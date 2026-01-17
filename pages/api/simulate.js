@@ -1,5 +1,4 @@
 // Fantasy Basketball Monte Carlo Simulation API
-// This runs the simulation entirely in JavaScript for Vercel compatibility
 
 const CATEGORY_VARIANCE = {
   FGM: 0.7, FGA: 0.7,
@@ -13,9 +12,6 @@ const CATEGORY_VARIANCE = {
 
 const CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
                     "REB", "AST", "STL", "BLK", "TO", "PTS", "DD", "TW"];
-
-const NUMERIC_COLS = ['FGM', 'FGA', 'FG%', 'FTM', 'FTA', 'FT%', '3PM', '3PA', '3P%',
-                      'REB', 'AST', 'STL', 'BLK', 'TO', 'DD', 'PTS', 'TW'];
 
 const INJURED_STATUSES = new Set(["OUT", "INJURY_RESERVE"]);
 
@@ -31,7 +27,15 @@ const NBA_TEAM_MAP = {
 const TEAM_FIXES = {"PHL": "PHI", "PHO": "PHX", "GS": "GSW", "WSH": "WAS", 
                    "NO": "NOP", "SA": "SAS", "NY": "NYK"};
 
-// Gaussian random using Box-Muller transform
+const PRO_TEAM_MAP = {
+  1: "ATL", 2: "BOS", 3: "NOP", 4: "CHI", 5: "CLE",
+  6: "DAL", 7: "DEN", 8: "DET", 9: "GSW", 10: "HOU",
+  11: "IND", 12: "LAC", 13: "LAL", 14: "MIA", 15: "MIL",
+  16: "MIN", 17: "BKN", 18: "NYK", 19: "ORL", 20: "PHI",
+  21: "PHX", 22: "POR", 23: "SAC", 24: "SAS", 25: "OKC",
+  26: "UTA", 27: "WAS", 28: "TOR", 29: "MEM", 30: "CHA"
+};
+
 function gaussianRandom(mean, stdDev) {
   const u1 = Math.random();
   const u2 = Math.random();
@@ -50,7 +54,6 @@ function safeNum(x) {
   return isNaN(n) ? 0 : n;
 }
 
-// ESPN API Functions
 async function fetchESPN(url, cookies) {
   const response = await fetch(url, {
     headers: {
@@ -69,14 +72,12 @@ async function fetchESPN(url, cookies) {
 async function getLeagueData(config) {
   const { league_id, espn_s2, swid, year = 2026 } = config;
   
-  // Get league settings and current matchup period
   const settingsUrl = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/${year}/segments/0/leagues/${league_id}?view=mSettings`;
   const settingsData = await fetchESPN(settingsUrl, { espn_s2, swid });
   
   const currentMatchupPeriod = settingsData.scoringPeriodId || settingsData.status?.currentMatchupPeriod || 1;
   const leagueName = settingsData.settings?.name || 'League';
   
-  // Get team and roster data
   const rosterUrl = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/${year}/segments/0/leagues/${league_id}?view=mTeam&view=mRoster&view=mMatchup&view=mMatchupScore&scoringPeriodId=${currentMatchupPeriod}`;
   const leagueData = await fetchESPN(rosterUrl, { espn_s2, swid });
   
@@ -103,9 +104,7 @@ async function getTeamSchedule(teamAbbrev) {
         const dateStr = event.date;
         const dt = new Date(dateStr);
         dates.push(dt.toISOString().split('T')[0]);
-      } catch (e) {
-        // Skip invalid dates
-      }
+      } catch (e) {}
     }
     return dates;
   } catch (e) {
@@ -117,7 +116,6 @@ function countGamesLeft(schedule) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
-  // Find end of current week (Sunday)
   const dayOfWeek = today.getDay();
   const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
   const endOfWeek = new Date(today);
@@ -129,30 +127,37 @@ function countGamesLeft(schedule) {
   return schedule.filter(d => d >= todayStr && d <= endStr).length;
 }
 
-function buildPlayerStats(players, periodKey, teamName) {
+function buildPlayerStats(players, teamName) {
   const result = [];
   
   for (const player of players) {
     const stats = player.stats || [];
     let periodStats = null;
     
-    // Find the right stats period
     for (const s of stats) {
-      if (s.id === periodKey || s.statSourceId === 0) {
+      if (s.statSourceId === 0 && s.statSplitTypeId === 0) {
         periodStats = s;
         break;
       }
     }
     
+    if (!periodStats) {
+      for (const s of stats) {
+        if (s.statSourceId === 0) {
+          periodStats = s;
+          break;
+        }
+      }
+    }
+    
     if (!periodStats) continue;
     
-    const avgStats = periodStats.averageStats || periodStats.stats || {};
+    const avgStats = periodStats.averageStats || {};
     const totalStats = periodStats.stats || {};
     
-    const gp = safeNum(totalStats[42]) || safeNum(avgStats[42]) || 1; // GP is stat ID 42
+    const gp = safeNum(totalStats[42]) || 1;
     if (gp <= 0) continue;
     
-    // ESPN stat IDs mapping
     const fgm = safeNum(avgStats[13] || (totalStats[13] / gp));
     const fga = safeNum(avgStats[14] || (totalStats[14] / gp));
     const ftm = safeNum(avgStats[15] || (totalStats[15] / gp));
@@ -165,11 +170,11 @@ function buildPlayerStats(players, periodKey, teamName) {
     const blk = safeNum(avgStats[1] || (totalStats[1] / gp));
     const to = safeNum(avgStats[11] || (totalStats[11] / gp));
     const pts = safeNum(avgStats[0] || (totalStats[0] / gp));
-    const dd = safeNum(totalStats[37] || 0) / gp;  // Double-doubles
-    const tw = safeNum(totalStats[38] || 0) / gp;  // Triple-doubles (might be different ID)
+    const dd = safeNum(totalStats[37] || 0) / gp;
+    const tw = safeNum(totalStats[38] || 0) / gp;
     
     result.push({
-      Player: player.fullName || player.player?.fullName || 'Unknown',
+      Player: player.fullName || 'Unknown',
       NBA_Team: player.proTeamId,
       Team: teamName,
       FGM: fgm, FGA: fga,
@@ -180,53 +185,11 @@ function buildPlayerStats(players, periodKey, teamName) {
       "3P%": tpa > 0 ? tpm / tpa : 0,
       REB: reb, AST: ast, STL: stl, BLK: blk, TO: to, PTS: pts,
       DD: dd, TW: tw,
-      injuryStatus: player.injuryStatus,
       "Games Left": 0
     });
   }
   
   return result;
-}
-
-function flattenStatDict(d) {
-  if (!d) return {};
-  const result = {};
-  for (const [k, v] of Object.entries(d)) {
-    result[k] = typeof v === 'object' && v !== null && 'value' in v ? v.value : v;
-  }
-  return result;
-}
-
-function blendStats(seasonPlayers, last30Players, blendWeight = 0.7) {
-  const seasonLookup = {};
-  for (const p of seasonPlayers) {
-    seasonLookup[p.Player] = p;
-  }
-  
-  const blended = [];
-  for (const l30 of last30Players) {
-    const sea = seasonLookup[l30.Player];
-    if (!sea) continue;
-    
-    const player = {
-      Player: l30.Player,
-      NBA_Team: l30.NBA_Team,
-      Team: l30.Team,
-      "Games Left": l30["Games Left"] || 0,
-    };
-    
-    for (const col of NUMERIC_COLS) {
-      const v30 = l30[col] || 0;
-      const vsea = sea[col] || 0;
-      player[col] = v30 * blendWeight + vsea * (1 - blendWeight);
-    }
-    
-    if (player["Games Left"] > 0) {
-      blended.push(player);
-    }
-  }
-  
-  return blended;
 }
 
 function simulateTeam(players, sims = 10000) {
@@ -254,7 +217,6 @@ function simulateTeam(players, sims = 10000) {
       }
     }
     
-    // Calculate percentages
     totals["FG%"] = totals.FGA > 0 ? totals.FGM / totals.FGA : 0;
     totals["FT%"] = totals.FTA > 0 ? totals.FTM / totals.FTA : 0;
     totals["3P%"] = totals["3PA"] > 0 ? totals["3PM"] / totals["3PA"] : 0;
@@ -273,13 +235,12 @@ function addCurrentToSim(current, sim) {
   for (const stat of Object.keys(sim)) {
     adjusted[stat] = sim[stat].map(val => {
       if (["FG%", "FT%", "3P%"].includes(stat)) {
-        return 0; // Will recalculate
+        return 0;
       }
       return val + (current[stat] || 0);
     });
   }
   
-  // Recalculate percentages
   for (let i = 0; i < sim.FGM.length; i++) {
     const FGM = adjusted.FGM[i];
     const FGA = adjusted.FGA[i];
@@ -357,16 +318,6 @@ function mean(arr) {
   return arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
-// ESPN Pro Team ID to abbreviation
-const PRO_TEAM_MAP = {
-  1: "ATL", 2: "BOS", 3: "NOP", 4: "CHI", 5: "CLE",
-  6: "DAL", 7: "DEN", 8: "DET", 9: "GSW", 10: "HOU",
-  11: "IND", 12: "LAC", 13: "LAL", 14: "MIA", 15: "MIL",
-  16: "MIN", 17: "BKN", 18: "NYK", 19: "ORL", 20: "PHI",
-  21: "PHX", 22: "POR", 23: "SAC", 24: "SAS", 25: "OKC",
-  26: "UTA", 27: "WAS", 28: "TOR", 29: "MEM", 30: "CHA"
-};
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -375,7 +326,6 @@ export default async function handler(req, res) {
   try {
     const config = req.body;
     
-    // Validate required fields
     const required = ["league_id", "espn_s2", "swid", "team_id"];
     for (const field of required) {
       if (!config[field]) {
@@ -384,14 +334,11 @@ export default async function handler(req, res) {
     }
     
     const teamId = parseInt(config.team_id);
-    const simCount = Math.min(parseInt(config.sim_count) || 10000, 15000); // Cap at 15k for performance
-    const streamersToTest = parseInt(config.streamers_to_test) || 20;
+    const simCount = Math.min(parseInt(config.sim_count) || 10000, 15000);
     const year = config.year || 2026;
     
-    // Get league data
-    const { leagueData, currentMatchupPeriod, leagueName } = await getLeagueData(config);
+    const { leagueData, currentMatchupPeriod } = await getLeagueData(config);
     
-    // Find teams
     const teams = leagueData.teams || [];
     const yourTeam = teams.find(t => t.id === teamId);
     
@@ -399,7 +346,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: `Team ID ${teamId} not found in league` });
     }
     
-    // Find current matchup
     const schedule = leagueData.schedule || [];
     const currentMatchup = schedule.find(m => 
       m.matchupPeriodId === currentMatchupPeriod &&
@@ -420,7 +366,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Opponent team not found' });
     }
     
-    // Get current totals from matchup
     const yourMatchupStats = currentMatchup.home?.teamId === teamId 
       ? currentMatchup.home 
       : currentMatchup.away;
@@ -451,11 +396,9 @@ export default async function handler(req, res) {
     const currentYou = buildTotals(yourMatchupStats);
     const currentOpp = buildTotals(oppMatchupStats);
     
-    // Get rosters
     const yourRoster = yourTeam.roster?.entries || [];
     const oppRoster = oppTeam.roster?.entries || [];
     
-    // Filter injured players
     const filterInjured = (roster) => roster.filter(e => 
       !INJURED_STATUSES.has(e.injuryStatus) && 
       !INJURED_STATUSES.has(e.playerPoolEntry?.player?.injuryStatus)
@@ -464,7 +407,6 @@ export default async function handler(req, res) {
     const yourFiltered = filterInjured(yourRoster);
     const oppFiltered = filterInjured(oppRoster);
     
-    // Extract player data
     const extractPlayers = (roster) => roster.map(e => ({
       ...e.playerPoolEntry?.player,
       fullName: e.playerPoolEntry?.player?.fullName,
@@ -476,12 +418,9 @@ export default async function handler(req, res) {
     const yourPlayers = extractPlayers(yourFiltered);
     const oppPlayers = extractPlayers(oppFiltered);
     
-    // Build stats (using season stats - statSourceId 0)
-    const yourSeasonStats = buildPlayerStats(yourPlayers, '002026', yourTeam.name);
-    const oppSeasonStats = buildPlayerStats(oppPlayers, '002026', oppTeam.name);
+    const yourSeasonStats = buildPlayerStats(yourPlayers, yourTeam.name);
+    const oppSeasonStats = buildPlayerStats(oppPlayers, oppTeam.name);
     
-    // For simplicity, use season stats (last 30 requires different API call)
-    // Add games left
     const scheduleCache = {};
     
     const addGamesLeft = async (players) => {
@@ -498,11 +437,9 @@ export default async function handler(req, res) {
     await addGamesLeft(yourSeasonStats);
     await addGamesLeft(oppSeasonStats);
     
-    // Filter to players with games left
     const yourTeamPlayers = yourSeasonStats.filter(p => p["Games Left"] > 0);
     const oppTeamPlayers = oppSeasonStats.filter(p => p["Games Left"] > 0);
     
-    // Run simulation
     const yourSimRaw = simulateTeam(yourTeamPlayers, simCount);
     const oppSimRaw = simulateTeam(oppTeamPlayers, simCount);
     
@@ -511,7 +448,6 @@ export default async function handler(req, res) {
     
     const { matchupResults, categoryOutcomes, outcomeCounts } = compareMatchups(yourSim, oppSim, CATEGORIES);
     
-    // Calculate projected score
     const totalSims = matchupResults.you + matchupResults.opponent + matchupResults.tie;
     let youWins = 0;
     
@@ -525,7 +461,6 @@ export default async function handler(req, res) {
       }
     }
     
-    // Top outcomes
     const sortedOutcomes = Object.entries(outcomeCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -534,7 +469,6 @@ export default async function handler(req, res) {
         probability: (count / totalSims) * 100
       }));
     
-    // Category details
     const categories = [];
     const swingCategories = [];
     
@@ -559,7 +493,6 @@ export default async function handler(req, res) {
       });
     }
     
-    // Expected categories
     let baselineAvgCats = 0;
     for (const [score, count] of Object.entries(outcomeCounts)) {
       const [yourW] = score.split('-').map(Number);
@@ -567,11 +500,6 @@ export default async function handler(req, res) {
     }
     baselineAvgCats /= totalSims;
     
-    // Streamer analysis (simplified - just show top free agents by projected value)
-    // Full streamer sim would require additional API calls
-    const streamers = [];
-    
-    // Build response
     const response = {
       matchup: {
         your_team: yourTeam.name || `Team ${teamId}`,
@@ -587,21 +515,13 @@ export default async function handler(req, res) {
       categories,
       swing_categories: swingCategories,
       baseline_cats: baselineAvgCats,
-      streamers,
-      debug: {
-        your_players: yourTeamPlayers.length,
-        opp_players: oppTeamPlayers.length,
-        simulations: simCount
-      }
+      streamers: [],
     };
     
     return res.status(200).json(response);
     
   } catch (error) {
     console.error('Simulation error:', error);
-    return res.status(500).json({ 
-      error: error.message || 'Simulation failed',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    return res.status(500).json({ error: error.message || 'Simulation failed' });
   }
 }
