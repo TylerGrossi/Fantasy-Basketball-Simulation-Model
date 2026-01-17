@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/simulate.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
+    },
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/simulate",
+      "dest": "/api/simulate.py"
+    }
+  ],
+  "functions": {
+    "api/simulate.py": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  }
+}
