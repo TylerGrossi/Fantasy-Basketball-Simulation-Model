@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 
-// YOUR CREDENTIALS - HARDCODED
+// YOUR CREDENTIALS - HARDCODED (using URL-encoded format like Python)
 const MY_CONFIG = {
   league_id: "267469544",
   team_id: "6",
-  espn_s2: "AEA1I6yiOI0coBpMp3Yiug3r6omco4wNWQEiE9UWQUyilpqa4%2FS0huEM2%2BLrfKTC7lljpbR7ReXHvBzOEcw%2FQ9ERRJnSrz6481pBYUF7etjEEZ%2F777wjWWi74Xjfafla2kLVjTWSRm83joduWHH6r5N18umByF%2BKlNTe18JydiMB2F0lCYWlQBmYSwGeLbyoSP%2Bn%2BOuS8WtX4KkWWt9wR%2BWxx%2F6mtrjZudkVl6uq6Bcia48kpS869%2FnXV793DXJZb6TdMLlc6EcOVfXaraH8CFBs8z7%2FdrHq%2FCA9gryZkdFPIg%3D%3D",
+  espn_s2: "AEBSyUk%2FmdLqOc%2BSzyDjGNUS5ikQCnK8FvvsGLMAu7mVyKgLRXAa6q6s9eaLrXj3rPzfOoB9H%2BIukXFCBnnSjLEjnSmOIiRzuXP8bEZGpYrVN4FJ5OgT3FuHfRmKV0SrwKJRbyjW0Irlz%2BTyk2QCsg5eTa7GtgXJ8sxXaF9MVhjc9ielluRUU%2FbGcCrpIAOhAzkbklw4Gs2UsEBHdWXzgMO6TUWJjzFN5afsaby20y9ONU5rz6r1J27VWoC5YgUiR3NpH%2F4hpyMf0xXvJUGv9fSI5lt6%2BskojM22lBfr2DwJgA%3D%3D",
   swid: "{D7E89394-85F1-4264-831E-481F3B4157D4}",
   sim_count: 10000,
 };
@@ -25,10 +25,16 @@ export default function Home() {
     setError(null);
 
     try {
+      // Decode the URL-encoded espn_s2 before sending
+      const config = {
+        ...MY_CONFIG,
+        espn_s2: decodeURIComponent(MY_CONFIG.espn_s2),
+      };
+
       const response = await fetch('/api/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(MY_CONFIG),
+        body: JSON.stringify(config),
       });
 
       const data = await response.json();
