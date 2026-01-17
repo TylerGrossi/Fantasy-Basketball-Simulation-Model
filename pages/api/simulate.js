@@ -1,4 +1,5 @@
 // Fantasy Basketball Monte Carlo Simulation API
+// Fixed ESPN authentication
 
 const CATEGORY_VARIANCE = {
   FGM: 0.7, FGA: 0.7,
@@ -54,16 +55,21 @@ function safeNum(x) {
   return isNaN(n) ? 0 : n;
 }
 
-async function fetchESPN(url, cookies) {
+async function fetchESPN(url, espn_s2, swid) {
+  // ESPN requires cookies to be passed in a specific format
+  const cookieHeader = `espn_s2=${espn_s2}; SWID=${swid}`;
+  
   const response = await fetch(url, {
+    method: 'GET',
     headers: {
-      'Cookie': `espn_s2=${cookies.espn_s2}; SWID=${cookies.swid}`,
+      'Cookie': cookieHeader,
       'Accept': 'application/json',
-    }
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
   });
   
   if (!response.ok) {
-    throw new Error(`ESPN API error: ${response.status}`);
+    throw new Error(`ESPN returned an HTTP ${response.status}`);
   }
   
   return response.json();
@@ -72,16 +78,17 @@ async function fetchESPN(url, cookies) {
 async function getLeagueData(config) {
   const { league_id, espn_s2, swid, year = 2026 } = config;
   
+  // First get settings to find current matchup period
   const settingsUrl = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/${year}/segments/0/leagues/${league_id}?view=mSettings`;
-  const settingsData = await fetchESPN(settingsUrl, { espn_s2, swid });
+  const settingsData = await fetchESPN(settingsUrl, espn_s2, swid);
   
   const currentMatchupPeriod = settingsData.scoringPeriodId || settingsData.status?.currentMatchupPeriod || 1;
-  const leagueName = settingsData.settings?.name || 'League';
   
+  // Get full league data with rosters and matchups
   const rosterUrl = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/${year}/segments/0/leagues/${league_id}?view=mTeam&view=mRoster&view=mMatchup&view=mMatchupScore&scoringPeriodId=${currentMatchupPeriod}`;
-  const leagueData = await fetchESPN(rosterUrl, { espn_s2, swid });
+  const leagueData = await fetchESPN(rosterUrl, espn_s2, swid);
   
-  return { leagueData, currentMatchupPeriod, leagueName };
+  return { leagueData, currentMatchupPeriod };
 }
 
 async function getTeamSchedule(teamAbbrev) {
@@ -93,7 +100,11 @@ async function getTeamSchedule(teamAbbrev) {
   
   try {
     const url = `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${slug}/schedule`;
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }
+    });
     if (!response.ok) return [];
     
     const data = await response.json();
@@ -134,6 +145,7 @@ function buildPlayerStats(players, teamName) {
     const stats = player.stats || [];
     let periodStats = null;
     
+    // Find season stats (statSourceId 0, statSplitTypeId 0)
     for (const s of stats) {
       if (s.statSourceId === 0 && s.statSplitTypeId === 0) {
         periodStats = s;
@@ -158,6 +170,7 @@ function buildPlayerStats(players, teamName) {
     const gp = safeNum(totalStats[42]) || 1;
     if (gp <= 0) continue;
     
+    // ESPN stat IDs
     const fgm = safeNum(avgStats[13] || (totalStats[13] / gp));
     const fga = safeNum(avgStats[14] || (totalStats[14] / gp));
     const ftm = safeNum(avgStats[15] || (totalStats[15] / gp));
@@ -335,8 +348,8 @@ export default async function handler(req, res) {
     
     const teamId = parseInt(config.team_id);
     const simCount = Math.min(parseInt(config.sim_count) || 10000, 15000);
-    const year = config.year || 2026;
     
+    // Get league data from ESPN
     const { leagueData, currentMatchupPeriod } = await getLeagueData(config);
     
     const teams = leagueData.teams || [];
@@ -346,6 +359,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: `Team ID ${teamId} not found in league` });
     }
     
+    // Find current matchup
     const schedule = leagueData.schedule || [];
     const currentMatchup = schedule.find(m => 
       m.matchupPeriodId === currentMatchupPeriod &&
@@ -366,6 +380,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Opponent team not found' });
     }
     
+    // Get current week totals
     const yourMatchupStats = currentMatchup.home?.teamId === teamId 
       ? currentMatchup.home 
       : currentMatchup.away;
@@ -396,9 +411,11 @@ export default async function handler(req, res) {
     const currentYou = buildTotals(yourMatchupStats);
     const currentOpp = buildTotals(oppMatchupStats);
     
+    // Get rosters
     const yourRoster = yourTeam.roster?.entries || [];
     const oppRoster = oppTeam.roster?.entries || [];
     
+    // Filter injured players
     const filterInjured = (roster) => roster.filter(e => 
       !INJURED_STATUSES.has(e.injuryStatus) && 
       !INJURED_STATUSES.has(e.playerPoolEntry?.player?.injuryStatus)
@@ -407,6 +424,7 @@ export default async function handler(req, res) {
     const yourFiltered = filterInjured(yourRoster);
     const oppFiltered = filterInjured(oppRoster);
     
+    // Extract player data
     const extractPlayers = (roster) => roster.map(e => ({
       ...e.playerPoolEntry?.player,
       fullName: e.playerPoolEntry?.player?.fullName,
@@ -418,28 +436,34 @@ export default async function handler(req, res) {
     const yourPlayers = extractPlayers(yourFiltered);
     const oppPlayers = extractPlayers(oppFiltered);
     
+    // Build stats
     const yourSeasonStats = buildPlayerStats(yourPlayers, yourTeam.name);
     const oppSeasonStats = buildPlayerStats(oppPlayers, oppTeam.name);
     
+    // Add games left for each player
     const scheduleCache = {};
     
-    const addGamesLeft = async (players) => {
-      for (const p of players) {
-        const team = p.NBA_Team;
-        if (!scheduleCache[team]) {
-          scheduleCache[team] = await getTeamSchedule(team);
-        }
-        p["Games Left"] = countGamesLeft(scheduleCache[team]);
+    for (const p of yourSeasonStats) {
+      const team = p.NBA_Team;
+      if (!scheduleCache[team]) {
+        scheduleCache[team] = await getTeamSchedule(team);
       }
-      return players;
-    };
+      p["Games Left"] = countGamesLeft(scheduleCache[team]);
+    }
     
-    await addGamesLeft(yourSeasonStats);
-    await addGamesLeft(oppSeasonStats);
+    for (const p of oppSeasonStats) {
+      const team = p.NBA_Team;
+      if (!scheduleCache[team]) {
+        scheduleCache[team] = await getTeamSchedule(team);
+      }
+      p["Games Left"] = countGamesLeft(scheduleCache[team]);
+    }
     
+    // Filter to players with games left
     const yourTeamPlayers = yourSeasonStats.filter(p => p["Games Left"] > 0);
     const oppTeamPlayers = oppSeasonStats.filter(p => p["Games Left"] > 0);
     
+    // Run Monte Carlo simulation
     const yourSimRaw = simulateTeam(yourTeamPlayers, simCount);
     const oppSimRaw = simulateTeam(oppTeamPlayers, simCount);
     
@@ -448,6 +472,7 @@ export default async function handler(req, res) {
     
     const { matchupResults, categoryOutcomes, outcomeCounts } = compareMatchups(yourSim, oppSim, CATEGORIES);
     
+    // Calculate projected score
     const totalSims = matchupResults.you + matchupResults.opponent + matchupResults.tie;
     let youWins = 0;
     
@@ -461,6 +486,7 @@ export default async function handler(req, res) {
       }
     }
     
+    // Get top outcomes
     const sortedOutcomes = Object.entries(outcomeCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -469,6 +495,7 @@ export default async function handler(req, res) {
         probability: (count / totalSims) * 100
       }));
     
+    // Build category details
     const categories = [];
     const swingCategories = [];
     
@@ -493,6 +520,7 @@ export default async function handler(req, res) {
       });
     }
     
+    // Calculate baseline expected categories
     let baselineAvgCats = 0;
     for (const [score, count] of Object.entries(outcomeCounts)) {
       const [yourW] = score.split('-').map(Number);
@@ -500,6 +528,7 @@ export default async function handler(req, res) {
     }
     baselineAvgCats /= totalSims;
     
+    // Build response
     const response = {
       matchup: {
         your_team: yourTeam.name || `Team ${teamId}`,
