@@ -1,7 +1,3 @@
 {
-  "functions": {
-    "pages/api/simulate.js": {
-      "maxDuration": 60
-    }
-  }
+  "framework": "nextjs"
 }
