@@ -5,7 +5,7 @@ import Head from 'next/head';
 const MY_CONFIG = {
   league_id: "267469544",
   team_id: "6",
-  espn_s2: "AEBSyUk/mdLqOc+SzyDjGNUS5ikQCnK8FvvsGLMAu7mVyKgLRXAa6q6s9eaLrXj3rPzfOoB9H+IukXFCBnnSjLEjnSmOIiRzuXP8bEZGpYrVN4FJ5OgT3FuHfRmKV0SrwKJRbyjW0Irlz+Tyk2QCsg5eTa7GtgXJ8sxXaF9MVhjc9ielluRUU/bGcCrpIAOhAzkbklw4Gs2UsEBHdWXzgMO6TUWJjzFN5afsaby20y9ONU5rz6r1J27VWoC5YgUiR3NpH/4hpyMf0xXvJUGv9fSI5lt6+skojM22lBfr2DwJgA==",
+  espn_s2: "***REMOVED***5",
   swid: "***REMOVED***",
   sim_count: 10000,
 };
