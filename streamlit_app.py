@@ -19,7 +19,7 @@ from plotly.subplots import make_subplots
 # Must be the first Streamlit command
 st.set_page_config(
     page_title="Fantasy Basketball Simulator",
-    page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23FF6B35'/></svg>",
+    page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23FF6B35' stroke='%23000' stroke-width='2'/><path d='M50 5 Q50 50 50 95' stroke='%23000' stroke-width='2' fill='none'/><path d='M5 50 Q50 50 95 50' stroke='%23000' stroke-width='2' fill='none'/><path d='M15 20 Q50 35 85 20' stroke='%23000' stroke-width='2' fill='none'/><path d='M15 80 Q50 65 85 80' stroke='%23000' stroke-width='2' fill='none'/></svg>",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -39,7 +39,7 @@ CATEGORY_VARIANCE = {
 }
 
 CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
-              "REB", "AST", "STL", "BLK", "TO", "PTS", "DD", "TW"]
+              "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"]
 
 NUMERIC_COLS = ['FGM', 'FGA', 'FG%', 'FTM', 'FTA', 'FT%', '3PM', '3PA', '3P%',
                 'REB', 'AST', 'STL', 'BLK', 'TO', 'DD', 'PTS', 'TW']
@@ -745,11 +745,12 @@ def create_outcome_distribution(outcome_counts, total_sims):
         plot_bgcolor='rgba(0,0,0,0)',
         font={'color': 'white', 'family': 'Roboto Condensed'},
         height=300,
-        margin=dict(l=40, r=40, t=40, b=40),
+        margin=dict(l=40, r=40, t=40, b=60),
         xaxis=dict(
-            title='Score Outcome',
+            title='Score Outcome (You - Opponent)',
             showgrid=False,
-            tickfont=dict(family='Oswald', size=14)
+            tickfont=dict(family='Oswald', size=14),
+            type='category'
         ),
         yaxis=dict(
             title='Probability',
@@ -770,7 +771,13 @@ def main():
     # Header
     st.markdown('''
     <div style="display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 0.5rem;">
-        <div style="width: 50px; height: 50px; background: #FF6B35; border-radius: 50%;"></div>
+        <svg width="50" height="50" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="45" fill="#FF6B35" stroke="#000" stroke-width="3"/>
+            <path d="M50 5 Q50 50 50 95" stroke="#000" stroke-width="2.5" fill="none"/>
+            <path d="M5 50 Q50 50 95 50" stroke="#000" stroke-width="2.5" fill="none"/>
+            <path d="M12 25 Q50 40 88 25" stroke="#000" stroke-width="2" fill="none"/>
+            <path d="M12 75 Q50 60 88 75" stroke="#000" stroke-width="2" fill="none"/>
+        </svg>
         <h1 class="main-header" style="margin: 0;">FANTASY BASKETBALL SIMULATOR</h1>
     </div>
     ''', unsafe_allow_html=True)
@@ -927,7 +934,7 @@ def main():
             st.plotly_chart(create_category_chart(category_results, your_sim, opp_sim), use_container_width=True)
             
             # Detailed category table
-            with st.expander("Detailed Category Projections"):
+            with st.expander("Detailed Category Projections", expanded=False):
                 cat_data = []
                 for cat in CATEGORIES:
                     outcome = category_results[cat]
@@ -953,7 +960,12 @@ def main():
                         "Swing": "*" if is_swing else ""
                     })
                 
-                st.dataframe(pd.DataFrame(cat_data), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    pd.DataFrame(cat_data), 
+                    use_container_width=True, 
+                    hide_index=True,
+                    height=560  # Fixed height to show all 15 rows
+                )
             
             # Rosters
             with st.expander("Your Roster"):
