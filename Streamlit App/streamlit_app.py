@@ -18,8 +18,8 @@ from plotly.subplots import make_subplots
 
 # Must be the first Streamlit command
 st.set_page_config(
-    page_title="🏀 Fantasy Basketball Simulator",
-    page_icon="🏀",
+    page_title="Fantasy Basketball Simulator",
+    page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23FF6B35'/></svg>",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -65,6 +65,20 @@ TEAM_FIXES = {"PHL": "PHI", "PHO": "PHX", "GS": "GSW", "WSH": "WAS",
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Roboto+Condensed:wght@300;400;700&display=swap');
+    @import url('https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css');
+    
+    /* Hide anchor link icons */
+    .stMarkdown a[href^="#"]::after,
+    h1 a, h2 a, h3 a, h4 a, h5 a, h6 a,
+    [data-testid="stHeaderActionElements"],
+    .stMarkdown h1 a, .stMarkdown h2 a, .stMarkdown h3 a {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    
+    a.anchor-link {
+        display: none !important;
+    }
     
     :root {
         --primary: #FF6B35;
@@ -754,14 +768,19 @@ def create_outcome_distribution(outcome_counts, total_sims):
 
 def main():
     # Header
-    st.markdown('<h1 class="main-header">🏀 Fantasy Basketball Simulator</h1>', unsafe_allow_html=True)
+    st.markdown('''
+    <div style="display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 0.5rem;">
+        <div style="width: 50px; height: 50px; background: #FF6B35; border-radius: 50%;"></div>
+        <h1 class="main-header" style="margin: 0;">FANTASY BASKETBALL SIMULATOR</h1>
+    </div>
+    ''', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #888; font-family: Roboto Condensed;">Monte Carlo Simulation for ESPN Fantasy Basketball</p>', unsafe_allow_html=True)
     
     # Sidebar Configuration
     with st.sidebar:
-        st.markdown("## ⚙️ Configuration")
+        st.markdown('<h2><i class="bi bi-gear-fill" style="color: #FF6B35;"></i> Configuration</h2>', unsafe_allow_html=True)
         
-        st.markdown("### ESPN Credentials")
+        st.markdown('<h4><i class="bi bi-link-45deg" style="color: #00D4FF;"></i> ESPN Credentials</h4>', unsafe_allow_html=True)
         league_id = st.number_input("League ID", value=267469544, help="Your ESPN League ID")
         year = st.number_input("Season Year", value=2026, min_value=2020, max_value=2030)
         
@@ -781,24 +800,24 @@ def main():
         
         team_id = st.number_input("Your Team ID", value=6, min_value=1, max_value=20)
         
-        st.markdown("### Simulation Settings")
+        st.markdown('<h4><i class="bi bi-sliders" style="color: #00D4FF;"></i> Simulation Settings</h4>', unsafe_allow_html=True)
         sim_count = st.slider("Simulations", 1000, 50000, 10000, 1000, help="More = more accurate but slower")
         blend_weight = st.slider("Last 30 Days Weight", 0.0, 1.0, 0.7, 0.05, help="Blend of recent vs season stats")
         num_streamers = st.slider("Streamers to Analyze", 5, 50, 20, 5)
         
         st.markdown("---")
-        run_button = st.button("🎲 RUN SIMULATION", use_container_width=True)
+        run_button = st.button("RUN SIMULATION", use_container_width=True)
     
     # Main content area
     if run_button:
         try:
             # Connect to ESPN
-            with st.spinner("🔌 Connecting to ESPN..."):
+            with st.spinner("Connecting to ESPN..."):
                 league = connect_to_espn(league_id, year, espn_s2, swid)
                 st.success(f"Connected to **{league.settings.name}**")
             
             # Get matchup info
-            with st.spinner("📊 Loading matchup data..."):
+            with st.spinner("Loading matchup data..."):
                 your_team_obj, opp_team_obj, matchup, current_week = get_matchup_info(league, team_id)
                 your_team_name = your_team_obj.team_name
                 opp_team_name = opp_team_obj.team_name
@@ -807,11 +826,11 @@ def main():
             # Display matchup header
             col1, col2, col3 = st.columns([2, 1, 2])
             with col1:
-                st.markdown(f"### 🏠 {your_team_name}")
+                st.markdown(f'<h3><i class="bi bi-house-fill" style="color: #00FF88;"></i> {your_team_name}</h3>', unsafe_allow_html=True)
             with col2:
                 st.markdown(f"<h3 style='text-align: center; color: #FF6B35;'>Week {current_week}</h3>", unsafe_allow_html=True)
             with col3:
-                st.markdown(f"### 🏃 {opp_team_name}")
+                st.markdown(f'<h3><i class="bi bi-person-fill" style="color: #FF4757;"></i> {opp_team_name}</h3>', unsafe_allow_html=True)
             
             # Build player stats
             progress = st.progress(0, text="Loading player stats...")
@@ -871,17 +890,17 @@ def main():
             
             # Display Results
             st.markdown("---")
-            st.markdown("## 📊 Simulation Results")
+            st.markdown('<h2><i class="bi bi-bar-chart-fill" style="color: #FF6B35;"></i> Simulation Results</h2>', unsafe_allow_html=True)
             
             # Win probability gauge and key stats
             col1, col2 = st.columns([1, 1])
             
             with col1:
-                st.markdown("### 🎯 Win Probability")
+                st.markdown('<h3><i class="bi bi-bullseye" style="color: #00D4FF;"></i> Win Probability</h3>', unsafe_allow_html=True)
                 st.plotly_chart(create_win_probability_gauge(win_pct), use_container_width=True)
             
             with col2:
-                st.markdown("### 📈 Key Metrics")
+                st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: #00FF88;"></i> Key Metrics</h3>', unsafe_allow_html=True)
                 metric_cols = st.columns(3)
                 with metric_cols[0]:
                     st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{baseline_avg_cats - 7.5:.1f} vs even")
@@ -900,15 +919,15 @@ def main():
                     st.markdown(f"<span style='color: {color}; font-family: Oswald; font-size: 1.2rem;'>{your_w}-{opp_w}</span> <span style='color: #888;'>({pct:.1f}%)</span>", unsafe_allow_html=True)
             
             # Outcome distribution
-            st.markdown("### 🎲 Score Distribution")
+            st.markdown('<h3><i class="bi bi-dice-5-fill" style="color: #FFD93D;"></i> Score Distribution</h3>', unsafe_allow_html=True)
             st.plotly_chart(create_outcome_distribution(outcome_counts, total_sims), use_container_width=True)
             
             # Category breakdown
-            st.markdown("### 📊 Category Analysis")
+            st.markdown('<h3><i class="bi bi-clipboard-data-fill" style="color: #00D4FF;"></i> Category Analysis</h3>', unsafe_allow_html=True)
             st.plotly_chart(create_category_chart(category_results, your_sim, opp_sim), use_container_width=True)
             
             # Detailed category table
-            with st.expander("📋 Detailed Category Projections"):
+            with st.expander("Detailed Category Projections"):
                 cat_data = []
                 for cat in CATEGORIES:
                     outcome = category_results[cat]
@@ -931,24 +950,24 @@ def main():
                         "Opp Proj": f"{o_proj:.2f}" if "%" in cat else f"{o_proj:.1f}",
                         "Your CI": f"{y_ci[0]:.1f} - {y_ci[1]:.1f}",
                         "Opp CI": f"{o_ci[0]:.1f} - {o_ci[1]:.1f}",
-                        "Swing?": "⭐" if is_swing else ""
+                        "Swing": "*" if is_swing else ""
                     })
                 
                 st.dataframe(pd.DataFrame(cat_data), use_container_width=True, hide_index=True)
             
             # Rosters
-            with st.expander("🏀 Your Roster"):
+            with st.expander("Your Roster"):
                 roster_cols = ["Player", "NBA_Team", "Games Left", "PTS", "REB", "AST", "3PM", "FG%", "FT%"]
                 display_cols = [c for c in roster_cols if c in your_team_df.columns]
                 st.dataframe(your_team_df[display_cols].round(2), use_container_width=True, hide_index=True)
             
-            with st.expander("🏃 Opponent Roster"):
+            with st.expander("Opponent Roster"):
                 display_cols = [c for c in roster_cols if c in opp_team_df.columns]
                 st.dataframe(opp_team_df[display_cols].round(2), use_container_width=True, hide_index=True)
             
             # Streamer Analysis
             st.markdown("---")
-            st.markdown("## 🔄 Streamer Analysis")
+            st.markdown('<h2><i class="bi bi-arrow-repeat" style="color: #FF6B35;"></i> Streamer Analysis</h2>', unsafe_allow_html=True)
             
             with st.spinner(f"Analyzing {num_streamers} potential streamers..."):
                 baseline_results = (win_pct, category_results, baseline_avg_cats)
@@ -960,7 +979,7 @@ def main():
             
             if streamers:
                 # Top recommendations
-                st.markdown("### 🌟 Top Recommendations")
+                st.markdown('<h3><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Top Recommendations</h3>', unsafe_allow_html=True)
                 
                 top_3 = streamers[:3]
                 cols = st.columns(3)
@@ -995,14 +1014,14 @@ def main():
                         
                         # Show category impacts
                         if player["Cat Impacts"]:
-                            impacts_str = ", ".join([f"{'🟢' if v > 0 else '🔻'}{k}: {v:+.0f}%" for k, v in sorted(player["Cat Impacts"].items(), key=lambda x: abs(x[1]), reverse=True)[:3]])
+                            impacts_str = ", ".join([f"{'▲' if v > 0 else '▼'}{k}: {v:+.0f}%" for k, v in sorted(player["Cat Impacts"].items(), key=lambda x: abs(x[1]), reverse=True)[:3]])
                             st.caption(impacts_str)
                         
                         if player["Risks"]:
-                            st.caption(f"⚠️ {', '.join(player['Risks'])}")
+                            st.caption(f"Risk: {', '.join(player['Risks'])}")
                 
                 # Full streamer table
-                with st.expander("📋 All Analyzed Streamers"):
+                with st.expander("All Analyzed Streamers"):
                     streamer_df = pd.DataFrame([{
                         "Player": p["Player"],
                         "Team": p["Team"],
@@ -1018,10 +1037,10 @@ def main():
                     
                     st.dataframe(streamer_df, use_container_width=True, hide_index=True)
             
-            st.success("✅ Simulation complete!")
+            st.success("Simulation complete!")
             
         except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+            st.error(f"Error: {str(e)}")
             st.exception(e)
     
     else:
@@ -1035,7 +1054,7 @@ def main():
                 based on player projections, remaining games, and statistical variance.
             </p>
             <div style="margin-top: 2rem;">
-                <p style="color: #FFD93D;">👈 Configure your settings in the sidebar and click <strong>RUN SIMULATION</strong></p>
+                <p style="color: #FFD93D;"><i class="bi bi-arrow-left-circle-fill"></i> Configure your settings in the sidebar and click <strong>RUN SIMULATION</strong></p>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1046,7 +1065,7 @@ def main():
         with col1:
             st.markdown("""
             <div style="background: #1A1A2E; border-radius: 12px; padding: 1.5rem; height: 200px;">
-                <h3 style="color: #00FF88; font-family: Oswald;">🎲 Monte Carlo</h3>
+                <h3 style="color: #00FF88; font-family: Oswald;"><i class="bi bi-dice-5-fill"></i> Monte Carlo</h3>
                 <p style="color: #888; font-family: Roboto Condensed;">
                     Run thousands of simulations to estimate your true win probability, accounting for game-to-game variance.
                 </p>
@@ -1056,7 +1075,7 @@ def main():
         with col2:
             st.markdown("""
             <div style="background: #1A1A2E; border-radius: 12px; padding: 1.5rem; height: 200px;">
-                <h3 style="color: #00D4FF; font-family: Oswald;">📊 Category Analysis</h3>
+                <h3 style="color: #00D4FF; font-family: Oswald;"><i class="bi bi-clipboard-data-fill"></i> Category Analysis</h3>
                 <p style="color: #888; font-family: Roboto Condensed;">
                     See which categories are locks, which are swing categories, and where to focus streaming efforts.
                 </p>
@@ -1066,7 +1085,7 @@ def main():
         with col3:
             st.markdown("""
             <div style="background: #1A1A2E; border-radius: 12px; padding: 1.5rem; height: 200px;">
-                <h3 style="color: #FF6B35; font-family: Oswald;">🔄 Streamer Impact</h3>
+                <h3 style="color: #FF6B35; font-family: Oswald;"><i class="bi bi-arrow-repeat"></i> Streamer Impact</h3>
                 <p style="color: #888; font-family: Roboto Condensed;">
                     Analyze free agents to find the best streaming options that maximize your expected categories won.
                 </p>
