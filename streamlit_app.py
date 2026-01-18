@@ -658,7 +658,8 @@ def create_category_chart(category_results, your_sim, opp_sim):
     you_pcts = []
     opp_pcts = []
     
-    for cat in CATEGORIES:
+    # Reverse the order so FGM is at top
+    for cat in reversed(CATEGORIES):
         outcome = category_results[cat]
         total = sum(outcome.values())
         you_pcts.append(outcome["you"] / total * 100)
@@ -736,27 +737,33 @@ def create_outcome_distribution(outcome_counts, total_sims):
             marker_color=colors,
             text=[f'{v:.1f}%' for v in values],
             textposition='outside',
-            textfont=dict(family='Oswald', size=14, color='white')
+            textfont=dict(family='Oswald', size=12, color='white'),
+            cliponaxis=False
         )
     ])
+    
+    # Calculate max value for y-axis range with padding
+    max_val = max(values) if values else 50
+    y_max = max_val * 1.2  # 20% padding above tallest bar
     
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         font={'color': 'white', 'family': 'Roboto Condensed'},
         height=300,
-        margin=dict(l=40, r=40, t=40, b=60),
+        margin=dict(l=40, r=40, t=50, b=60),
         xaxis=dict(
             title='Score Outcome (You - Opponent)',
             showgrid=False,
-            tickfont=dict(family='Oswald', size=14),
+            tickfont=dict(family='Oswald', size=12),
             type='category'
         ),
         yaxis=dict(
             title='Probability',
             showgrid=True,
             gridcolor='rgba(255,255,255,0.1)',
-            ticksuffix='%'
+            ticksuffix='%',
+            range=[0, y_max]
         )
     )
     
@@ -840,7 +847,9 @@ def main():
                 st.markdown(f'<h3><i class="bi bi-person-fill" style="color: #FF4757;"></i> {opp_team_name}</h3>', unsafe_allow_html=True)
             
             # Build player stats
-            progress = st.progress(0, text="Loading player stats...")
+            status_text = st.empty()
+            progress = st.progress(0)
+            status_text.text("Loading player stats...")
             
             your_filtered = filter_injured(your_team_obj.roster)
             opp_filtered = filter_injured(opp_team_obj.roster)
@@ -850,14 +859,16 @@ def main():
             opp_season = build_stat_df(opp_filtered, f"{year}_total", "Season", opp_team_name, year)
             opp_last30 = build_stat_df(opp_filtered, f"{year}_last_30", "Last30", opp_team_name, year)
             
-            progress.progress(25, text="Fetching NBA schedules...")
+            progress.progress(25)
+            status_text.text("Fetching NBA schedules...")
             
             your_season = add_games_left(your_season)
             your_last30 = add_games_left(your_last30)
             opp_season = add_games_left(opp_season)
             opp_last30 = add_games_left(opp_last30)
             
-            progress.progress(50, text="Blending statistics...")
+            progress.progress(50)
+            status_text.text("Blending statistics...")
             
             # Blend stats
             season_df = pd.concat([your_season, opp_season], ignore_index=True)
@@ -876,7 +887,8 @@ def main():
             your_team_df = your_team_df[your_team_df["Games Left"] > 0]
             opp_team_df = opp_team_df[opp_team_df["Games Left"] > 0]
             
-            progress.progress(75, text=f"Running {sim_count:,} simulations...")
+            progress.progress(75)
+            status_text.text(f"Running {sim_count:,} simulations...")
             
             # Run simulation
             your_sim_raw = simulate_team(your_team_df, sims=sim_count)
@@ -887,8 +899,10 @@ def main():
             
             matchup_results, category_results, outcome_counts = compare_matchups(your_sim, opp_sim, CATEGORIES)
             
-            progress.progress(100, text="Complete!")
+            progress.progress(100)
+            status_text.text("Complete!")
             progress.empty()
+            status_text.empty()
             
             # Calculate key metrics
             total_sims = sum(matchup_results.values())
@@ -899,7 +913,19 @@ def main():
             st.markdown("---")
             st.markdown('<h2><i class="bi bi-bar-chart-fill" style="color: #FF6B35;"></i> Simulation Results</h2>', unsafe_allow_html=True)
             
-            # Win probability gauge and key stats
+            # Key metrics row FIRST
+            st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: #00FF88;"></i> Key Metrics</h3>', unsafe_allow_html=True)
+            metric_cols = st.columns(3)
+            with metric_cols[0]:
+                st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{baseline_avg_cats - 7.5:.1f} vs even")
+            with metric_cols[1]:
+                sorted_outcomes = sorted(outcome_counts.items(), key=lambda x: x[1], reverse=True)
+                most_likely = sorted_outcomes[0][0]
+                st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
+            with metric_cols[2]:
+                st.metric("Simulations", f"{sim_count:,}")
+            
+            # Win probability gauge and Score Distribution side by side
             col1, col2 = st.columns([1, 1])
             
             with col1:
@@ -907,28 +933,8 @@ def main():
                 st.plotly_chart(create_win_probability_gauge(win_pct), use_container_width=True)
             
             with col2:
-                st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: #00FF88;"></i> Key Metrics</h3>', unsafe_allow_html=True)
-                metric_cols = st.columns(3)
-                with metric_cols[0]:
-                    st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{baseline_avg_cats - 7.5:.1f} vs even")
-                with metric_cols[1]:
-                    sorted_outcomes = sorted(outcome_counts.items(), key=lambda x: x[1], reverse=True)
-                    most_likely = sorted_outcomes[0][0]
-                    st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
-                with metric_cols[2]:
-                    st.metric("Simulations", f"{sim_count:,}")
-                
-                # Top outcomes
-                st.markdown("#### Most Likely Outcomes")
-                for i, ((your_w, opp_w), count) in enumerate(sorted_outcomes[:5]):
-                    pct = count / total_sims * 100
-                    color = "#00FF88" if your_w > opp_w else "#FF4757" if opp_w > your_w else "#FFD93D"
-                    st.markdown(f"<span style='color: {color}; font-family: Oswald; font-size: 1.2rem;'>{your_w}-{opp_w}</span> <span style='color: #888;'>({pct:.1f}%)</span>", unsafe_allow_html=True)
-            
-            # Outcome distribution
-            st.markdown('<h3><i class="bi bi-dice-5-fill" style="color: #FFD93D;"></i> Score Distribution</h3>', unsafe_allow_html=True)
-            st.plotly_chart(create_outcome_distribution(outcome_counts, total_sims), use_container_width=True)
-            
+                st.markdown('<h3><i class="bi bi-dice-5-fill" style="color: #FFD93D;"></i> Score Distribution</h3>', unsafe_allow_html=True)
+                st.plotly_chart(create_outcome_distribution(outcome_counts, total_sims), use_container_width=True)
             # Category breakdown
             st.markdown('<h3><i class="bi bi-clipboard-data-fill" style="color: #00D4FF;"></i> Category Analysis</h3>', unsafe_allow_html=True)
             st.plotly_chart(create_category_chart(category_results, your_sim, opp_sim), use_container_width=True)
