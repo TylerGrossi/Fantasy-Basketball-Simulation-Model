@@ -618,7 +618,6 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
 def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
     """Create a scoreboard showing current week stats"""
     
-    # Calculate current category wins
     categories_order = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%", "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"]
     
     # Calculate percentages
@@ -662,10 +661,79 @@ def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
             elif y_val < o_val: opp_wins += 1
             else: ties += 1
     
-    # Build the scoreboard HTML
-    scoreboard_html = f'''
+    # Build header cells
+    header_cells = '<th style="padding: 8px 4px; text-align: left; color: #888; font-size: 0.75rem;">TEAM</th>'
+    for cat in categories_order:
+        header_cells += f'<th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">{cat}</th>'
+    header_cells += '<th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">SCORE</th>'
+    
+    # Build your team row
+    your_cells = f'<td style="padding: 10px 4px; color: white; font-weight: 600;">{your_team_name[:15]}</td>'
+    for cat in categories_order:
+        y_val = your_stats[cat]
+        o_val = opp_stats[cat]
+        
+        # Determine color
+        if cat == "TO":
+            if y_val < o_val:
+                color = "#00FF88"
+            elif y_val > o_val:
+                color = "#FF4757"
+            else:
+                color = "white"
+        else:
+            if y_val > o_val:
+                color = "#00FF88"
+            elif y_val < o_val:
+                color = "#FF4757"
+            else:
+                color = "white"
+        
+        # Format value
+        if "%" in cat:
+            val_str = f"{y_val:.4f}"
+        else:
+            val_str = str(int(y_val))
+        
+        your_cells += f'<td style="padding: 10px 4px; text-align: center; color: {color}; font-weight: 600;">{val_str}</td>'
+    
+    your_cells += f'<td style="padding: 10px 4px; text-align: center; color: #00FF88; font-weight: 700; font-family: Oswald;">{your_wins}-{opp_wins}-{ties}</td>'
+    
+    # Build opponent row
+    opp_cells = f'<td style="padding: 10px 4px; color: white; font-weight: 600;">{opp_team_name[:15]}</td>'
+    for cat in categories_order:
+        y_val = your_stats[cat]
+        o_val = opp_stats[cat]
+        
+        # Determine color (reversed for opponent)
+        if cat == "TO":
+            if o_val < y_val:
+                color = "#00FF88"
+            elif o_val > y_val:
+                color = "#FF4757"
+            else:
+                color = "white"
+        else:
+            if o_val > y_val:
+                color = "#00FF88"
+            elif o_val < y_val:
+                color = "#FF4757"
+            else:
+                color = "white"
+        
+        # Format value
+        if "%" in cat:
+            val_str = f"{o_val:.4f}"
+        else:
+            val_str = str(int(o_val))
+        
+        opp_cells += f'<td style="padding: 10px 4px; text-align: center; color: {color}; font-weight: 600;">{val_str}</td>'
+    
+    opp_cells += f'<td style="padding: 10px 4px; text-align: center; color: #FF4757; font-weight: 700; font-family: Oswald;">{opp_wins}-{your_wins}-{ties}</td>'
+    
+    # Build the complete HTML
+    html = f"""
     <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid rgba(255, 107, 53, 0.3);">
-        <!-- Team names and score -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
             <div style="text-align: left; flex: 1;">
                 <span style="font-family: Oswald; font-size: 1.5rem; color: white;">{your_team_name}</span>
@@ -678,35 +746,27 @@ def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
                 <span style="font-family: Oswald; font-size: 1.5rem; color: white;">{opp_team_name}</span>
             </div>
         </div>
-        
-        <!-- Stats table -->
         <div style="overflow-x: auto;">
             <table style="width: 100%; border-collapse: collapse; font-family: Roboto Condensed;">
                 <thead>
                     <tr style="border-bottom: 2px solid rgba(255,255,255,0.2);">
-                        <th style="padding: 8px 4px; text-align: left; color: #888; font-size: 0.75rem;">TEAM</th>
-                        {"".join([f'<th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">{cat}</th>' for cat in categories_order])}
-                        <th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">SCORE</th>
+                        {header_cells}
                     </tr>
                 </thead>
                 <tbody>
                     <tr style="background: rgba(0, 255, 136, 0.1);">
-                        <td style="padding: 10px 4px; color: white; font-weight: 600;">{your_team_name[:15]}</td>
-                        {"".join([f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (your_stats[cat] > opp_stats[cat] and cat != "TO") or (your_stats[cat] < opp_stats[cat] and cat == "TO") else "#FF4757" if (your_stats[cat] < opp_stats[cat] and cat != "TO") or (your_stats[cat] > opp_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{your_stats[cat]:.4f}</td>' if "%" in cat else f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (your_stats[cat] > opp_stats[cat] and cat != "TO") or (your_stats[cat] < opp_stats[cat] and cat == "TO") else "#FF4757" if (your_stats[cat] < opp_stats[cat] and cat != "TO") or (your_stats[cat] > opp_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{int(your_stats[cat])}</td>' for cat in categories_order])}
-                        <td style="padding: 10px 4px; text-align: center; color: #00FF88; font-weight: 700; font-family: Oswald;">{your_wins}-{opp_wins}-{ties}</td>
+                        {your_cells}
                     </tr>
                     <tr style="background: rgba(255, 71, 87, 0.1);">
-                        <td style="padding: 10px 4px; color: white; font-weight: 600;">{opp_team_name[:15]}</td>
-                        {"".join([f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (opp_stats[cat] > your_stats[cat] and cat != "TO") or (opp_stats[cat] < your_stats[cat] and cat == "TO") else "#FF4757" if (opp_stats[cat] < your_stats[cat] and cat != "TO") or (opp_stats[cat] > your_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{opp_stats[cat]:.4f}</td>' if "%" in cat else f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (opp_stats[cat] > your_stats[cat] and cat != "TO") or (opp_stats[cat] < your_stats[cat] and cat == "TO") else "#FF4757" if (opp_stats[cat] < your_stats[cat] and cat != "TO") or (opp_stats[cat] > your_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{int(opp_stats[cat])}</td>' for cat in categories_order])}
-                        <td style="padding: 10px 4px; text-align: center; color: #FF4757; font-weight: 700; font-family: Oswald;">{opp_wins}-{your_wins}-{ties}</td>
+                        {opp_cells}
                     </tr>
                 </tbody>
             </table>
         </div>
     </div>
-    '''
+    """
     
-    return scoreboard_html
+    return html
 
 
 def create_win_probability_gauge(win_pct):
