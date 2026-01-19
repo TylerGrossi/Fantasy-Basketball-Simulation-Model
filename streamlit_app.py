@@ -731,9 +731,9 @@ def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
     
     opp_cells += f'<td style="padding: 10px 4px; text-align: center; color: #FF4757; font-weight: 700; font-family: Oswald;">{opp_wins}-{your_wins}-{ties}</td>'
     
-    # Build the complete HTML
+    # Build the complete HTML - clean version without backgrounds
     html = f"""
-    <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid rgba(255, 107, 53, 0.3);">
+    <div style="margin-bottom: 1.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
             <div style="text-align: left; flex: 1;">
                 <span style="font-family: Oswald; font-size: 1.5rem; color: white;">{your_team_name}</span>
@@ -749,15 +749,15 @@ def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
         <div style="overflow-x: auto;">
             <table style="width: 100%; border-collapse: collapse; font-family: Roboto Condensed;">
                 <thead>
-                    <tr style="border-bottom: 2px solid rgba(255,255,255,0.2);">
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
                         {header_cells}
                     </tr>
                 </thead>
                 <tbody>
-                    <tr style="background: rgba(0, 255, 136, 0.1);">
+                    <tr>
                         {your_cells}
                     </tr>
-                    <tr style="background: rgba(255, 71, 87, 0.1);">
+                    <tr>
                         {opp_cells}
                     </tr>
                 </tbody>
