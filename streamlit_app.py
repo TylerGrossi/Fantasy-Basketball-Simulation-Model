@@ -615,6 +615,100 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
 # VISUALIZATION FUNCTIONS
 # =============================================================================
 
+def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
+    """Create a scoreboard showing current week stats"""
+    
+    # Calculate current category wins
+    categories_order = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%", "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"]
+    
+    # Calculate percentages
+    your_fgp = current_you["FGM"] / current_you["FGA"] if current_you["FGA"] > 0 else 0
+    opp_fgp = current_opp["FGM"] / current_opp["FGA"] if current_opp["FGA"] > 0 else 0
+    your_ftp = current_you["FTM"] / current_you["FTA"] if current_you["FTA"] > 0 else 0
+    opp_ftp = current_opp["FTM"] / current_opp["FTA"] if current_opp["FTA"] > 0 else 0
+    your_3pp = current_you["3PM"] / current_you["3PA"] if current_you["3PA"] > 0 else 0
+    opp_3pp = current_opp["3PM"] / current_opp["3PA"] if current_opp["3PA"] > 0 else 0
+    
+    your_stats = {
+        "FGM": current_you["FGM"], "FGA": current_you["FGA"], "FG%": your_fgp,
+        "FT%": your_ftp, "3PM": current_you["3PM"], "3PA": current_you["3PA"], "3P%": your_3pp,
+        "REB": current_you["REB"], "AST": current_you["AST"], "STL": current_you["STL"],
+        "BLK": current_you["BLK"], "TO": current_you["TO"], "DD": current_you["DD"],
+        "PTS": current_you["PTS"], "TW": current_you["TW"]
+    }
+    
+    opp_stats = {
+        "FGM": current_opp["FGM"], "FGA": current_opp["FGA"], "FG%": opp_fgp,
+        "FT%": opp_ftp, "3PM": current_opp["3PM"], "3PA": current_opp["3PA"], "3P%": opp_3pp,
+        "REB": current_opp["REB"], "AST": current_opp["AST"], "STL": current_opp["STL"],
+        "BLK": current_opp["BLK"], "TO": current_opp["TO"], "DD": current_opp["DD"],
+        "PTS": current_opp["PTS"], "TW": current_opp["TW"]
+    }
+    
+    # Count wins
+    your_wins = 0
+    opp_wins = 0
+    ties = 0
+    
+    for cat in categories_order:
+        y_val = your_stats[cat]
+        o_val = opp_stats[cat]
+        if cat == "TO":
+            if y_val < o_val: your_wins += 1
+            elif y_val > o_val: opp_wins += 1
+            else: ties += 1
+        else:
+            if y_val > o_val: your_wins += 1
+            elif y_val < o_val: opp_wins += 1
+            else: ties += 1
+    
+    # Build the scoreboard HTML
+    scoreboard_html = f'''
+    <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid rgba(255, 107, 53, 0.3);">
+        <!-- Team names and score -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <div style="text-align: left; flex: 1;">
+                <span style="font-family: Oswald; font-size: 1.5rem; color: white;">{your_team_name}</span>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <span style="font-family: Oswald; font-size: 2.5rem; color: #00FF88;">{your_wins}-{opp_wins}-{ties}</span>
+                <span style="font-family: Oswald; font-size: 1.2rem; color: #666; margin-left: 2rem;">{opp_wins}-{your_wins}-{ties}</span>
+            </div>
+            <div style="text-align: right; flex: 1;">
+                <span style="font-family: Oswald; font-size: 1.5rem; color: white;">{opp_team_name}</span>
+            </div>
+        </div>
+        
+        <!-- Stats table -->
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-family: Roboto Condensed;">
+                <thead>
+                    <tr style="border-bottom: 2px solid rgba(255,255,255,0.2);">
+                        <th style="padding: 8px 4px; text-align: left; color: #888; font-size: 0.75rem;">TEAM</th>
+                        {"".join([f'<th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">{cat}</th>' for cat in categories_order])}
+                        <th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">SCORE</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="background: rgba(0, 255, 136, 0.1);">
+                        <td style="padding: 10px 4px; color: white; font-weight: 600;">{your_team_name[:15]}</td>
+                        {"".join([f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (your_stats[cat] > opp_stats[cat] and cat != "TO") or (your_stats[cat] < opp_stats[cat] and cat == "TO") else "#FF4757" if (your_stats[cat] < opp_stats[cat] and cat != "TO") or (your_stats[cat] > opp_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{your_stats[cat]:.4f}</td>' if "%" in cat else f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (your_stats[cat] > opp_stats[cat] and cat != "TO") or (your_stats[cat] < opp_stats[cat] and cat == "TO") else "#FF4757" if (your_stats[cat] < opp_stats[cat] and cat != "TO") or (your_stats[cat] > opp_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{int(your_stats[cat])}</td>' for cat in categories_order])}
+                        <td style="padding: 10px 4px; text-align: center; color: #00FF88; font-weight: 700; font-family: Oswald;">{your_wins}-{opp_wins}-{ties}</td>
+                    </tr>
+                    <tr style="background: rgba(255, 71, 87, 0.1);">
+                        <td style="padding: 10px 4px; color: white; font-weight: 600;">{opp_team_name[:15]}</td>
+                        {"".join([f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (opp_stats[cat] > your_stats[cat] and cat != "TO") or (opp_stats[cat] < your_stats[cat] and cat == "TO") else "#FF4757" if (opp_stats[cat] < your_stats[cat] and cat != "TO") or (opp_stats[cat] > your_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{opp_stats[cat]:.4f}</td>' if "%" in cat else f'<td style="padding: 10px 4px; text-align: center; color: {"#00FF88" if (opp_stats[cat] > your_stats[cat] and cat != "TO") or (opp_stats[cat] < your_stats[cat] and cat == "TO") else "#FF4757" if (opp_stats[cat] < your_stats[cat] and cat != "TO") or (opp_stats[cat] > your_stats[cat] and cat == "TO") else "white"}; font-weight: 600;">{int(opp_stats[cat])}</td>' for cat in categories_order])}
+                        <td style="padding: 10px 4px; text-align: center; color: #FF4757; font-weight: 700; font-family: Oswald;">{opp_wins}-{your_wins}-{ties}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    '''
+    
+    return scoreboard_html
+
+
 def create_win_probability_gauge(win_pct):
     """Create a gauge chart for win probability"""
     fig = go.Figure(go.Indicator(
@@ -912,6 +1006,10 @@ def main():
             # Display Results
             st.markdown("---")
             st.markdown('<h2><i class="bi bi-bar-chart-fill" style="color: #FF6B35;"></i> Simulation Results</h2>', unsafe_allow_html=True)
+            
+            # Current Scoreboard
+            st.markdown('<h3><i class="bi bi-trophy-fill" style="color: #FFD93D;"></i> Current Scoreboard</h3>', unsafe_allow_html=True)
+            st.markdown(create_scoreboard(current_you, current_opp, your_team_name, opp_team_name), unsafe_allow_html=True)
             
             # Key metrics row FIRST
             st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: #00FF88;"></i> Key Metrics</h3>', unsafe_allow_html=True)
