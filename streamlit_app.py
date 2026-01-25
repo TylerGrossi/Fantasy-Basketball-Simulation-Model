@@ -1207,6 +1207,136 @@ def analyze_bench_strategy(your_team_df, opp_team_df, current_totals_you, curren
     }
 
 
+def calculate_league_stats(league, year):
+    """
+    Calculate league-wide statistics including all-play records.
+    All-play = total category wins/losses if you played every team every week.
+    Each week: (num_teams - 1) opponents × num_categories = category matchups per week
+    """
+    teams = league.teams
+    num_teams = len(teams)
+    # Use currentMatchupPeriod - 1 to only count COMPLETED weeks, not current week
+    current_week = league.currentMatchupPeriod
+    num_completed_weeks = current_week - 1 if current_week > 1 else current_week
+    
+    # Initialize all-play records - tracking CATEGORY wins, not matchup wins
+    all_play_records = {team.team_id: {"wins": 0, "losses": 0, "ties": 0} for team in teams}
+    
+    # Calculate all-play record by going through each COMPLETED week
+    for week in range(1, num_completed_weeks + 1):
+        try:
+            boxscores = league.box_scores(matchup_period=week)
+            
+            # Get each team's category totals for this week
+            weekly_stats = {}
+            for matchup in boxscores:
+                # Home team stats
+                home_stats = flatten_stat_dict(matchup.home_stats)
+                home_id = matchup.home_team.team_id
+                weekly_stats[home_id] = home_stats
+                
+                # Away team stats  
+                away_stats = flatten_stat_dict(matchup.away_stats)
+                away_id = matchup.away_team.team_id
+                weekly_stats[away_id] = away_stats
+            
+            # Skip if we don't have stats for this week
+            if not weekly_stats:
+                continue
+                
+            # Compare each team against every other team for this week
+            team_ids = list(weekly_stats.keys())
+            
+            for team1_id in team_ids:
+                for team2_id in team_ids:
+                    if team1_id == team2_id:
+                        continue
+                    
+                    stats1 = weekly_stats.get(team1_id, {})
+                    stats2 = weekly_stats.get(team2_id, {})
+                    
+                    if not stats1 or not stats2:
+                        continue
+                    
+                    # Count EACH CATEGORY as a separate win/loss/tie
+                    for cat in CATEGORIES:
+                        val1 = stats1.get(cat, 0)
+                        val2 = stats2.get(cat, 0)
+                        
+                        # Handle percentage categories
+                        if cat == "FG%":
+                            fgm1, fga1 = stats1.get("FGM", 0), stats1.get("FGA", 0)
+                            fgm2, fga2 = stats2.get("FGM", 0), stats2.get("FGA", 0)
+                            val1 = fgm1 / fga1 if fga1 > 0 else 0
+                            val2 = fgm2 / fga2 if fga2 > 0 else 0
+                        elif cat == "FT%":
+                            ftm1, fta1 = stats1.get("FTM", 0), stats1.get("FTA", 0)
+                            ftm2, fta2 = stats2.get("FTM", 0), stats2.get("FTA", 0)
+                            val1 = ftm1 / fta1 if fta1 > 0 else 0
+                            val2 = ftm2 / fta2 if fta2 > 0 else 0
+                        elif cat == "3P%":
+                            tpm1, tpa1 = stats1.get("3PM", 0), stats1.get("3PA", 0)
+                            tpm2, tpa2 = stats2.get("3PM", 0), stats2.get("3PA", 0)
+                            val1 = tpm1 / tpa1 if tpa1 > 0 else 0
+                            val2 = tpm2 / tpa2 if tpa2 > 0 else 0
+                        
+                        # Compare values - each category is its own win/loss
+                        if cat == "TO":
+                            # Lower is better for turnovers
+                            if val1 < val2:
+                                all_play_records[team1_id]["wins"] += 1
+                            elif val2 < val1:
+                                all_play_records[team1_id]["losses"] += 1
+                            else:
+                                all_play_records[team1_id]["ties"] += 1
+                        else:
+                            if val1 > val2:
+                                all_play_records[team1_id]["wins"] += 1
+                            elif val2 > val1:
+                                all_play_records[team1_id]["losses"] += 1
+                            else:
+                                all_play_records[team1_id]["ties"] += 1
+        
+        except Exception as e:
+            # Skip weeks that fail
+            continue
+    
+    # Combine data
+    league_data = []
+    for team in teams:
+        tid = team.team_id
+        ap = all_play_records[tid]
+        ap_total = ap["wins"] + ap["losses"] + ap["ties"]
+        ap_pct = ap["wins"] / ap_total if ap_total > 0 else 0
+        
+        actual_total = team.wins + team.losses + getattr(team, 'ties', 0)
+        actual_pct = team.wins / actual_total if actual_total > 0 else 0
+        
+        # Calculate luck factor (actual win% - all-play win%)
+        luck = (actual_pct - ap_pct) * 100
+        
+        league_data.append({
+            "team_id": tid,
+            "team_name": team.team_name,
+            "standing": team.standing,
+            "actual_wins": team.wins,
+            "actual_losses": team.losses,
+            "actual_ties": getattr(team, 'ties', 0),
+            "actual_pct": actual_pct,
+            "all_play_wins": ap["wins"],
+            "all_play_losses": ap["losses"],
+            "all_play_ties": ap["ties"],
+            "all_play_pct": ap_pct,
+            "luck": luck,
+            "points_for": getattr(team, 'points_for', 0),
+        })
+    
+    # Sort by standing
+    league_data = sorted(league_data, key=lambda x: x["standing"])
+    
+    return league_data
+
+
 # =============================================================================
 # VISUALIZATION FUNCTIONS
 # =============================================================================
@@ -1682,274 +1812,383 @@ def main():
             win_pct = matchup_results["you"] / total_sims * 100
             baseline_avg_cats = sum(your_w * count for (your_w, opp_w), count in outcome_counts.items()) / total_sims
             
-            # Display Results
-            st.markdown("---")
-            st.markdown('<h2><i class="bi bi-bar-chart-fill" style="color: #FF6B35;"></i> Simulation Results</h2>', unsafe_allow_html=True)
+            # Store data in session state for tabs
+            st.session_state['simulation_done'] = True
+            st.session_state['league'] = league
+            st.session_state['year'] = year
+            st.session_state['team_id'] = team_id
             
-            # Current Scoreboard
-            st.markdown('<h3><i class="bi bi-trophy-fill" style="color: #FFD93D;"></i> Current Scoreboard</h3>', unsafe_allow_html=True)
-            st.markdown(create_scoreboard(current_you, current_opp, your_team_name, opp_team_name), unsafe_allow_html=True)
+            # Create tabs for different sections
+            tab_matchup, tab_streamers, tab_strategy, tab_league = st.tabs([
+                "Matchup Analysis",
+                "Streamer Analysis", 
+                "Bench Strategy",
+                "League Stats"
+            ])
             
-            # Key metrics row FIRST
-            st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: #00FF88;"></i> Key Metrics</h3>', unsafe_allow_html=True)
-            metric_cols = st.columns(3)
-            with metric_cols[0]:
-                st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{baseline_avg_cats - 7.5:.1f} vs even")
-            with metric_cols[1]:
-                sorted_outcomes = sorted(outcome_counts.items(), key=lambda x: x[1], reverse=True)
-                most_likely = sorted_outcomes[0][0]
-                st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
-            with metric_cols[2]:
-                st.metric("Simulations", f"{sim_count:,}")
-            
-            # Win probability gauge and Score Distribution side by side
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                st.markdown('<h3><i class="bi bi-bullseye" style="color: #00D4FF;"></i> Win Probability</h3>', unsafe_allow_html=True)
-                st.plotly_chart(create_win_probability_gauge(win_pct), use_container_width=True)
-            
-            with col2:
-                st.markdown('<h3><i class="bi bi-dice-5-fill" style="color: #FFD93D;"></i> Score Distribution</h3>', unsafe_allow_html=True)
-                st.plotly_chart(create_outcome_distribution(outcome_counts, total_sims), use_container_width=True)
-            # Category breakdown
-            st.markdown('<h3><i class="bi bi-clipboard-data-fill" style="color: #00D4FF;"></i> Category Analysis</h3>', unsafe_allow_html=True)
-            st.plotly_chart(create_category_chart(category_results, your_sim, opp_sim), use_container_width=True)
-            
-            # Detailed category table
-            with st.expander("Detailed Category Projections", expanded=False):
-                cat_data = []
-                for cat in CATEGORIES:
-                    outcome = category_results[cat]
-                    total_cat = sum(outcome.values())
-                    you_pct = outcome["you"] / total_cat * 100
-                    opp_pct = outcome["opponent"] / total_cat * 100
-                    
-                    y_proj = np.mean(your_sim[cat])
-                    o_proj = np.mean(opp_sim[cat])
-                    y_ci = (np.percentile(your_sim[cat], 10), np.percentile(your_sim[cat], 90))
-                    o_ci = (np.percentile(opp_sim[cat], 10), np.percentile(opp_sim[cat], 90))
-                    
-                    is_swing = abs(you_pct - opp_pct) <= 15
-                    
-                    cat_data.append({
-                        "Category": cat,
-                        "You Win %": f"{you_pct:.0f}%",
-                        "Opp Win %": f"{opp_pct:.0f}%",
-                        "Your Proj": f"{y_proj:.2f}" if "%" in cat else f"{y_proj:.1f}",
-                        "Opp Proj": f"{o_proj:.2f}" if "%" in cat else f"{o_proj:.1f}",
-                        "Your CI": f"{y_ci[0]:.1f} - {y_ci[1]:.1f}",
-                        "Opp CI": f"{o_ci[0]:.1f} - {o_ci[1]:.1f}",
-                        "Swing": "*" if is_swing else ""
-                    })
+            # ==================== TAB 1: MATCHUP ANALYSIS ====================
+            with tab_matchup:
+                st.markdown('<h2><i class="bi bi-bar-chart-fill" style="color: #FF6B35;"></i> Simulation Results</h2>', unsafe_allow_html=True)
                 
-                st.dataframe(
-                    pd.DataFrame(cat_data), 
-                    use_container_width=True, 
-                    hide_index=True,
-                    height=560  # Fixed height to show all 15 rows
-                )
+                # Current Scoreboard
+                st.markdown('<h3><i class="bi bi-trophy-fill" style="color: #FFD93D;"></i> Current Scoreboard</h3>', unsafe_allow_html=True)
+                st.markdown(create_scoreboard(current_you, current_opp, your_team_name, opp_team_name), unsafe_allow_html=True)
+                
+                # Key metrics row
+                st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: #00FF88;"></i> Key Metrics</h3>', unsafe_allow_html=True)
+                metric_cols = st.columns(3)
+                with metric_cols[0]:
+                    st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{baseline_avg_cats - 7.5:.1f} vs even")
+                with metric_cols[1]:
+                    sorted_outcomes = sorted(outcome_counts.items(), key=lambda x: x[1], reverse=True)
+                    most_likely = sorted_outcomes[0][0]
+                    st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
+                with metric_cols[2]:
+                    st.metric("Simulations", f"{sim_count:,}")
+                
+                # Win probability gauge and Score Distribution side by side
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
+                    st.markdown('<h3><i class="bi bi-bullseye" style="color: #00D4FF;"></i> Win Probability</h3>', unsafe_allow_html=True)
+                    st.plotly_chart(create_win_probability_gauge(win_pct), use_container_width=True)
+                
+                with col2:
+                    st.markdown('<h3><i class="bi bi-dice-5-fill" style="color: #FFD93D;"></i> Score Distribution</h3>', unsafe_allow_html=True)
+                    st.plotly_chart(create_outcome_distribution(outcome_counts, total_sims), use_container_width=True)
+                
+                # Category breakdown
+                st.markdown('<h3><i class="bi bi-clipboard-data-fill" style="color: #00D4FF;"></i> Category Analysis</h3>', unsafe_allow_html=True)
+                st.plotly_chart(create_category_chart(category_results, your_sim, opp_sim), use_container_width=True)
+                
+                # Detailed category table
+                with st.expander("Detailed Category Projections", expanded=False):
+                    cat_data = []
+                    for cat in CATEGORIES:
+                        outcome = category_results[cat]
+                        total_cat = sum(outcome.values())
+                        you_pct = outcome["you"] / total_cat * 100
+                        opp_pct = outcome["opponent"] / total_cat * 100
+                        
+                        y_proj = np.mean(your_sim[cat])
+                        o_proj = np.mean(opp_sim[cat])
+                        y_ci = (np.percentile(your_sim[cat], 10), np.percentile(your_sim[cat], 90))
+                        o_ci = (np.percentile(opp_sim[cat], 10), np.percentile(opp_sim[cat], 90))
+                        
+                        is_swing = abs(you_pct - opp_pct) <= 15
+                        
+                        cat_data.append({
+                            "Category": cat,
+                            "You Win %": f"{you_pct:.0f}%",
+                            "Opp Win %": f"{opp_pct:.0f}%",
+                            "Your Proj": f"{y_proj:.2f}" if "%" in cat else f"{y_proj:.1f}",
+                            "Opp Proj": f"{o_proj:.2f}" if "%" in cat else f"{o_proj:.1f}",
+                            "Your CI": f"{y_ci[0]:.1f} - {y_ci[1]:.1f}",
+                            "Opp CI": f"{o_ci[0]:.1f} - {o_ci[1]:.1f}",
+                            "Swing": "*" if is_swing else ""
+                        })
+                    
+                    st.dataframe(pd.DataFrame(cat_data), use_container_width=True, hide_index=True, height=560)
+                
+                # Rosters
+                with st.expander("Your Roster"):
+                    roster_cols = ["Player", "NBA_Team", "Games Left", "PTS", "REB", "AST", "3PM", "FG%", "FT%"]
+                    display_cols = [c for c in roster_cols if c in your_team_df.columns]
+                    display_df = your_team_df[display_cols].round(2).copy()
+                    if untouchables:
+                        untouchables_lower = [p.lower().strip() for p in untouchables]
+                        display_df["Lock"] = display_df["Player"].str.lower().str.strip().isin(untouchables_lower).map({True: "Y", False: ""})
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                
+                with st.expander("Opponent Roster"):
+                    display_cols = [c for c in roster_cols if c in opp_team_df.columns]
+                    st.dataframe(opp_team_df[display_cols].round(2), use_container_width=True, hide_index=True)
             
-            # Rosters
-            with st.expander("Your Roster"):
-                roster_cols = ["Player", "NBA_Team", "Games Left", "PTS", "REB", "AST", "3PM", "FG%", "FT%"]
-                display_cols = [c for c in roster_cols if c in your_team_df.columns]
-                display_df = your_team_df[display_cols].round(2).copy()
-                # Mark untouchables
+            # ==================== TAB 2: STREAMER ANALYSIS ====================
+            with tab_streamers:
+                st.markdown('<h2><i class="bi bi-arrow-repeat" style="color: #FF6B35;"></i> Streamer Analysis</h2>', unsafe_allow_html=True)
+                
                 if untouchables:
-                    untouchables_lower = [p.lower().strip() for p in untouchables]
-                    display_df["Lock"] = display_df["Player"].str.lower().str.strip().isin(untouchables_lower).map({True: "Y", False: ""})
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
-            with st.expander("Opponent Roster"):
-                display_cols = [c for c in roster_cols if c in opp_team_df.columns]
-                st.dataframe(opp_team_df[display_cols].round(2), use_container_width=True, hide_index=True)
-            
-            # Streamer Analysis
-            st.markdown("---")
-            st.markdown('<h2><i class="bi bi-arrow-repeat" style="color: #FF6B35;"></i> Streamer Analysis</h2>', unsafe_allow_html=True)
-            
-            if untouchables:
-                st.markdown(f'<div style="padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border-left: 4px solid #00D4FF; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-lock-fill" style="color: #00D4FF;"></i> <strong>Untouchable players:</strong> {", ".join(untouchables)}</div>', unsafe_allow_html=True)
-            if has_open_spot:
-                st.markdown('<div style="padding: 0.75rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00FF88; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-check-circle-fill" style="color: #00FF88;"></i> You have an open roster spot - streamers can be added without dropping anyone</div>', unsafe_allow_html=True)
-            
-            with st.spinner(f"Analyzing {num_streamers} potential streamers (considering drop candidates)..."):
-                baseline_results = (win_pct, category_results, baseline_avg_cats)
-                streamers = analyze_streamers(
-                    league, your_team_df, opp_team_df, 
-                    current_you, current_opp, baseline_results,
-                    blend_weight, year, num_streamers,
-                    untouchables=untouchables,
-                    has_open_roster_spot=has_open_spot,
-                    manual_watchlist=manual_watchlist
-                )
-            
-            if streamers:
-                # Top recommendations
-                st.markdown('<h3><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Top Recommendations</h3>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border-left: 4px solid #00D4FF; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-lock-fill" style="color: #00D4FF;"></i> <strong>Untouchable players:</strong> {", ".join(untouchables)}</div>', unsafe_allow_html=True)
+                if has_open_spot:
+                    st.markdown('<div style="padding: 0.75rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00FF88; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-check-circle-fill" style="color: #00FF88;"></i> You have an open roster spot - streamers can be added without dropping anyone</div>', unsafe_allow_html=True)
                 
-                top_3 = streamers[:3]
-                cols = st.columns(3)
+                with st.spinner(f"Analyzing {num_streamers} potential streamers (considering drop candidates)..."):
+                    baseline_results = (win_pct, category_results, baseline_avg_cats)
+                    streamers = analyze_streamers(
+                        league, your_team_df, opp_team_df, 
+                        current_you, current_opp, baseline_results,
+                        blend_weight, year, num_streamers,
+                        untouchables=untouchables,
+                        has_open_roster_spot=has_open_spot,
+                        manual_watchlist=manual_watchlist
+                    )
                 
-                for i, player in enumerate(top_3):
-                    with cols[i]:
-                        delta_color = "#00FF88" if player["Δ Cats"] > 0 else "#FF4757" if player["Δ Cats"] < 0 else "#FFD93D"
-                        border_color = delta_color
+                if streamers:
+                    st.markdown('<h3><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Top Recommendations</h3>', unsafe_allow_html=True)
+                    
+                    top_3 = streamers[:3]
+                    cols = st.columns(3)
+                    
+                    for i, player in enumerate(top_3):
+                        with cols[i]:
+                            delta_color = "#00FF88" if player["Δ Cats"] > 0 else "#FF4757" if player["Δ Cats"] < 0 else "#FFD93D"
+                            border_color = delta_color
+                            
+                            drop_text = player["Drop"]
+                            if drop_text == "(Open Spot)":
+                                drop_display = '<span style="color: #00FF88;">Add (Open Spot)</span>'
+                            else:
+                                drop_display = f'<span style="color: #FF4757;">Drop: {drop_text}</span>'
+                            
+                            watchlist_badge = ' <i class="bi bi-star-fill" style="color: #FFD93D; font-size: 0.9rem;"></i>' if player.get("Watchlist") else ""
+                            
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
+                                        border-radius: 12px; padding: 1.2rem; 
+                                        border-left: 4px solid {border_color};">
+                                <h4 style="margin: 0; color: white; font-family: Oswald;">{player['Player']}{watchlist_badge}</h4>
+                                <p style="color: #888; margin: 0.3rem 0; font-size: 0.9rem;">{player['Team']} - {player['Games']} games</p>
+                                <p style="margin: 0.5rem 0; font-size: 0.85rem;">{drop_display}</p>
+                                <div style="display: flex; justify-content: space-between; margin-top: 0.8rem;">
+                                    <div>
+                                        <span style="color: #888; font-size: 0.8rem;">Δ CATS</span><br/>
+                                        <span style="color: {delta_color}; font-size: 1.5rem; font-family: Oswald; font-weight: 600;">
+                                            {player['Δ Cats']:+.2f}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888; font-size: 0.8rem;">EXP CATS</span><br/>
+                                        <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
+                                            {player['Exp Cats']:.1f}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888; font-size: 0.8rem;">WIN %</span><br/>
+                                        <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
+                                            {player['Win %']:.0f}%
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            if player["Cat Impacts"]:
+                                impacts_str = ", ".join([f"{'▲' if v > 0 else '▼'}{k}: {v:+.0f}%" for k, v in sorted(player["Cat Impacts"].items(), key=lambda x: abs(x[1]), reverse=True)[:3]])
+                                st.caption(impacts_str)
+                            
+                            if player["Risks"]:
+                                st.caption(f"Risk: {', '.join(player['Risks'])}")
+                    
+                    with st.expander("All Analyzed Streamers"):
+                        streamer_df = pd.DataFrame([{
+                            "WL": p.get("Watchlist", ""),
+                            "Player": p["Player"],
+                            "Team": p["Team"],
+                            "Games": p["Games"],
+                            "Drop": p["Drop"],
+                            "Δ Cats": p["Δ Cats"],
+                            "Exp Cats": p["Exp Cats"],
+                            "Win %": p["Win %"],
+                            "PTS": p["PTS"],
+                            "REB": p["REB"],
+                            "AST": p["AST"],
+                            "Risks": ", ".join(p["Risks"]) if p["Risks"] else ""
+                        } for p in streamers])
                         
-                        drop_text = player["Drop"]
-                        if drop_text == "(Open Spot)":
-                            drop_display = '<span style="color: #00FF88;">Add (Open Spot)</span>'
-                        else:
-                            drop_display = f'<span style="color: #FF4757;">Drop: {drop_text}</span>'
-                        
-                        watchlist_badge = ' <i class="bi bi-star-fill" style="color: #FFD93D; font-size: 0.9rem;"></i>' if player.get("Watchlist") else ""
+                        st.dataframe(streamer_df, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("No streamers found with games remaining this week.")
+            
+            # ==================== TAB 3: BENCH STRATEGY ====================
+            with tab_strategy:
+                st.markdown('<h2><i class="bi bi-pause-circle-fill" style="color: #FF6B35;"></i> Bench Strategy Analysis</h2>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #888;">Should you bench your players today to protect your lead? This analyzes whether sitting everyone improves your expected categories won.</p>', unsafe_allow_html=True)
+                
+                with st.spinner("Analyzing bench vs play scenarios..."):
+                    bench_analysis = analyze_bench_strategy(
+                        your_team_df, opp_team_df,
+                        current_you, current_opp,
+                        (win_pct, category_results, baseline_avg_cats)
+                    )
+                
+                is_bench_better = bench_analysis["recommendation"] == "BENCH"
+                rec_color = "#FFD93D" if is_bench_better else "#00FF88"
+                rec_icon = "bi-pause-circle-fill" if is_bench_better else "bi-play-circle-fill"
+                
+                st.markdown(f"""
+                <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
+                            border-radius: 16px; padding: 1.5rem; 
+                            border: 2px solid {rec_color}; margin-bottom: 1.5rem;">
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <i class="{rec_icon}" style="font-size: 3rem; color: {rec_color};"></i>
+                        <div>
+                            <h3 style="margin: 0; color: {rec_color}; font-family: Oswald;">RECOMMENDATION: {bench_analysis["recommendation"]}</h3>
+                            <p style="margin: 0.5rem 0 0 0; color: #888;">
+                                Expected cats difference: <strong style="color: white;">{bench_analysis["cats_diff"]:+.2f}</strong> | 
+                                Win % difference: <strong style="color: white;">{bench_analysis["win_pct_diff"]:+.1f}%</strong>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.2rem; border-left: 4px solid #00FF88;">
+                        <h4 style="margin: 0; color: #00FF88; font-family: Oswald;"><i class="bi bi-play-fill"></i> PLAY SCENARIO</h4>
+                        <div style="margin-top: 1rem;">
+                            <p style="margin: 0.3rem 0; color: #888;">Win Probability: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["play"]["win_pct"]:.1f}%</span></p>
+                            <p style="margin: 0.3rem 0; color: #888;">Expected Cats: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["play"]["avg_cats"]:.2f}</span></p>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if bench_analysis["play_helps"]:
+                        st.markdown("<p style='color: #888; margin-top: 0.5rem;'><strong>Playing helps:</strong></p>", unsafe_allow_html=True)
+                        for cat, diff in bench_analysis["play_helps"][:5]:
+                            st.markdown(f"<span style='color: #00FF88;'>▲ {cat}: +{diff:.1f}%</span>", unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.2rem; border-left: 4px solid #FFD93D;">
+                        <h4 style="margin: 0; color: #FFD93D; font-family: Oswald;"><i class="bi bi-pause-fill"></i> BENCH SCENARIO</h4>
+                        <div style="margin-top: 1rem;">
+                            <p style="margin: 0.3rem 0; color: #888;">Win Probability: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["bench"]["win_pct"]:.1f}%</span></p>
+                            <p style="margin: 0.3rem 0; color: #888;">Expected Cats: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["bench"]["avg_cats"]:.2f}</span></p>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if bench_analysis["bench_helps"]:
+                        st.markdown("<p style='color: #888; margin-top: 0.5rem;'><strong>Benching helps:</strong></p>", unsafe_allow_html=True)
+                        for cat, diff in bench_analysis["bench_helps"][:5]:
+                            st.markdown(f"<span style='color: #FFD93D;'>▲ {cat}: +{diff:.1f}%</span>", unsafe_allow_html=True)
+                
+                with st.expander("Detailed Category Comparison (Play vs Bench)"):
+                    bench_cat_data = []
+                    for cat in CATEGORIES:
+                        play_pct = bench_analysis["play"]["cat_results"][cat]["win_pct"]
+                        bench_pct = bench_analysis["bench"]["cat_results"][cat]["win_pct"]
+                        diff = bench_pct - play_pct
+                        better = "Bench" if diff > 2 else "Play" if diff < -2 else "Same"
+                        bench_cat_data.append({
+                            "Category": cat,
+                            "Play Win %": f"{play_pct:.1f}%",
+                            "Bench Win %": f"{bench_pct:.1f}%",
+                            "Difference": f"{diff:+.1f}%",
+                            "Better": better
+                        })
+                    st.dataframe(pd.DataFrame(bench_cat_data), use_container_width=True, hide_index=True)
+            
+            # ==================== TAB 4: LEAGUE STATS ====================
+            with tab_league:
+                st.markdown('<h2><i class="bi bi-trophy-fill" style="color: #FF6B35;"></i> League Statistics</h2>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #888;">League standings, all-play records (your record if you played everyone every week), and luck factor analysis.</p>', unsafe_allow_html=True)
+                
+                with st.spinner("Calculating league statistics (this may take a moment)..."):
+                    league_stats = calculate_league_stats(league, year)
+                
+                your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
+                
+                if your_team_stats:
+                    luck_color = "#00FF88" if your_team_stats["luck"] > 0 else "#FF4757" if your_team_stats["luck"] < 0 else "#888"
+                    luck_text = "Lucky" if your_team_stats["luck"] > 2 else "Unlucky" if your_team_stats["luck"] < -2 else "Average"
+                    
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
+                                border-radius: 16px; padding: 1.5rem; 
+                                border: 2px solid #FF6B35; margin-bottom: 1.5rem;">
+                        <h3 style="margin: 0 0 1rem 0; color: #FF6B35; font-family: Oswald;">
+                            <i class="bi bi-person-circle"></i> {your_team_stats["team_name"]} - #{your_team_stats["standing"]}
+                        </h3>
+                        <div style="display: flex; flex-wrap: wrap; gap: 2rem;">
+                            <div>
+                                <span style="color: #888; font-size: 0.85rem;">ACTUAL RECORD</span><br/>
+                                <span style="color: white; font-size: 1.8rem; font-family: Oswald;">
+                                    {your_team_stats["actual_wins"]}-{your_team_stats["actual_losses"]}-{your_team_stats["actual_ties"]}
+                                </span>
+                                <span style="color: #888; font-size: 1rem;"> ({your_team_stats["actual_pct"]:.3f})</span>
+                            </div>
+                            <div>
+                                <span style="color: #888; font-size: 0.85rem;">ALL-PLAY RECORD</span><br/>
+                                <span style="color: #00D4FF; font-size: 1.8rem; font-family: Oswald;">
+                                    {your_team_stats["all_play_wins"]}-{your_team_stats["all_play_losses"]}-{your_team_stats["all_play_ties"]}
+                                </span>
+                                <span style="color: #888; font-size: 1rem;"> ({your_team_stats["all_play_pct"]:.3f})</span>
+                            </div>
+                            <div>
+                                <span style="color: #888; font-size: 0.85rem;">LUCK FACTOR</span><br/>
+                                <span style="color: {luck_color}; font-size: 1.8rem; font-family: Oswald;">
+                                    {your_team_stats["luck"]:+.1f}%
+                                </span>
+                                <span style="color: {luck_color}; font-size: 1rem;"> ({luck_text})</span>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown('<h3><i class="bi bi-list-ol" style="color: #00D4FF;"></i> Full League Standings</h3>', unsafe_allow_html=True)
+                
+                standings_df = pd.DataFrame([{
+                    "Rank": t["standing"],
+                    "Team": t["team_name"],
+                    "Record": f"{t['actual_wins']}-{t['actual_losses']}-{t['actual_ties']}",
+                    "PCT": f"{t['actual_pct']:.3f}",
+                    "All-Play": f"{t['all_play_wins']}-{t['all_play_losses']}-{t['all_play_ties']}",
+                    "AP PCT": f"{t['all_play_pct']:.3f}",
+                    "Luck": f"{t['luck']:+.1f}%",
+                } for t in league_stats])
+                
+                st.dataframe(standings_df, use_container_width=True, hide_index=True)
+                
+                with st.expander("All-Play Power Rankings"):
+                    st.markdown('<p style="color: #888;">Teams ranked by all-play win percentage - the truest measure of team strength.</p>', unsafe_allow_html=True)
+                    ap_sorted = sorted(league_stats, key=lambda x: x["all_play_pct"], reverse=True)
+                    
+                    for i, team in enumerate(ap_sorted, 1):
+                        ap_pct = team["all_play_pct"]
+                        bar_width = ap_pct * 100
+                        is_your_team = team["team_id"] == team_id
+                        border_style = "border: 2px solid #FF6B35;" if is_your_team else ""
+                        name_style = "color: #FF6B35;" if is_your_team else "color: white;"
                         
                         st.markdown(f"""
-                        <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
-                                    border-radius: 12px; padding: 1.2rem; 
-                                    border-left: 4px solid {border_color};">
-                            <h4 style="margin: 0; color: white; font-family: Oswald;">{player['Player']}{watchlist_badge}</h4>
-                            <p style="color: #888; margin: 0.3rem 0; font-size: 0.9rem;">{player['Team']} • {player['Games']} games</p>
-                            <p style="margin: 0.5rem 0; font-size: 0.85rem;">{drop_display}</p>
-                            <div style="display: flex; justify-content: space-between; margin-top: 0.8rem;">
-                                <div>
-                                    <span style="color: #888; font-size: 0.8rem;">Δ CATS</span><br/>
-                                    <span style="color: {delta_color}; font-size: 1.5rem; font-family: Oswald; font-weight: 600;">
-                                        {player['Δ Cats']:+.2f}
-                                    </span>
-                                </div>
-                                <div>
-                                    <span style="color: #888; font-size: 0.8rem;">EXP CATS</span><br/>
-                                    <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
-                                        {player['Exp Cats']:.1f}
-                                    </span>
-                                </div>
-                                <div>
-                                    <span style="color: #888; font-size: 0.8rem;">WIN %</span><br/>
-                                    <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
-                                        {player['Win %']:.0f}%
-                                    </span>
-                                </div>
+                        <div style="background: linear-gradient(145deg, #1A1A2E, #252545); 
+                                    border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem; {border_style}">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="{name_style} font-family: Oswald; font-size: 1.1rem;">
+                                    #{i} {team["team_name"]}
+                                </span>
+                                <span style="color: #00D4FF; font-family: Oswald;">
+                                    {team["all_play_wins"]}-{team["all_play_losses"]} ({ap_pct:.3f})
+                                </span>
+                            </div>
+                            <div style="background: #0F0F1A; border-radius: 4px; height: 8px; margin-top: 0.5rem; overflow: hidden;">
+                                <div style="background: linear-gradient(90deg, #00D4FF, #00FF88); width: {bar_width}%; height: 100%;"></div>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                        # Show category impacts
-                        if player["Cat Impacts"]:
-                            impacts_str = ", ".join([f"{'▲' if v > 0 else '▼'}{k}: {v:+.0f}%" for k, v in sorted(player["Cat Impacts"].items(), key=lambda x: abs(x[1]), reverse=True)[:3]])
-                            st.caption(impacts_str)
-                        
-                        if player["Risks"]:
-                            st.caption(f"Risk: {', '.join(player['Risks'])}")
                 
-                # Full streamer table
-                with st.expander("All Analyzed Streamers"):
-                    streamer_df = pd.DataFrame([{
-                        "WL": p.get("Watchlist", ""),
-                        "Player": p["Player"],
-                        "Team": p["Team"],
-                        "Games": p["Games"],
-                        "Drop": p["Drop"],
-                        "Δ Cats": p["Δ Cats"],
-                        "Exp Cats": p["Exp Cats"],
-                        "Win %": p["Win %"],
-                        "PTS": p["PTS"],
-                        "REB": p["REB"],
-                        "AST": p["AST"],
-                        "Risks": ", ".join(p["Risks"]) if p["Risks"] else ""
-                    } for p in streamers])
+                with st.expander("Luck Rankings"):
+                    st.markdown('<p style="color: #888;">Luck = Actual Win% - All-Play Win%. Positive = lucky (winning more than expected), Negative = unlucky.</p>', unsafe_allow_html=True)
+                    luck_sorted = sorted(league_stats, key=lambda x: x["luck"], reverse=True)
                     
-                    st.dataframe(streamer_df, use_container_width=True, hide_index=True)
-            
-            # Bench Strategy Analysis
-            st.markdown("---")
-            st.markdown('<h2><i class="bi bi-pause-circle-fill" style="color: #FF6B35;"></i> Bench Strategy Analysis</h2>', unsafe_allow_html=True)
-            st.markdown('<p style="color: #888;">Should you bench your players today to protect your lead? This analyzes whether sitting everyone improves your expected categories won.</p>', unsafe_allow_html=True)
-            
-            with st.spinner("Analyzing bench vs play scenarios..."):
-                bench_analysis = analyze_bench_strategy(
-                    your_team_df, opp_team_df,
-                    current_you, current_opp,
-                    baseline_results
-                )
-            
-            # Recommendation card
-            is_bench_better = bench_analysis["recommendation"] == "BENCH"
-            rec_color = "#FFD93D" if is_bench_better else "#00FF88"
-            rec_icon = "bi-pause-circle-fill" if is_bench_better else "bi-play-circle-fill"
-            
-            st.markdown(f"""
-            <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
-                        border-radius: 16px; padding: 1.5rem; 
-                        border: 2px solid {rec_color}; margin-bottom: 1.5rem;">
-                <div style="display: flex; align-items: center; gap: 1rem;">
-                    <i class="{rec_icon}" style="font-size: 3rem; color: {rec_color};"></i>
-                    <div>
-                        <h3 style="margin: 0; color: {rec_color}; font-family: Oswald;">RECOMMENDATION: {bench_analysis["recommendation"]}</h3>
-                        <p style="margin: 0.5rem 0 0 0; color: #888;">
-                            Expected cats difference: <strong style="color: white;">{bench_analysis["cats_diff"]:+.2f}</strong> | 
-                            Win % difference: <strong style="color: white;">{bench_analysis["win_pct_diff"]:+.1f}%</strong>
-                        </p>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Comparison table
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown(f"""
-                <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.2rem; border-left: 4px solid #00FF88;">
-                    <h4 style="margin: 0; color: #00FF88; font-family: Oswald;"><i class="bi bi-play-fill"></i> PLAY SCENARIO</h4>
-                    <div style="margin-top: 1rem;">
-                        <p style="margin: 0.3rem 0; color: #888;">Win Probability: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["play"]["win_pct"]:.1f}%</span></p>
-                        <p style="margin: 0.3rem 0; color: #888;">Expected Cats: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["play"]["avg_cats"]:.2f}</span></p>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                if bench_analysis["play_helps"]:
-                    st.markdown("<p style='color: #888; margin-top: 0.5rem;'><strong>Playing helps:</strong></p>", unsafe_allow_html=True)
-                    for cat, diff in bench_analysis["play_helps"][:5]:
-                        st.markdown(f"<span style='color: #00FF88;'>▲ {cat}: +{diff:.1f}%</span>", unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown(f"""
-                <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.2rem; border-left: 4px solid #FFD93D;">
-                    <h4 style="margin: 0; color: #FFD93D; font-family: Oswald;"><i class="bi bi-pause-fill"></i> BENCH SCENARIO</h4>
-                    <div style="margin-top: 1rem;">
-                        <p style="margin: 0.3rem 0; color: #888;">Win Probability: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["bench"]["win_pct"]:.1f}%</span></p>
-                        <p style="margin: 0.3rem 0; color: #888;">Expected Cats: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["bench"]["avg_cats"]:.2f}</span></p>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                if bench_analysis["bench_helps"]:
-                    st.markdown("<p style='color: #888; margin-top: 0.5rem;'><strong>Benching helps:</strong></p>", unsafe_allow_html=True)
-                    for cat, diff in bench_analysis["bench_helps"][:5]:
-                        st.markdown(f"<span style='color: #FFD93D;'>▲ {cat}: +{diff:.1f}%</span>", unsafe_allow_html=True)
-            
-            # Detailed category comparison
-            with st.expander("Detailed Category Comparison (Play vs Bench)"):
-                bench_cat_data = []
-                for cat in CATEGORIES:
-                    play_pct = bench_analysis["play"]["cat_results"][cat]["win_pct"]
-                    bench_pct = bench_analysis["bench"]["cat_results"][cat]["win_pct"]
-                    diff = bench_pct - play_pct
+                    luck_data = []
+                    for team in luck_sorted:
+                        luck_val = team["luck"]
+                        luck_label = "Lucky" if luck_val > 2 else "Unlucky" if luck_val < -2 else "Neutral"
+                        luck_data.append({
+                            "Team": team["team_name"],
+                            "Actual PCT": f"{team['actual_pct']:.3f}",
+                            "All-Play PCT": f"{team['all_play_pct']:.3f}",
+                            "Luck": f"{luck_val:+.1f}%",
+                            "Status": luck_label
+                        })
                     
-                    better = "Bench" if diff > 2 else "Play" if diff < -2 else "Same"
-                    
-                    bench_cat_data.append({
-                        "Category": cat,
-                        "Play Win %": f"{play_pct:.1f}%",
-                        "Bench Win %": f"{bench_pct:.1f}%",
-                        "Difference": f"{diff:+.1f}%",
-                        "Better": better
-                    })
-                
-                st.dataframe(pd.DataFrame(bench_cat_data), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(luck_data), use_container_width=True, hide_index=True)
             
             st.success("Simulation complete!")
             
