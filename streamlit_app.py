@@ -230,6 +230,144 @@ st.markdown("""
         background: rgba(26, 26, 46, 0.9) !important;
         border: 1px solid rgba(255, 107, 53, 0.3) !important;
     }
+    
+    /* Mobile responsive card */
+    .mobile-card {
+        background: linear-gradient(145deg, #252545, #1A1A2E);
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid #00D4FF;
+    }
+    
+    /* Responsive scoreboard table */
+    .scoreboard-table {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* ========================================
+       MOBILE RESPONSIVE STYLES
+       ======================================== */
+    
+    /* Tablets and smaller (max-width: 992px) */
+    @media screen and (max-width: 992px) {
+        .main-header {
+            font-size: 2.5rem !important;
+        }
+        
+        [data-testid="stMetricValue"] {
+            font-size: 1.5rem !important;
+        }
+    }
+    
+    /* Mobile devices (max-width: 768px) */
+    @media screen and (max-width: 768px) {
+        .main-header {
+            font-size: 1.8rem !important;
+            letter-spacing: 1px;
+        }
+        
+        h2 {
+            font-size: 1.3rem !important;
+        }
+        
+        h3 {
+            font-size: 1.1rem !important;
+        }
+        
+        .win-pct {
+            font-size: 2.5rem;
+        }
+        
+        [data-testid="stMetricValue"] {
+            font-size: 1.3rem !important;
+        }
+        
+        .stat-card {
+            padding: 1rem;
+            border-radius: 12px;
+        }
+        
+        /* Stack columns on mobile */
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        
+        /* Smaller table fonts on mobile */
+        .dataframe {
+            font-size: 0.75rem !important;
+        }
+        
+        .dataframe th, .dataframe td {
+            padding: 4px 6px !important;
+        }
+        
+        /* Adjust plotly charts for mobile */
+        .js-plotly-plot {
+            max-width: 100% !important;
+        }
+        
+        /* Mobile scoreboard adjustments */
+        .scoreboard-table table {
+            font-size: 0.7rem;
+        }
+        
+        .scoreboard-table th, .scoreboard-table td {
+            padding: 4px 2px !important;
+        }
+    }
+    
+    /* Small mobile devices (max-width: 480px) */
+    @media screen and (max-width: 480px) {
+        .main-header {
+            font-size: 1.4rem !important;
+            letter-spacing: 0.5px;
+        }
+        
+        h2 {
+            font-size: 1.1rem !important;
+        }
+        
+        h3 {
+            font-size: 1rem !important;
+        }
+        
+        .win-pct {
+            font-size: 2rem;
+        }
+        
+        [data-testid="stMetricValue"] {
+            font-size: 1.1rem !important;
+        }
+        
+        /* Hide less important columns on very small screens */
+        .hide-mobile {
+            display: none !important;
+        }
+        
+        .dataframe {
+            font-size: 0.65rem !important;
+        }
+        
+        /* Compact button on mobile */
+        .stButton > button {
+            padding: 0.5rem 1rem !important;
+            font-size: 0.9rem !important;
+        }
+    }
+    
+    /* Ensure horizontal scroll for wide tables */
+    [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+    }
+    
+    [data-testid="stDataFrame"] > div {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -259,13 +397,17 @@ def filter_injured(roster):
     return [p for p in roster if p.injuryStatus not in INJURED_STATUSES]
 
 
+def is_player_injured(player):
+    """Check if a player object is injured"""
+    return player.injuryStatus in INJURED_STATUSES
+
+
 # =============================================================================
 # ESPN DATA FUNCTIONS
 # =============================================================================
 
-@st.cache_resource(ttl=300)
 def connect_to_espn(league_id, year, espn_s2, swid):
-    """Connect to ESPN Fantasy Basketball API"""
+    """Connect to ESPN Fantasy Basketball API - always fetches fresh data"""
     from espn_api.basketball import League
     league = League(
         league_id=league_id,
@@ -434,108 +576,194 @@ def add_games_left(df):
 # =============================================================================
 
 def simulate_team(team_df, sims=10000):
-    """Monte Carlo simulation for team stats"""
-    results = defaultdict(list)
-    all_stats = list(CATEGORY_VARIANCE.keys()) + ["FG%", "FT%", "3P%"]
+    """Monte Carlo simulation for team stats - Vectorized NumPy version for speed"""
+    if team_df.empty:
+        # Return zeros if no players
+        all_stats = list(CATEGORY_VARIANCE.keys()) + ["FG%", "FT%", "3P%"]
+        return {stat: [0.0] * sims for stat in all_stats}
     
-    for _ in range(sims):
-        totals = defaultdict(float)
+    # Prepare data as numpy arrays
+    stats_to_sim = list(CATEGORY_VARIANCE.keys())
+    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
+    
+    # Get means and games for each player
+    team_df_clean = team_df.fillna(0)
+    means = team_df_clean[stats_to_sim].values  # Shape: (n_players, n_stats)
+    games = team_df_clean["Games Left"].values.astype(int)  # Shape: (n_players,)
+    
+    # Initialize totals array: (sims, n_stats)
+    totals = np.zeros((sims, len(stats_to_sim)))
+    
+    # Simulate each player
+    for p_idx in range(len(team_df_clean)):
+        n_games = games[p_idx]
+        if n_games <= 0:
+            continue
         
-        for _, row in team_df.iterrows():
-            row = row.fillna(0)
-            for _ in range(int(row["Games Left"])):
-                for stat in CATEGORY_VARIANCE:
-                    mean = row[stat]
-                    std_dev = mean * CATEGORY_VARIANCE[stat]
-                    totals[stat] += random.gauss(mean, std_dev)
+        player_means = means[p_idx]  # Shape: (n_stats,)
+        player_stds = player_means * variance_vals  # Shape: (n_stats,)
         
-        totals["FG%"] = totals["FGM"] / totals["FGA"] if totals["FGA"] > 0 else 0
-        totals["FT%"] = totals["FTM"] / totals["FTA"] if totals["FTA"] > 0 else 0
-        totals["3P%"] = totals["3PM"] / totals["3PA"] if totals["3PA"] > 0 else 0
+        # Generate all random values at once: (sims, n_games, n_stats)
+        random_vals = np.random.normal(
+            loc=player_means,
+            scale=player_stds,
+            size=(sims, n_games, len(stats_to_sim))
+        )
         
-        for stat in all_stats:
-            results[stat].append(totals[stat])
+        # Sum across games and add to totals
+        totals += random_vals.sum(axis=1)  # Sum over games dimension
+    
+    # Build results dict
+    results = {}
+    for i, stat in enumerate(stats_to_sim):
+        results[stat] = totals[:, i].tolist()
+    
+    # Calculate percentage stats
+    fgm = totals[:, stats_to_sim.index("FGM")]
+    fga = totals[:, stats_to_sim.index("FGA")]
+    ftm = totals[:, stats_to_sim.index("FTM")]
+    fta = totals[:, stats_to_sim.index("FTA")]
+    tpm = totals[:, stats_to_sim.index("3PM")]
+    tpa = totals[:, stats_to_sim.index("3PA")]
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        results["FG%"] = np.where(fga > 0, fgm / fga, 0).tolist()
+        results["FT%"] = np.where(fta > 0, ftm / fta, 0).tolist()
+        results["3P%"] = np.where(tpa > 0, tpm / tpa, 0).tolist()
     
     return results
 
 
 def add_current_to_sim(current, sim):
-    """Add current week totals to simulated rest-of-week stats"""
-    adjusted = defaultdict(list)
+    """Add current week totals to simulated rest-of-week stats - Vectorized"""
+    adjusted = {}
     
+    # Convert to numpy for speed
     for stat in sim:
-        for val in sim[stat]:
-            if stat in ["FG%", "FT%", "3P%"]:
-                adjusted[stat].append(0)
-            else:
-                adjusted[stat].append(val + current.get(stat, 0))
+        sim_arr = np.array(sim[stat])
+        if stat in ["FG%", "FT%", "3P%"]:
+            adjusted[stat] = np.zeros_like(sim_arr)
+        else:
+            adjusted[stat] = sim_arr + current.get(stat, 0)
     
-    for i in range(len(sim["FGM"])):
-        FGM = adjusted["FGM"][i]
-        FGA = adjusted["FGA"][i]
-        adjusted["FG%"][i] = FGM / FGA if FGA > 0 else 0
-        
-        FTM = adjusted["FTM"][i]
-        FTA = adjusted["FTA"][i]
-        adjusted["FT%"][i] = FTM / FTA if FTA > 0 else 0
-        
-        adjusted["3P%"][i] = adjusted["3PM"][i] / adjusted["3PA"][i] if adjusted["3PA"][i] > 0 else 0
+    # Recalculate percentages
+    fgm = adjusted["FGM"]
+    fga = adjusted["FGA"]
+    ftm = adjusted["FTM"]
+    fta = adjusted["FTA"]
+    tpm = adjusted["3PM"]
+    tpa = adjusted["3PA"]
     
-    return adjusted
+    with np.errstate(divide='ignore', invalid='ignore'):
+        adjusted["FG%"] = np.where(fga > 0, fgm / fga, 0)
+        adjusted["FT%"] = np.where(fta > 0, ftm / fta, 0)
+        adjusted["3P%"] = np.where(tpa > 0, tpm / tpa, 0)
+    
+    # Convert back to lists for compatibility
+    return {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in adjusted.items()}
 
 
 def compare_matchups(sim1, sim2, categories):
-    """Compare two teams across all simulations"""
-    sims = len(next(iter(sim1.values())))
-    matchup_results = {"you": 0, "opponent": 0, "tie": 0}
-    category_outcomes = {cat: {"you": 0, "opponent": 0, "tie": 0} for cat in categories}
-    outcome_counts = defaultdict(int)
+    """Compare two teams across all simulations - Vectorized"""
+    sims = len(sim1["FGM"])
     
-    for i in range(sims):
-        your_wins = opp_wins = 0
-        for cat in categories:
-            y_val, o_val = sim1[cat][i], sim2[cat][i]
-            
-            if cat == "TO":
-                if y_val < o_val:
-                    your_wins += 1
-                    category_outcomes[cat]["you"] += 1
-                elif y_val > o_val:
-                    opp_wins += 1
-                    category_outcomes[cat]["opponent"] += 1
-                else:
-                    category_outcomes[cat]["tie"] += 1
-            else:
-                if y_val > o_val:
-                    your_wins += 1
-                    category_outcomes[cat]["you"] += 1
-                elif y_val < o_val:
-                    opp_wins += 1
-                    category_outcomes[cat]["opponent"] += 1
-                else:
-                    category_outcomes[cat]["tie"] += 1
+    # Convert to numpy arrays
+    sim1_arr = {cat: np.array(sim1[cat]) for cat in categories}
+    sim2_arr = {cat: np.array(sim2[cat]) for cat in categories}
+    
+    # Initialize category outcomes
+    category_outcomes = {cat: {"you": 0, "opponent": 0, "tie": 0} for cat in categories}
+    
+    # Calculate wins per simulation
+    your_wins_per_sim = np.zeros(sims)
+    opp_wins_per_sim = np.zeros(sims)
+    
+    for cat in categories:
+        y_vals = sim1_arr[cat]
+        o_vals = sim2_arr[cat]
         
-        outcome_counts[(your_wins, opp_wins)] += 1
-        
-        if your_wins > opp_wins:
-            matchup_results["you"] += 1
-        elif opp_wins > your_wins:
-            matchup_results["opponent"] += 1
+        if cat == "TO":
+            # Lower is better for TO
+            you_win = y_vals < o_vals
+            opp_win = y_vals > o_vals
         else:
-            matchup_results["tie"] += 1
+            you_win = y_vals > o_vals
+            opp_win = y_vals < o_vals
+        
+        ties = ~you_win & ~opp_win
+        
+        category_outcomes[cat]["you"] = int(you_win.sum())
+        category_outcomes[cat]["opponent"] = int(opp_win.sum())
+        category_outcomes[cat]["tie"] = int(ties.sum())
+        
+        your_wins_per_sim += you_win.astype(int)
+        opp_wins_per_sim += opp_win.astype(int)
+    
+    # Count matchup outcomes
+    you_win_matchup = your_wins_per_sim > opp_wins_per_sim
+    opp_win_matchup = opp_wins_per_sim > your_wins_per_sim
+    tie_matchup = your_wins_per_sim == opp_wins_per_sim
+    
+    matchup_results = {
+        "you": int(you_win_matchup.sum()),
+        "opponent": int(opp_win_matchup.sum()),
+        "tie": int(tie_matchup.sum())
+    }
+    
+    # Count outcome distribution
+    outcome_counts = defaultdict(int)
+    for y_w, o_w in zip(your_wins_per_sim.astype(int), opp_wins_per_sim.astype(int)):
+        outcome_counts[(y_w, o_w)] += 1
     
     return matchup_results, category_outcomes, outcome_counts
 
 
 def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, current_totals_opp, 
-                     baseline_results, blend_weight, year, num_streamers=20):
-    """Analyze potential streamer pickups"""
+                     baseline_results, blend_weight, year, num_streamers=20, 
+                     untouchables=None, has_open_roster_spot=False, manual_watchlist=None):
+    """
+    Analyze potential streamer pickups, considering who to drop.
+    Uses fully vectorized NumPy operations for speed.
+    
+    Args:
+        league: ESPN league object
+        your_team_df: Your team's player stats DataFrame
+        opp_team_df: Opponent's player stats DataFrame
+        current_totals_you: Current week totals for your team
+        current_totals_opp: Current week totals for opponent
+        baseline_results: Tuple of (win_pct, cat_results, avg_cats)
+        blend_weight: Weight for last 30 days vs season stats
+        year: Season year
+        num_streamers: Number of streamers to analyze
+        untouchables: List of player names that cannot be dropped
+        has_open_roster_spot: If True, can add without dropping
+        manual_watchlist: List of player names to mark as watchlist
+    """
     baseline_win_pct, baseline_cat_results, baseline_avg_cats = baseline_results
+    untouchables = untouchables or []
+    untouchables_lower = [p.lower().strip() for p in untouchables]
     
-    free_agents = league.free_agents(size=150)
+    # Manual watchlist names (case-insensitive matching)
+    manual_watchlist = manual_watchlist or []
+    watchlist_names_lower = {p.lower().strip() for p in manual_watchlist}
     
-    fa_season = build_stat_df(free_agents, f"{year}_total", "Season", "Waiver", year)
-    fa_last30 = build_stat_df(free_agents, f"{year}_last_30", "Last30", "Waiver", year)
+    # Get droppable players from your team (not untouchables)
+    droppable_players = your_team_df[
+        ~your_team_df["Player"].str.lower().str.strip().isin(untouchables_lower)
+    ].copy()
+    
+    # Get free agents - ESPN returns them sorted by % owned (most owned first)
+    # Request more than needed to account for filtering
+    free_agents = league.free_agents(size=min(200, num_streamers * 2))
+    
+    # Filter out injured players
+    healthy_players = [p for p in free_agents if not is_player_injured(p)]
+    
+    if not healthy_players:
+        return []
+    
+    fa_season = build_stat_df(healthy_players, f"{year}_total", "Season", "Waiver", year)
+    fa_last30 = build_stat_df(healthy_players, f"{year}_last_30", "Last30", "Waiver", year)
     
     fa_season = add_games_left(fa_season)
     fa_last30 = add_games_left(fa_last30)
@@ -548,7 +776,16 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
         if g <= 0:
             continue
         
-        out = {"Player": r["Player"], "NBA_Team": r["NBA_Team"], "Games Left": g, "Team": "Waiver"}
+        # Check if player is on manual watchlist (case-insensitive)
+        is_on_watchlist = r["Player"].lower().strip() in watchlist_names_lower
+        
+        out = {
+            "Player": r["Player"], 
+            "NBA_Team": r["NBA_Team"], 
+            "Games Left": g, 
+            "Team": "Waiver",
+            "On Watchlist": is_on_watchlist
+        }
         for col in NUMERIC_COLS:
             c30, csea = f"{col}_30", f"{col}_season"
             if c30 in r and csea in r:
@@ -557,58 +794,417 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
                 out[col] = r.get(c30, r.get(csea, 0))
         rows.append(out)
     
-    waiver_df = pd.DataFrame(rows).sort_values(["Games Left", "PTS"], ascending=[False, False])
+    waiver_df = pd.DataFrame(rows)
+    
+    # Sort: watchlist players first, then by games left and points
+    waiver_df["_watchlist_sort"] = waiver_df["On Watchlist"].map({True: 0, False: 1})
+    waiver_df = waiver_df.sort_values(["_watchlist_sort", "Games Left", "PTS"], ascending=[True, False, False])
+    waiver_df = waiver_df.drop(columns=["_watchlist_sort"])
+    
     streamers = waiver_df.head(num_streamers)
     
+    if streamers.empty:
+        return []
+    
+    # Simulation parameters
     streamer_sims = 2000
-    opp_sim_raw = simulate_team(opp_team_df, sims=streamer_sims)
-    opp_sim = add_current_to_sim(current_totals_opp, opp_sim_raw)
+    stats_to_sim = list(CATEGORY_VARIANCE.keys())
+    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
+    
+    # Pre-compute opponent simulation arrays ONCE
+    opp_df_clean = opp_team_df.fillna(0)
+    opp_means = opp_df_clean[stats_to_sim].values
+    opp_games = opp_df_clean["Games Left"].values.astype(int)
+    
+    opp_totals = np.zeros((streamer_sims, len(stats_to_sim)))
+    for p_idx in range(len(opp_df_clean)):
+        n_games = opp_games[p_idx]
+        if n_games <= 0:
+            continue
+        player_means = opp_means[p_idx]
+        player_stds = player_means * variance_vals
+        random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(streamer_sims, n_games, len(stats_to_sim)))
+        opp_totals += random_vals.sum(axis=1)
+    
+    # Add current totals to opponent
+    for i, stat in enumerate(stats_to_sim):
+        opp_totals[:, i] += current_totals_opp.get(stat, 0)
+    
+    # Calculate opponent percentages
+    opp_fgm = opp_totals[:, stats_to_sim.index("FGM")]
+    opp_fga = opp_totals[:, stats_to_sim.index("FGA")]
+    opp_ftm = opp_totals[:, stats_to_sim.index("FTM")]
+    opp_fta = opp_totals[:, stats_to_sim.index("FTA")]
+    opp_3pm = opp_totals[:, stats_to_sim.index("3PM")]
+    opp_3pa = opp_totals[:, stats_to_sim.index("3PA")]
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        opp_fgp = np.where(opp_fga > 0, opp_fgm / opp_fga, 0)
+        opp_ftp = np.where(opp_fta > 0, opp_ftm / opp_fta, 0)
+        opp_3pp = np.where(opp_3pa > 0, opp_3pm / opp_3pa, 0)
+    
+    # Pre-compute base team data (without any drops)
+    your_df_clean = your_team_df.fillna(0)
+    your_means = your_df_clean[stats_to_sim].values
+    your_games = your_df_clean["Games Left"].values.astype(int)
+    your_players = your_df_clean["Player"].values
     
     results = []
-    for _, row in streamers.iterrows():
-        test_team = pd.concat([your_team_df, pd.DataFrame([row])], ignore_index=True)
-        test_sim_raw = simulate_team(test_team, sims=streamer_sims)
-        test_sim = add_current_to_sim(current_totals_you, test_sim_raw)
+    
+    for _, streamer_row in streamers.iterrows():
+        best_drop = None
+        best_net_cats = float('-inf')
+        best_exp_cats = 0
+        best_win_pct = 0
+        best_cat_impacts = {}
         
-        result, cat_results, outcome_counts = compare_matchups(test_sim, opp_sim, CATEGORIES)
+        # Streamer stats
+        streamer_means = np.array([streamer_row.get(s, 0) for s in stats_to_sim])
+        streamer_stds = streamer_means * variance_vals
+        streamer_games = int(streamer_row["Games Left"])
         
-        total_sims = sum(result.values())
-        avg_cats_won = sum(your_w * count for (your_w, opp_w), count in outcome_counts.items()) / total_sims
-        cats_gained = avg_cats_won - baseline_avg_cats
+        # Pre-generate streamer contribution for all sims
+        if streamer_games > 0:
+            streamer_contrib = np.random.normal(
+                loc=streamer_means, scale=streamer_stds, 
+                size=(streamer_sims, streamer_games, len(stats_to_sim))
+            ).sum(axis=1)
+        else:
+            streamer_contrib = np.zeros((streamer_sims, len(stats_to_sim)))
         
-        win_pct = result["you"] / total_sims * 100
+        # If there's an open roster spot, try adding without dropping
+        if has_open_roster_spot:
+            # Full team + streamer
+            test_totals = np.zeros((streamer_sims, len(stats_to_sim)))
+            for p_idx in range(len(your_df_clean)):
+                n_games = your_games[p_idx]
+                if n_games <= 0:
+                    continue
+                player_means = your_means[p_idx]
+                player_stds = player_means * variance_vals
+                random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(streamer_sims, n_games, len(stats_to_sim)))
+                test_totals += random_vals.sum(axis=1)
+            
+            test_totals += streamer_contrib
+            
+            # Add current totals
+            for i, stat in enumerate(stats_to_sim):
+                test_totals[:, i] += current_totals_you.get(stat, 0)
+            
+            # Calculate percentages and compare
+            net_cats, exp_cats, win_pct, cat_impacts = _evaluate_matchup(
+                test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp,
+                stats_to_sim, baseline_avg_cats, baseline_cat_results, streamer_sims
+            )
+            
+            best_drop = "(Open Spot)"
+            best_net_cats = net_cats
+            best_exp_cats = exp_cats
+            best_win_pct = win_pct
+            best_cat_impacts = cat_impacts
         
-        cat_impacts = {}
-        for cat in CATEGORIES:
-            base_win_rate = baseline_cat_results[cat]["you"] / sum(baseline_cat_results[cat].values())
-            new_win_rate = cat_results[cat]["you"] / sum(cat_results[cat].values())
-            delta = (new_win_rate - base_win_rate) * 100
-            if abs(delta) > 3:
-                cat_impacts[cat] = delta
+        # Try dropping each droppable player
+        for drop_idx, (_, drop_row) in enumerate(droppable_players.iterrows()):
+            drop_player_name = drop_row["Player"]
+            
+            # Build team totals excluding dropped player
+            test_totals = np.zeros((streamer_sims, len(stats_to_sim)))
+            for p_idx in range(len(your_df_clean)):
+                if your_players[p_idx] == drop_player_name:
+                    continue  # Skip dropped player
+                n_games = your_games[p_idx]
+                if n_games <= 0:
+                    continue
+                player_means = your_means[p_idx]
+                player_stds = player_means * variance_vals
+                random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(streamer_sims, n_games, len(stats_to_sim)))
+                test_totals += random_vals.sum(axis=1)
+            
+            # Add streamer
+            test_totals += streamer_contrib
+            
+            # Add current totals
+            for i, stat in enumerate(stats_to_sim):
+                test_totals[:, i] += current_totals_you.get(stat, 0)
+            
+            # Evaluate
+            net_cats, exp_cats, win_pct, cat_impacts = _evaluate_matchup(
+                test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp,
+                stats_to_sim, baseline_avg_cats, baseline_cat_results, streamer_sims
+            )
+            
+            if net_cats > best_net_cats:
+                best_drop = drop_player_name
+                best_net_cats = net_cats
+                best_exp_cats = exp_cats
+                best_win_pct = win_pct
+                best_cat_impacts = cat_impacts
+        
+        # Skip if no valid transaction found
+        if best_drop is None:
+            continue
         
         risk_tags = []
-        if row.get("FGA", 0) > 12:
+        if streamer_row.get("FGA", 0) > 12:
             risk_tags.append("High FGA")
-        if row.get("TO", 0) > 2:
+        if streamer_row.get("TO", 0) > 2:
             risk_tags.append("High TO")
-        if row.get("FG%", 1.0) < 0.42:
+        if streamer_row.get("FG%", 1.0) < 0.42:
             risk_tags.append("Low FG%")
         
         results.append({
-            "Player": row["Player"],
-            "Team": row["NBA_Team"],
-            "Games": int(row["Games Left"]),
-            "Δ Cats": round(cats_gained, 2),
-            "Exp Cats": round(avg_cats_won, 2),
-            "Win %": round(win_pct, 1),
-            "Cat Impacts": cat_impacts,
+            "Player": streamer_row["Player"],
+            "Team": streamer_row["NBA_Team"],
+            "Games": int(streamer_row["Games Left"]),
+            "Drop": best_drop,
+            "Δ Cats": round(best_net_cats, 2),
+            "Exp Cats": round(best_exp_cats, 2),
+            "Win %": round(best_win_pct, 1),
+            "Cat Impacts": best_cat_impacts,
             "Risks": risk_tags,
-            "PTS": round(row.get("PTS", 0), 1),
-            "REB": round(row.get("REB", 0), 1),
-            "AST": round(row.get("AST", 0), 1),
+            "PTS": round(streamer_row.get("PTS", 0), 1),
+            "REB": round(streamer_row.get("REB", 0), 1),
+            "AST": round(streamer_row.get("AST", 0), 1),
+            "Watchlist": "W" if streamer_row.get("On Watchlist", False) else "",
         })
     
     return sorted(results, key=lambda x: x["Δ Cats"], reverse=True)
+
+
+def _evaluate_matchup(test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp,
+                      stats_to_sim, baseline_avg_cats, baseline_cat_results, sims):
+    """Helper function to evaluate a matchup using vectorized operations."""
+    # Calculate your percentages
+    fgm_idx = stats_to_sim.index("FGM")
+    fga_idx = stats_to_sim.index("FGA")
+    ftm_idx = stats_to_sim.index("FTM")
+    fta_idx = stats_to_sim.index("FTA")
+    tpm_idx = stats_to_sim.index("3PM")
+    tpa_idx = stats_to_sim.index("3PA")
+    
+    your_fgm = test_totals[:, fgm_idx]
+    your_fga = test_totals[:, fga_idx]
+    your_ftm = test_totals[:, ftm_idx]
+    your_fta = test_totals[:, fta_idx]
+    your_3pm = test_totals[:, tpm_idx]
+    your_3pa = test_totals[:, tpa_idx]
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        your_fgp = np.where(your_fga > 0, your_fgm / your_fga, 0)
+        your_ftp = np.where(your_fta > 0, your_ftm / your_fta, 0)
+        your_3pp = np.where(your_3pa > 0, your_3pm / your_3pa, 0)
+    
+    # Compare categories
+    your_wins = np.zeros(sims)
+    opp_wins = np.zeros(sims)
+    cat_results = {}
+    
+    for cat in CATEGORIES:
+        if cat == "FG%":
+            y_vals, o_vals = your_fgp, opp_fgp
+        elif cat == "FT%":
+            y_vals, o_vals = your_ftp, opp_ftp
+        elif cat == "3P%":
+            y_vals, o_vals = your_3pp, opp_3pp
+        else:
+            cat_idx = stats_to_sim.index(cat) if cat in stats_to_sim else None
+            if cat_idx is None:
+                continue
+            y_vals = test_totals[:, cat_idx]
+            o_vals = opp_totals[:, cat_idx]
+        
+        if cat == "TO":
+            you_win = y_vals < o_vals
+            opp_win = y_vals > o_vals
+        else:
+            you_win = y_vals > o_vals
+            opp_win = y_vals < o_vals
+        
+        cat_results[cat] = {"you": int(you_win.sum()), "opponent": int(opp_win.sum()), "tie": int((~you_win & ~opp_win).sum())}
+        your_wins += you_win.astype(int)
+        opp_wins += opp_win.astype(int)
+    
+    # Calculate metrics
+    you_win_matchup = (your_wins > opp_wins).sum()
+    avg_cats_won = your_wins.mean()
+    net_cats = avg_cats_won - baseline_avg_cats
+    win_pct = you_win_matchup / sims * 100
+    
+    # Category impacts
+    cat_impacts = {}
+    for cat in CATEGORIES:
+        if cat in cat_results:
+            base_win_rate = baseline_cat_results[cat]["you"] / sum(baseline_cat_results[cat].values())
+            new_win_rate = cat_results[cat]["you"] / sims
+            delta = (new_win_rate - base_win_rate) * 100
+            if abs(delta) > 3:
+                cat_impacts[cat] = delta
+    
+    return net_cats, avg_cats_won, win_pct, cat_impacts
+
+
+def analyze_bench_strategy(your_team_df, opp_team_df, current_totals_you, current_totals_opp, 
+                           baseline_results, sims=3000):
+    """
+    Analyze whether benching all players today would improve win probability.
+    Useful for protecting leads in categories like TO, FG%, FT%.
+    
+    Returns comparison of playing vs benching scenarios.
+    """
+    baseline_win_pct, baseline_cat_results, baseline_avg_cats = baseline_results
+    
+    stats_to_sim = list(CATEGORY_VARIANCE.keys())
+    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
+    
+    # Simulate opponent playing all their games
+    opp_df_clean = opp_team_df.fillna(0)
+    opp_means = opp_df_clean[stats_to_sim].values
+    opp_games = opp_df_clean["Games Left"].values.astype(int)
+    
+    opp_totals = np.zeros((sims, len(stats_to_sim)))
+    for p_idx in range(len(opp_df_clean)):
+        n_games = opp_games[p_idx]
+        if n_games <= 0:
+            continue
+        player_means = opp_means[p_idx]
+        player_stds = player_means * variance_vals
+        random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(sims, n_games, len(stats_to_sim)))
+        opp_totals += random_vals.sum(axis=1)
+    
+    # Add current totals to opponent
+    for i, stat in enumerate(stats_to_sim):
+        opp_totals[:, i] += current_totals_opp.get(stat, 0)
+    
+    # Calculate opponent percentages
+    opp_fgm = opp_totals[:, stats_to_sim.index("FGM")]
+    opp_fga = opp_totals[:, stats_to_sim.index("FGA")]
+    opp_ftm = opp_totals[:, stats_to_sim.index("FTM")]
+    opp_fta = opp_totals[:, stats_to_sim.index("FTA")]
+    opp_3pm = opp_totals[:, stats_to_sim.index("3PM")]
+    opp_3pa = opp_totals[:, stats_to_sim.index("3PA")]
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        opp_fgp = np.where(opp_fga > 0, opp_fgm / opp_fga, 0)
+        opp_ftp = np.where(opp_fta > 0, opp_ftm / opp_fta, 0)
+        opp_3pp = np.where(opp_3pa > 0, opp_3pm / opp_3pa, 0)
+    
+    # SCENARIO 1: You play all games (normal)
+    your_df_clean = your_team_df.fillna(0)
+    your_means = your_df_clean[stats_to_sim].values
+    your_games = your_df_clean["Games Left"].values.astype(int)
+    
+    play_totals = np.zeros((sims, len(stats_to_sim)))
+    for p_idx in range(len(your_df_clean)):
+        n_games = your_games[p_idx]
+        if n_games <= 0:
+            continue
+        player_means = your_means[p_idx]
+        player_stds = player_means * variance_vals
+        random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(sims, n_games, len(stats_to_sim)))
+        play_totals += random_vals.sum(axis=1)
+    
+    # Add current totals
+    for i, stat in enumerate(stats_to_sim):
+        play_totals[:, i] += current_totals_you.get(stat, 0)
+    
+    # SCENARIO 2: You bench everyone (only current totals)
+    bench_totals = np.zeros((sims, len(stats_to_sim)))
+    for i, stat in enumerate(stats_to_sim):
+        bench_totals[:, i] = current_totals_you.get(stat, 0)
+    
+    # Evaluate both scenarios
+    def evaluate_scenario(your_totals):
+        # Calculate your percentages
+        fgm_idx = stats_to_sim.index("FGM")
+        fga_idx = stats_to_sim.index("FGA")
+        ftm_idx = stats_to_sim.index("FTM")
+        fta_idx = stats_to_sim.index("FTA")
+        tpm_idx = stats_to_sim.index("3PM")
+        tpa_idx = stats_to_sim.index("3PA")
+        
+        your_fgm = your_totals[:, fgm_idx]
+        your_fga = your_totals[:, fga_idx]
+        your_ftm = your_totals[:, ftm_idx]
+        your_fta = your_totals[:, fta_idx]
+        your_3pm = your_totals[:, tpm_idx]
+        your_3pa = your_totals[:, tpa_idx]
+        
+        with np.errstate(divide='ignore', invalid='ignore'):
+            your_fgp = np.where(your_fga > 0, your_fgm / your_fga, 0)
+            your_ftp = np.where(your_fta > 0, your_ftm / your_fta, 0)
+            your_3pp = np.where(your_3pa > 0, your_3pm / your_3pa, 0)
+        
+        # Compare categories
+        your_wins = np.zeros(sims)
+        cat_results = {}
+        
+        for cat in CATEGORIES:
+            if cat == "FG%":
+                y_vals, o_vals = your_fgp, opp_fgp
+            elif cat == "FT%":
+                y_vals, o_vals = your_ftp, opp_ftp
+            elif cat == "3P%":
+                y_vals, o_vals = your_3pp, opp_3pp
+            else:
+                cat_idx = stats_to_sim.index(cat) if cat in stats_to_sim else None
+                if cat_idx is None:
+                    continue
+                y_vals = your_totals[:, cat_idx]
+                o_vals = opp_totals[:, cat_idx]
+            
+            if cat == "TO":
+                you_win = y_vals < o_vals
+            else:
+                you_win = y_vals > o_vals
+            
+            cat_results[cat] = {
+                "win_pct": float(you_win.mean() * 100),
+                "your_avg": float(y_vals.mean()),
+                "opp_avg": float(o_vals.mean())
+            }
+            your_wins += you_win.astype(int)
+        
+        # Calculate overall metrics
+        opp_wins = len(CATEGORIES) - your_wins  # Simplified
+        you_win_matchup = (your_wins > (len(CATEGORIES) / 2)).sum()
+        avg_cats_won = your_wins.mean()
+        win_pct = you_win_matchup / sims * 100
+        
+        return {
+            "win_pct": win_pct,
+            "avg_cats": avg_cats_won,
+            "cat_results": cat_results
+        }
+    
+    play_results = evaluate_scenario(play_totals)
+    bench_results = evaluate_scenario(bench_totals)
+    
+    # Determine recommendation
+    play_better = play_results["avg_cats"] >= bench_results["avg_cats"]
+    cats_diff = play_results["avg_cats"] - bench_results["avg_cats"]
+    win_pct_diff = play_results["win_pct"] - bench_results["win_pct"]
+    
+    # Find categories where benching helps
+    bench_helps_cats = []
+    play_helps_cats = []
+    for cat in CATEGORIES:
+        play_cat_pct = play_results["cat_results"][cat]["win_pct"]
+        bench_cat_pct = bench_results["cat_results"][cat]["win_pct"]
+        diff = bench_cat_pct - play_cat_pct
+        if diff > 5:  # Benching helps this category by >5%
+            bench_helps_cats.append((cat, diff))
+        elif diff < -5:  # Playing helps this category by >5%
+            play_helps_cats.append((cat, -diff))
+    
+    return {
+        "play": play_results,
+        "bench": bench_results,
+        "recommendation": "PLAY" if play_better else "BENCH",
+        "cats_diff": cats_diff,
+        "win_pct_diff": win_pct_diff,
+        "bench_helps": sorted(bench_helps_cats, key=lambda x: x[1], reverse=True),
+        "play_helps": sorted(play_helps_cats, key=lambda x: x[1], reverse=True)
+    }
 
 
 # =============================================================================
@@ -942,7 +1538,7 @@ def main():
         <h1 class="main-header" style="margin: 0;">FANTASY BASKETBALL SIMULATOR</h1>
     </div>
     ''', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; color: #888; font-family: Roboto Condensed;">Monte Carlo Simulation for ESPN Fantasy Basketball</p>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; color: #888; font-family: Roboto Condensed;">Monte Carlo Simulation for ESPN Fantasy Basketball <span style="color: #00FF88;"><i class="bi bi-arrow-repeat"></i> Fresh Data Each Run</span></p>', unsafe_allow_html=True)
     
     # Sidebar Configuration
     with st.sidebar:
@@ -971,7 +1567,28 @@ def main():
         st.markdown('<h4><i class="bi bi-sliders" style="color: #00D4FF;"></i> Simulation Settings</h4>', unsafe_allow_html=True)
         sim_count = st.slider("Simulations", 1000, 50000, 10000, 1000, help="More = more accurate but slower")
         blend_weight = st.slider("Last 30 Days Weight", 0.0, 1.0, 0.7, 0.05, help="Blend of recent vs season stats")
-        num_streamers = st.slider("Streamers to Analyze", 5, 50, 20, 5)
+        num_streamers = st.slider("Streamers to Analyze", 5, 100, 20, 5, help="Number of free agents to analyze")
+        
+        st.markdown('<h4><i class="bi bi-shield-fill" style="color: #FFD93D;"></i> Roster Settings</h4>', unsafe_allow_html=True)
+        has_open_spot = st.checkbox("I have an open roster spot", value=False, 
+                                    help="Check if you have an empty roster spot and can add without dropping")
+        
+        untouchables_input = st.text_area(
+            "Untouchable Players",
+            value="Tyrese Maxey\nNikola Jokic\nJalen Williams\nVJ Edgecombe\nNikola Vucevic\nJa Morant\nIvica Zubac\nKawhi Leonard\nKel'el Ware\nShaedon Sharpe\nKyshawn George\nMatas Buzelis",
+            help="Enter player names (one per line) that should never be recommended as drops",
+            placeholder="LeBron James\nStephen Curry\nKevin Durant"
+        )
+        untouchables = [p.strip() for p in untouchables_input.split("\n") if p.strip()]
+        
+        st.markdown('<h4><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Watchlist</h4>', unsafe_allow_html=True)
+        watchlist_input = st.text_area(
+            "Manual Watchlist",
+            value="",
+            help="Enter player names (one per line) to prioritize in streamer analysis. These will be marked with 'W' in results.",
+            placeholder="Paste player names from your ESPN watchlist here\nOne name per line"
+        )
+        manual_watchlist = [p.strip() for p in watchlist_input.split("\n") if p.strip()]
         
         st.markdown("---")
         run_button = st.button("RUN SIMULATION", use_container_width=True)
@@ -982,7 +1599,8 @@ def main():
             # Connect to ESPN
             with st.spinner("Connecting to ESPN..."):
                 league = connect_to_espn(league_id, year, espn_s2, swid)
-                st.success(f"Connected to **{league.settings.name}**")
+                fetch_time = datetime.now(ZoneInfo("America/New_York")).strftime("%I:%M %p ET")
+                st.success(f"Connected to **{league.settings.name}** - Data fetched at {fetch_time}")
             
             # Get matchup info
             with st.spinner("Loading matchup data..."):
@@ -1034,6 +1652,7 @@ def main():
             
             merged["Games Left"] = merged["Games Left_30"]
             merged["Team"] = merged["Team_30"]
+            merged["NBA_Team"] = merged["NBA_Team_30"]
             
             your_team_df = merged[merged["Team"] == your_team_name].copy()
             opp_team_df = merged[merged["Team"] == opp_team_name].copy()
@@ -1135,7 +1754,12 @@ def main():
             with st.expander("Your Roster"):
                 roster_cols = ["Player", "NBA_Team", "Games Left", "PTS", "REB", "AST", "3PM", "FG%", "FT%"]
                 display_cols = [c for c in roster_cols if c in your_team_df.columns]
-                st.dataframe(your_team_df[display_cols].round(2), use_container_width=True, hide_index=True)
+                display_df = your_team_df[display_cols].round(2).copy()
+                # Mark untouchables
+                if untouchables:
+                    untouchables_lower = [p.lower().strip() for p in untouchables]
+                    display_df["Lock"] = display_df["Player"].str.lower().str.strip().isin(untouchables_lower).map({True: "Y", False: ""})
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
             
             with st.expander("Opponent Roster"):
                 display_cols = [c for c in roster_cols if c in opp_team_df.columns]
@@ -1145,12 +1769,20 @@ def main():
             st.markdown("---")
             st.markdown('<h2><i class="bi bi-arrow-repeat" style="color: #FF6B35;"></i> Streamer Analysis</h2>', unsafe_allow_html=True)
             
-            with st.spinner(f"Analyzing {num_streamers} potential streamers..."):
+            if untouchables:
+                st.markdown(f'<div style="padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border-left: 4px solid #00D4FF; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-lock-fill" style="color: #00D4FF;"></i> <strong>Untouchable players:</strong> {", ".join(untouchables)}</div>', unsafe_allow_html=True)
+            if has_open_spot:
+                st.markdown('<div style="padding: 0.75rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00FF88; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-check-circle-fill" style="color: #00FF88;"></i> You have an open roster spot - streamers can be added without dropping anyone</div>', unsafe_allow_html=True)
+            
+            with st.spinner(f"Analyzing {num_streamers} potential streamers (considering drop candidates)..."):
                 baseline_results = (win_pct, category_results, baseline_avg_cats)
                 streamers = analyze_streamers(
                     league, your_team_df, opp_team_df, 
                     current_you, current_opp, baseline_results,
-                    blend_weight, year, num_streamers
+                    blend_weight, year, num_streamers,
+                    untouchables=untouchables,
+                    has_open_roster_spot=has_open_spot,
+                    manual_watchlist=manual_watchlist
                 )
             
             if streamers:
@@ -1165,17 +1797,32 @@ def main():
                         delta_color = "#00FF88" if player["Δ Cats"] > 0 else "#FF4757" if player["Δ Cats"] < 0 else "#FFD93D"
                         border_color = delta_color
                         
+                        drop_text = player["Drop"]
+                        if drop_text == "(Open Spot)":
+                            drop_display = '<span style="color: #00FF88;">Add (Open Spot)</span>'
+                        else:
+                            drop_display = f'<span style="color: #FF4757;">Drop: {drop_text}</span>'
+                        
+                        watchlist_badge = ' <i class="bi bi-star-fill" style="color: #FFD93D; font-size: 0.9rem;"></i>' if player.get("Watchlist") else ""
+                        
                         st.markdown(f"""
                         <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
                                     border-radius: 12px; padding: 1.2rem; 
                                     border-left: 4px solid {border_color};">
-                            <h4 style="margin: 0; color: white; font-family: Oswald;">{player['Player']}</h4>
+                            <h4 style="margin: 0; color: white; font-family: Oswald;">{player['Player']}{watchlist_badge}</h4>
                             <p style="color: #888; margin: 0.3rem 0; font-size: 0.9rem;">{player['Team']} • {player['Games']} games</p>
+                            <p style="margin: 0.5rem 0; font-size: 0.85rem;">{drop_display}</p>
                             <div style="display: flex; justify-content: space-between; margin-top: 0.8rem;">
                                 <div>
                                     <span style="color: #888; font-size: 0.8rem;">Δ CATS</span><br/>
                                     <span style="color: {delta_color}; font-size: 1.5rem; font-family: Oswald; font-weight: 600;">
                                         {player['Δ Cats']:+.2f}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span style="color: #888; font-size: 0.8rem;">EXP CATS</span><br/>
+                                    <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
+                                        {player['Exp Cats']:.1f}
                                     </span>
                                 </div>
                                 <div>
@@ -1199,9 +1846,11 @@ def main():
                 # Full streamer table
                 with st.expander("All Analyzed Streamers"):
                     streamer_df = pd.DataFrame([{
+                        "WL": p.get("Watchlist", ""),
                         "Player": p["Player"],
                         "Team": p["Team"],
                         "Games": p["Games"],
+                        "Drop": p["Drop"],
                         "Δ Cats": p["Δ Cats"],
                         "Exp Cats": p["Exp Cats"],
                         "Win %": p["Win %"],
@@ -1212,6 +1861,95 @@ def main():
                     } for p in streamers])
                     
                     st.dataframe(streamer_df, use_container_width=True, hide_index=True)
+            
+            # Bench Strategy Analysis
+            st.markdown("---")
+            st.markdown('<h2><i class="bi bi-pause-circle-fill" style="color: #FF6B35;"></i> Bench Strategy Analysis</h2>', unsafe_allow_html=True)
+            st.markdown('<p style="color: #888;">Should you bench your players today to protect your lead? This analyzes whether sitting everyone improves your expected categories won.</p>', unsafe_allow_html=True)
+            
+            with st.spinner("Analyzing bench vs play scenarios..."):
+                bench_analysis = analyze_bench_strategy(
+                    your_team_df, opp_team_df,
+                    current_you, current_opp,
+                    baseline_results
+                )
+            
+            # Recommendation card
+            is_bench_better = bench_analysis["recommendation"] == "BENCH"
+            rec_color = "#FFD93D" if is_bench_better else "#00FF88"
+            rec_icon = "bi-pause-circle-fill" if is_bench_better else "bi-play-circle-fill"
+            
+            st.markdown(f"""
+            <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
+                        border-radius: 16px; padding: 1.5rem; 
+                        border: 2px solid {rec_color}; margin-bottom: 1.5rem;">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <i class="{rec_icon}" style="font-size: 3rem; color: {rec_color};"></i>
+                    <div>
+                        <h3 style="margin: 0; color: {rec_color}; font-family: Oswald;">RECOMMENDATION: {bench_analysis["recommendation"]}</h3>
+                        <p style="margin: 0.5rem 0 0 0; color: #888;">
+                            Expected cats difference: <strong style="color: white;">{bench_analysis["cats_diff"]:+.2f}</strong> | 
+                            Win % difference: <strong style="color: white;">{bench_analysis["win_pct_diff"]:+.1f}%</strong>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Comparison table
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"""
+                <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.2rem; border-left: 4px solid #00FF88;">
+                    <h4 style="margin: 0; color: #00FF88; font-family: Oswald;"><i class="bi bi-play-fill"></i> PLAY SCENARIO</h4>
+                    <div style="margin-top: 1rem;">
+                        <p style="margin: 0.3rem 0; color: #888;">Win Probability: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["play"]["win_pct"]:.1f}%</span></p>
+                        <p style="margin: 0.3rem 0; color: #888;">Expected Cats: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["play"]["avg_cats"]:.2f}</span></p>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if bench_analysis["play_helps"]:
+                    st.markdown("<p style='color: #888; margin-top: 0.5rem;'><strong>Playing helps:</strong></p>", unsafe_allow_html=True)
+                    for cat, diff in bench_analysis["play_helps"][:5]:
+                        st.markdown(f"<span style='color: #00FF88;'>▲ {cat}: +{diff:.1f}%</span>", unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 12px; padding: 1.2rem; border-left: 4px solid #FFD93D;">
+                    <h4 style="margin: 0; color: #FFD93D; font-family: Oswald;"><i class="bi bi-pause-fill"></i> BENCH SCENARIO</h4>
+                    <div style="margin-top: 1rem;">
+                        <p style="margin: 0.3rem 0; color: #888;">Win Probability: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["bench"]["win_pct"]:.1f}%</span></p>
+                        <p style="margin: 0.3rem 0; color: #888;">Expected Cats: <span style="color: white; font-size: 1.3rem; font-family: Oswald;">{bench_analysis["bench"]["avg_cats"]:.2f}</span></p>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if bench_analysis["bench_helps"]:
+                    st.markdown("<p style='color: #888; margin-top: 0.5rem;'><strong>Benching helps:</strong></p>", unsafe_allow_html=True)
+                    for cat, diff in bench_analysis["bench_helps"][:5]:
+                        st.markdown(f"<span style='color: #FFD93D;'>▲ {cat}: +{diff:.1f}%</span>", unsafe_allow_html=True)
+            
+            # Detailed category comparison
+            with st.expander("Detailed Category Comparison (Play vs Bench)"):
+                bench_cat_data = []
+                for cat in CATEGORIES:
+                    play_pct = bench_analysis["play"]["cat_results"][cat]["win_pct"]
+                    bench_pct = bench_analysis["bench"]["cat_results"][cat]["win_pct"]
+                    diff = bench_pct - play_pct
+                    
+                    better = "Bench" if diff > 2 else "Play" if diff < -2 else "Same"
+                    
+                    bench_cat_data.append({
+                        "Category": cat,
+                        "Play Win %": f"{play_pct:.1f}%",
+                        "Bench Win %": f"{bench_pct:.1f}%",
+                        "Difference": f"{diff:+.1f}%",
+                        "Better": better
+                    })
+                
+                st.dataframe(pd.DataFrame(bench_cat_data), use_container_width=True, hide_index=True)
             
             st.success("Simulation complete!")
             
@@ -1261,9 +1999,9 @@ def main():
         with col3:
             st.markdown("""
             <div style="background: #1A1A2E; border-radius: 12px; padding: 1.5rem; height: 200px;">
-                <h3 style="color: #FF6B35; font-family: Oswald;"><i class="bi bi-arrow-repeat"></i> Streamer Impact</h3>
+                <h3 style="color: #FF6B35; font-family: Oswald;"><i class="bi bi-arrow-repeat"></i> Smart Streaming</h3>
                 <p style="color: #888; font-family: Roboto Condensed;">
-                    Analyze free agents to find the best streaming options that maximize your expected categories won.
+                    Analyze streamers with drop recommendations. Set untouchables and find the best add/drop combos.
                 </p>
             </div>
             """, unsafe_allow_html=True)
