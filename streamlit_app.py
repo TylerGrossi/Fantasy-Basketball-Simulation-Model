@@ -214,6 +214,34 @@ st.markdown("""
         font-size: 2rem !important;
     }
     
+    /* Center metrics */
+    [data-testid="stMetric"] {
+        text-align: center;
+    }
+    
+    [data-testid="stMetricLabel"] {
+        display: flex;
+        justify-content: center;
+    }
+    
+    /* Make metric value and delta inline */
+    [data-testid="stMetric"] > div {
+        display: flex;
+        flex-direction: row;
+        align-items: baseline;
+        justify-content: center;
+        gap: 0.5rem;
+    }
+    
+    [data-testid="stMetricValue"] {
+        display: flex;
+        justify-content: center;
+    }
+    
+    [data-testid="stMetricDelta"] {
+        font-size: 0.9rem !important;
+    }
+    
     /* Expander */
     .streamlit-expanderHeader {
         font-family: 'Oswald', sans-serif !important;
@@ -1819,10 +1847,11 @@ def main():
             st.session_state['team_id'] = team_id
             
             # Create tabs for different sections
-            tab_matchup, tab_streamers, tab_strategy, tab_league = st.tabs([
+            tab_matchup, tab_streamers, tab_strategy, tab_season, tab_league = st.tabs([
                 "Matchup Analysis",
                 "Streamer Analysis", 
                 "Bench Strategy",
+                "My Season Stats",
                 "League Stats"
             ])
             
@@ -2083,7 +2112,338 @@ def main():
                         })
                     st.dataframe(pd.DataFrame(bench_cat_data), use_container_width=True, hide_index=True)
             
-            # ==================== TAB 4: LEAGUE STATS ====================
+            # ==================== TAB 4: MY SEASON STATS ====================
+            with tab_season:
+                st.markdown('<h2><i class="bi bi-people-fill" style="color: #FF6B35;"></i> My Season Stats</h2>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #888;">All players who have contributed to your team this season, with their total stats and percentage of team production.</p>', unsafe_allow_html=True)
+                
+                # Load data (this runs once when tab is first opened)
+                # Get weekly stats for your team
+                current_week = league.currentMatchupPeriod
+                
+                # Initialize season totals and player tracking
+                season_totals = {"FGM": 0, "FGA": 0, "FTM": 0, "FTA": 0, "3PM": 0, "3PA": 0, 
+                                "REB": 0, "AST": 0, "STL": 0, "BLK": 0, "TO": 0, "PTS": 0}
+                player_season_stats = {}
+                weekly_data = []
+                
+                with st.spinner("Loading player season statistics..."):
+                    for week in range(1, current_week + 1):
+                        try:
+                            boxscores = league.box_scores(matchup_period=week)
+                            
+                            for matchup in boxscores:
+                                # Find your team's matchup
+                                if matchup.home_team.team_id == team_id:
+                                    week_stats = flatten_stat_dict(matchup.home_stats)
+                                    opponent = matchup.away_team.team_name
+                                    lineup = matchup.home_lineup if hasattr(matchup, 'home_lineup') else []
+                                elif matchup.away_team.team_id == team_id:
+                                    week_stats = flatten_stat_dict(matchup.away_stats)
+                                    opponent = matchup.home_team.team_name
+                                    lineup = matchup.away_lineup if hasattr(matchup, 'away_lineup') else []
+                                else:
+                                    continue
+                                
+                                # Add to season totals
+                                for stat in season_totals.keys():
+                                    season_totals[stat] += week_stats.get(stat, 0)
+                                
+                                # Calculate weekly result
+                                fgm, fga = week_stats.get("FGM", 0), week_stats.get("FGA", 0)
+                                fg_pct = fgm / fga if fga > 0 else 0
+                                
+                                weekly_data.append({
+                                    "Week": week,
+                                    "Opponent": opponent,
+                                    "PTS": week_stats.get("PTS", 0),
+                                    "REB": week_stats.get("REB", 0),
+                                    "AST": week_stats.get("AST", 0),
+                                })
+                                
+                                # Extract player stats from lineup
+                                if lineup:
+                                    for player_entry in lineup:
+                                        try:
+                                            # Get player name
+                                            player_name = getattr(player_entry, 'name', None)
+                                            if not player_name:
+                                                continue
+                                            
+                                            # Get slot position - skip bench/IR
+                                            slot = getattr(player_entry, 'slot_position', "")
+                                            if slot in ["BE", "IR", "Bench", "IR+"]:
+                                                continue
+                                            
+                                            # Initialize player if first time seeing them
+                                            if player_name not in player_season_stats:
+                                                player_season_stats[player_name] = {
+                                                    "GP": 0, "PTS": 0, "REB": 0, "AST": 0, 
+                                                    "STL": 0, "BLK": 0, "3PM": 0, "TO": 0,
+                                                    "FGM": 0, "FGA": 0, "FTM": 0, "FTA": 0,
+                                                    "3PA": 0, "DD": 0, "TW": 0
+                                                }
+                                            
+                                            # Get player's stats for this week
+                                            # Try points_breakdown first (most detailed)
+                                            if hasattr(player_entry, 'points_breakdown') and player_entry.points_breakdown:
+                                                pb = player_entry.points_breakdown
+                                                # Count actual games played (estimate from stats)
+                                                # If player has any stats, they played
+                                                games_this_week = pb.get("GP", 0)
+                                                if games_this_week == 0 and pb.get("PTS", 0) > 0:
+                                                    # Estimate games from minutes or just count as playing
+                                                    games_this_week = max(1, int(pb.get("MIN", 0) / 30)) if pb.get("MIN", 0) > 0 else (1 if pb.get("PTS", 0) > 0 else 0)
+                                                
+                                                player_season_stats[player_name]["GP"] += games_this_week if games_this_week > 0 else (1 if pb.get("PTS", 0) > 0 else 0)
+                                                player_season_stats[player_name]["PTS"] += pb.get("PTS", 0)
+                                                player_season_stats[player_name]["REB"] += pb.get("REB", 0)
+                                                player_season_stats[player_name]["AST"] += pb.get("AST", 0)
+                                                player_season_stats[player_name]["STL"] += pb.get("STL", 0)
+                                                player_season_stats[player_name]["BLK"] += pb.get("BLK", 0)
+                                                player_season_stats[player_name]["3PM"] += pb.get("3PM", 0)
+                                                player_season_stats[player_name]["TO"] += pb.get("TO", 0)
+                                                player_season_stats[player_name]["FGM"] += pb.get("FGM", 0)
+                                                player_season_stats[player_name]["FGA"] += pb.get("FGA", 0)
+                                                player_season_stats[player_name]["FTM"] += pb.get("FTM", 0)
+                                                player_season_stats[player_name]["FTA"] += pb.get("FTA", 0)
+                                                player_season_stats[player_name]["3PA"] += pb.get("3PA", 0)
+                                                player_season_stats[player_name]["DD"] += pb.get("DD", 0)
+                                                player_season_stats[player_name]["TW"] += pb.get("TW", 0)
+                                            # Fallback to stats dict
+                                            elif hasattr(player_entry, 'stats') and player_entry.stats:
+                                                stats = player_entry.stats
+                                                if isinstance(stats, dict):
+                                                    games_this_week = stats.get("GP", 0)
+                                                    if games_this_week == 0 and stats.get("PTS", 0) > 0:
+                                                        games_this_week = 1
+                                                    player_season_stats[player_name]["GP"] += games_this_week
+                                                    player_season_stats[player_name]["PTS"] += stats.get("PTS", 0)
+                                                    player_season_stats[player_name]["REB"] += stats.get("REB", 0)
+                                                    player_season_stats[player_name]["AST"] += stats.get("AST", 0)
+                                                    player_season_stats[player_name]["STL"] += stats.get("STL", 0)
+                                                    player_season_stats[player_name]["BLK"] += stats.get("BLK", 0)
+                                                    player_season_stats[player_name]["3PM"] += stats.get("3PM", 0)
+                                                    player_season_stats[player_name]["TO"] += stats.get("TO", 0)
+                                                    player_season_stats[player_name]["FGM"] += stats.get("FGM", 0)
+                                                    player_season_stats[player_name]["FGA"] += stats.get("FGA", 0)
+                                                    player_season_stats[player_name]["TW"] += stats.get("TW", 0)
+                                        except Exception as e:
+                                            continue
+                                
+                                break  # Found our matchup, move to next week
+                        except Exception as e:
+                            continue
+                
+                # Calculate season percentages
+                season_fg_pct = season_totals["FGM"] / season_totals["FGA"] if season_totals["FGA"] > 0 else 0
+                season_ft_pct = season_totals["FTM"] / season_totals["FTA"] if season_totals["FTA"] > 0 else 0
+                season_3p_pct = season_totals["3PM"] / season_totals["3PA"] if season_totals["3PA"] > 0 else 0
+                
+                # Season Totals Summary Card
+                st.markdown('<h3><i class="bi bi-bar-chart-line-fill" style="color: #00FF88;"></i> Team Season Totals</h3>', unsafe_allow_html=True)
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Points", f"{int(season_totals['PTS']):,}")
+                    st.metric("Total Rebounds", f"{int(season_totals['REB']):,}")
+                with col2:
+                    st.metric("Total Assists", f"{int(season_totals['AST']):,}")
+                    st.metric("Total Steals", f"{int(season_totals['STL']):,}")
+                with col3:
+                    st.metric("Total Blocks", f"{int(season_totals['BLK']):,}")
+                    st.metric("Total 3PM", f"{int(season_totals['3PM']):,}")
+                with col4:
+                    st.metric("FG%", f"{season_fg_pct:.3f}")
+                    st.metric("FT%", f"{season_ft_pct:.3f}")
+                
+                # Player Stats Table - TOTALS
+                st.markdown('<h3><i class="bi bi-person-lines-fill" style="color: #00D4FF;"></i> Player Contributions (Season Totals)</h3>', unsafe_allow_html=True)
+                
+                if player_season_stats:
+                    # Build player dataframe for totals
+                    player_data_total = []
+                    
+                    for name, stats in player_season_stats.items():
+                        # Player percentages
+                        player_fg_pct = stats["FGM"] / stats["FGA"] if stats["FGA"] > 0 else 0
+                        player_ft_pct = stats["FTM"] / stats["FTA"] if stats["FTA"] > 0 else 0
+                        player_3p_pct = stats["3PM"] / stats["3PA"] if stats["3PA"] > 0 else 0
+                        
+                        # Total view - ESPN column order
+                        player_data_total.append({
+                            "Player": name,
+                            "GP": stats["GP"],
+                            "FGM": int(stats["FGM"]),
+                            "FGA": int(stats["FGA"]),
+                            "FG%": f"{player_fg_pct:.4f}",
+                            "FT%": f"{player_ft_pct:.4f}",
+                            "3PM": int(stats["3PM"]),
+                            "3PA": int(stats["3PA"]),
+                            "3P%": f"{player_3p_pct:.4f}",
+                            "REB": int(stats["REB"]),
+                            "AST": int(stats["AST"]),
+                            "STL": int(stats["STL"]),
+                            "BLK": int(stats["BLK"]),
+                            "TO": int(stats["TO"]),
+                            "DD": int(stats.get("DD", 0)),
+                            "PTS": int(stats["PTS"]),
+                            "TW": int(stats.get("TW", 0)),
+                            "_pts_raw": stats["PTS"],
+                        })
+                    
+                    # Sort by total points (highest first)
+                    player_data_total = sorted(player_data_total, key=lambda x: x["_pts_raw"], reverse=True)
+                    
+                    # Remove sorting column before display
+                    for p in player_data_total:
+                        del p["_pts_raw"]
+                    
+                    player_df_total = pd.DataFrame(player_data_total)
+                    
+                    st.dataframe(
+                        player_df_total, 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Player": st.column_config.TextColumn(width="medium"),
+                            "GP": st.column_config.NumberColumn(width="small"),
+                        }
+                    )
+                    
+                    # Player Stats Table - PER GAME AVERAGES
+                    st.markdown('<h3><i class="bi bi-calculator" style="color: #00FF88;"></i> Player Contributions (Per Game Average)</h3>', unsafe_allow_html=True)
+                    
+                    player_data_avg = []
+                    
+                    for name, stats in player_season_stats.items():
+                        # Player percentages
+                        player_fg_pct = stats["FGM"] / stats["FGA"] if stats["FGA"] > 0 else 0
+                        player_ft_pct = stats["FTM"] / stats["FTA"] if stats["FTA"] > 0 else 0
+                        player_3p_pct = stats["3PM"] / stats["3PA"] if stats["3PA"] > 0 else 0
+                        
+                        gp = stats["GP"] if stats["GP"] > 0 else 1  # Avoid division by zero
+                        
+                        # Average view - same order
+                        player_data_avg.append({
+                            "Player": name,
+                            "GP": stats["GP"],
+                            "FGM": round(stats["FGM"] / gp, 1),
+                            "FGA": round(stats["FGA"] / gp, 1),
+                            "FG%": f"{player_fg_pct:.4f}",
+                            "FT%": f"{player_ft_pct:.4f}",
+                            "3PM": round(stats["3PM"] / gp, 1),
+                            "3PA": round(stats["3PA"] / gp, 1),
+                            "3P%": f"{player_3p_pct:.4f}",
+                            "REB": round(stats["REB"] / gp, 1),
+                            "AST": round(stats["AST"] / gp, 1),
+                            "STL": round(stats["STL"] / gp, 1),
+                            "BLK": round(stats["BLK"] / gp, 1),
+                            "TO": round(stats["TO"] / gp, 1),
+                            "DD": round(stats.get("DD", 0) / gp, 2),
+                            "PTS": round(stats["PTS"] / gp, 1),
+                            "TW": round(stats.get("TW", 0) / gp, 2),
+                            "_pts_raw": stats["PTS"],
+                        })
+                    
+                    # Sort by total points (highest first)
+                    player_data_avg = sorted(player_data_avg, key=lambda x: x["_pts_raw"], reverse=True)
+                    
+                    # Remove sorting column before display
+                    for p in player_data_avg:
+                        del p["_pts_raw"]
+                    
+                    player_df_avg = pd.DataFrame(player_data_avg)
+                    
+                    st.dataframe(
+                        player_df_avg, 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Player": st.column_config.TextColumn(width="medium"),
+                            "GP": st.column_config.NumberColumn(width="small"),
+                        }
+                    )
+                    
+                    # Top contributors summary - use total data for leaders
+                    st.markdown('<h3><i class="bi bi-award-fill" style="color: #FFD93D;"></i> Top Contributors</h3>', unsafe_allow_html=True)
+                    
+                    # Find leaders in each category from raw stats
+                    if player_season_stats:
+                        # Get leaders from raw stats
+                        pts_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["PTS"])
+                        reb_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["REB"])
+                        ast_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["AST"])
+                        stl_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["STL"])
+                        blk_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["BLK"])
+                        tpm_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["3PM"])
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            pts_val = int(player_season_stats[pts_leader_name]["PTS"])
+                            pts_pct = (pts_val / season_totals["PTS"] * 100) if season_totals["PTS"] > 0 else 0
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem;">
+                                <p style="color: #888; margin: 0; font-size: 0.8rem;">POINTS LEADER</p>
+                                <p style="color: #FF6B35; margin: 0; font-family: Oswald; font-size: 1.2rem;">{pts_leader_name}</p>
+                                <p style="color: white; margin: 0;">{pts_val:,} pts ({pts_pct:.1f}%)</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            stl_val = int(player_season_stats[stl_leader_name]["STL"])
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 8px; padding: 1rem;">
+                                <p style="color: #888; margin: 0; font-size: 0.8rem;">STEALS LEADER</p>
+                                <p style="color: #FF6B35; margin: 0; font-family: Oswald; font-size: 1.2rem;">{stl_leader_name}</p>
+                                <p style="color: white; margin: 0;">{stl_val:,} stl</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        with col2:
+                            reb_val = int(player_season_stats[reb_leader_name]["REB"])
+                            reb_pct = (reb_val / season_totals["REB"] * 100) if season_totals["REB"] > 0 else 0
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem;">
+                                <p style="color: #888; margin: 0; font-size: 0.8rem;">REBOUNDS LEADER</p>
+                                <p style="color: #00D4FF; margin: 0; font-family: Oswald; font-size: 1.2rem;">{reb_leader_name}</p>
+                                <p style="color: white; margin: 0;">{reb_val:,} reb ({reb_pct:.1f}%)</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            blk_val = int(player_season_stats[blk_leader_name]["BLK"])
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 8px; padding: 1rem;">
+                                <p style="color: #888; margin: 0; font-size: 0.8rem;">BLOCKS LEADER</p>
+                                <p style="color: #00D4FF; margin: 0; font-family: Oswald; font-size: 1.2rem;">{blk_leader_name}</p>
+                                <p style="color: white; margin: 0;">{blk_val:,} blk</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        with col3:
+                            ast_val = int(player_season_stats[ast_leader_name]["AST"])
+                            ast_pct = (ast_val / season_totals["AST"] * 100) if season_totals["AST"] > 0 else 0
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem;">
+                                <p style="color: #888; margin: 0; font-size: 0.8rem;">ASSISTS LEADER</p>
+                                <p style="color: #00FF88; margin: 0; font-family: Oswald; font-size: 1.2rem;">{ast_leader_name}</p>
+                                <p style="color: white; margin: 0;">{ast_val:,} ast ({ast_pct:.1f}%)</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            tpm_val = int(player_season_stats[tpm_leader_name]["3PM"])
+                            tpm_pct = (tpm_val / season_totals["3PM"] * 100) if season_totals["3PM"] > 0 else 0
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #1A1A2E, #252545); border-radius: 8px; padding: 1rem;">
+                                <p style="color: #888; margin: 0; font-size: 0.8rem;">3PM LEADER</p>
+                                <p style="color: #00FF88; margin: 0; font-family: Oswald; font-size: 1.2rem;">{tpm_leader_name}</p>
+                                <p style="color: white; margin: 0;">{tpm_val:,} 3pm ({tpm_pct:.1f}%)</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                else:
+                    st.warning("No player data available. Player-level stats may not be accessible through the ESPN API for your league.")
+                    
+                    # Fallback to weekly breakdown
+                    st.markdown('<h3><i class="bi bi-calendar-week-fill" style="color: #FFD93D;"></i> Weekly Breakdown</h3>', unsafe_allow_html=True)
+                    if weekly_data:
+                        weekly_df = pd.DataFrame(weekly_data)
+                        st.dataframe(weekly_df, use_container_width=True, hide_index=True)
+            
+            # ==================== TAB 5: LEAGUE STATS ====================
             with tab_league:
                 st.markdown('<h2><i class="bi bi-trophy-fill" style="color: #FF6B35;"></i> League Statistics</h2>', unsafe_allow_html=True)
                 st.markdown('<p style="color: #888;">League standings, all-play records (your record if you played everyone every week), and luck factor analysis.</p>', unsafe_allow_html=True)
@@ -2133,7 +2493,7 @@ def main():
                 st.markdown('<h3><i class="bi bi-list-ol" style="color: #00D4FF;"></i> Full League Standings</h3>', unsafe_allow_html=True)
                 
                 standings_df = pd.DataFrame([{
-                    "Rank": t["standing"],
+                    "#": t["standing"],
                     "Team": t["team_name"],
                     "Record": f"{t['actual_wins']}-{t['actual_losses']}-{t['actual_ties']}",
                     "PCT": f"{t['actual_pct']:.3f}",
@@ -2142,7 +2502,15 @@ def main():
                     "Luck": f"{t['luck']:+.1f}%",
                 } for t in league_stats])
                 
-                st.dataframe(standings_df, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    standings_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "#": st.column_config.NumberColumn(width="small"),
+                        "Team": st.column_config.TextColumn(width="medium"),
+                    }
+                )
                 
                 with st.expander("All-Play Power Rankings"):
                     st.markdown('<p style="color: #888;">Teams ranked by all-play win percentage - the truest measure of team strength.</p>', unsafe_allow_html=True)
