@@ -44,7 +44,15 @@ CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
 NUMERIC_COLS = ['FGM', 'FGA', 'FG%', 'FTM', 'FTA', 'FT%', '3PM', '3PA', '3P%',
                 'REB', 'AST', 'STL', 'BLK', 'TO', 'DD', 'PTS', 'TW']
 
-INJURED_STATUSES = {"OUT", "INJURY_RESERVE"}
+INJURED_STATUSES = {"OUT", "INJURY_RESERVE", "SSPD"}
+
+# Display abbreviations for availability statuses in streamer table
+STATUS_DISPLAY = {
+    "DAY_TO_DAY": "DTD", "DTD": "DTD",
+    "QUESTIONABLE": "Q", "Q": "Q",
+    "PROBABLE": "P", "P": "P",
+    "DOUBTFUL": "D", "D": "D",
+}
 
 NBA_TEAM_MAP = {
     "ATL": "atl", "BOS": "bos", "BKN": "bkn", "CHA": "cha", "CHI": "chi",
@@ -790,6 +798,14 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
     if not healthy_players:
         return []
     
+    # Map player name -> availability status (DTD, Q, P, D) for table display
+    player_status_map = {}
+    for p in healthy_players:
+        raw = getattr(p, "injuryStatus", None) or ""
+        display = STATUS_DISPLAY.get(str(raw).upper().strip(), "") if raw else ""
+        if display:
+            player_status_map[p.name] = display
+    
     fa_season = build_stat_df(healthy_players, f"{year}_total", "Season", "Waiver", year)
     fa_last30 = build_stat_df(healthy_players, f"{year}_last_30", "Last30", "Waiver", year)
     
@@ -812,7 +828,8 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
             "NBA_Team": r["NBA_Team"], 
             "Games Left": g, 
             "Team": "Waiver",
-            "On Watchlist": is_on_watchlist
+            "On Watchlist": is_on_watchlist,
+            "Status": player_status_map.get(r["Player"], ""),
         }
         for col in NUMERIC_COLS:
             c30, csea = f"{col}_30", f"{col}_season"
@@ -990,6 +1007,7 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
             "Win %": round(best_win_pct, 1),
             "Cat Impacts": best_cat_impacts,
             "Risks": risk_tags,
+            "Status": streamer_row.get("Status", ""),
             "PTS": round(streamer_row.get("PTS", 0), 1),
             "REB": round(streamer_row.get("REB", 0), 1),
             "AST": round(streamer_row.get("AST", 0), 1),
@@ -1865,7 +1883,9 @@ def main():
                 
                 # Key metrics row
                 st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: #00FF88;"></i> Key Metrics</h3>', unsafe_allow_html=True)
-                metric_cols = st.columns(3)
+                your_roster_games = int(your_team_df["Games Left"].sum())
+                opp_roster_games = int(opp_team_df["Games Left"].sum())
+                metric_cols = st.columns(5)
                 with metric_cols[0]:
                     st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{baseline_avg_cats - 7.5:.1f} vs even")
                 with metric_cols[1]:
@@ -1874,6 +1894,10 @@ def main():
                     st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
                 with metric_cols[2]:
                     st.metric("Simulations", f"{sim_count:,}")
+                with metric_cols[3]:
+                    st.metric(f"{your_team_name} Games Left", your_roster_games)
+                with metric_cols[4]:
+                    st.metric(f"{opp_team_name} Games Left", opp_roster_games)
                 
                 # Win probability gauge and Score Distribution side by side
                 col1, col2 = st.columns([1, 1])
@@ -1971,13 +1995,14 @@ def main():
                                 drop_display = f'<span style="color: #FF4757;">Drop: {drop_text}</span>'
                             
                             watchlist_badge = ' <i class="bi bi-star-fill" style="color: #FFD93D; font-size: 0.9rem;"></i>' if player.get("Watchlist") else ""
+                            status_tag = f" <span style='color: #FFD93D;'>({player['Status']})</span>" if player.get("Status") else ""
                             
                             st.markdown(f"""
                             <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
                                         border-radius: 12px; padding: 1.2rem; 
                                         border-left: 4px solid {border_color};">
                                 <h4 style="margin: 0; color: white; font-family: Oswald;">{player['Player']}{watchlist_badge}</h4>
-                                <p style="color: #888; margin: 0.3rem 0; font-size: 0.9rem;">{player['Team']} - {player['Games']} games</p>
+                                <p style="color: #888; margin: 0.3rem 0; font-size: 0.9rem;">{player['Team']} - {player['Games']} games{status_tag}</p>
                                 <p style="margin: 0.5rem 0; font-size: 0.85rem;">{drop_display}</p>
                                 <div style="display: flex; justify-content: space-between; margin-top: 0.8rem;">
                                     <div>
@@ -2014,6 +2039,7 @@ def main():
                             "WL": p.get("Watchlist", ""),
                             "Player": p["Player"],
                             "Team": p["Team"],
+                            "Status": p.get("Status", ""),
                             "Games": p["Games"],
                             "Drop": p["Drop"],
                             "Δ Cats": p["Δ Cats"],

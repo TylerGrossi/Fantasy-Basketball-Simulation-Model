@@ -60,7 +60,7 @@ CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
 NUMERIC_COLS = ['FGM', 'FGA', 'FG%', 'FTM', 'FTA', 'FT%', '3PM', '3PA', '3P%',
                 'REB', 'AST', 'STL', 'BLK', 'TO', 'DD', 'PTS', 'TW']
 
-INJURED_STATUSES = {"OUT", "INJURY_RESERVE"}
+INJURED_STATUSES = {"OUT", "INJURY_RESERVE", "SSPD"}
 
 # ESPN team slug mapping
 NBA_TEAM_MAP = {
