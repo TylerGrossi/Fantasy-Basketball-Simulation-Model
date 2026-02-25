@@ -1,6 +1,9 @@
-streamlit>=1.28.0
+# Use the same Python env for: pip install -r requirements.txt  then  streamlit run streamlit_app.py
+streamlit>=1.30.0
 pandas>=2.0.0
 numpy>=1.24.0
 requests>=2.31.0
 plotly>=5.18.0
 espn-api>=0.35.0
+# PyPI package name is "nba_api" (underscore). Needed for advanced player projections; TW can use ESPN without it.
+nba_api>=1.9.0
