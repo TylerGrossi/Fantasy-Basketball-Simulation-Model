@@ -183,38 +183,6 @@ def get_team_schedule(team_abbrev):
         return []
 
 
-@st.cache_data(ttl=3600)
-def get_team_win_pcts_espn():
-    """
-    Get each NBA team's win percentage from ESPN (no nba_api needed).
-    Returns dict {abbrev: win_pct}, e.g. {"OKC": 0.759, "BOS": 0.661}.
-    Used as fallback for TW when nba_api is unavailable.
-    """
-    out = {}
-    for abbrev, slug in NBA_TEAM_MAP.items():
-        try:
-            r = requests.get(
-                f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{slug}",
-                timeout=10,
-            )
-            if r.status_code != 200:
-                continue
-            d = r.json()
-            team = d.get("team") or d
-            record = team.get("record") or {}
-            items = record.get("items") or []
-            for item in items:
-                if item.get("type") == "total":
-                    for s in item.get("stats") or []:
-                        if s.get("name") == "winPercent":
-                            out[abbrev] = float(s["value"])
-                            break
-                    break
-        except Exception:
-            pass
-    return out
-
-
 def count_games_left(team_abbrev):
     """Count games remaining this week."""
     eastern = ZoneInfo("America/New_York")
