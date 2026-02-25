@@ -1,6 +1,5 @@
 """
 Fantasy Basketball Simulator - Monte Carlo simulation, streamers, bench strategy, league stats.
-Uses advanced projections (pace, matchup, EMA, multivariate normal) when NBA API is available.
 """
 
 from collections import defaultdict
@@ -18,109 +17,39 @@ from data import (
     add_games_left,
     is_player_injured,
     flatten_stat_dict,
-    normalize_team,
 )
 
 
-def simulate_team(team_df, sims=10000, year=None):
-    """
-    Monte Carlo simulation for team stats. Uses advanced logic from player_projections when
-    possible (NBA API: game log EMA, pace/def, multivariate normal); otherwise falls back
-    to simple variance-based simulation.
-    Returns (results_dict, diagnostics_dict). Diagnostics can be shown in the UI to confirm
-    whether NBA API was used.
-    """
-    stats_to_sim = list(CATEGORY_VARIANCE.keys())
-    all_stat_keys = stats_to_sim + ["FG%", "FT%", "3P%"]
-    empty_results = {stat: [0.0] * sims for stat in all_stat_keys}
-    empty_diag = {"nba_api_league_stats": False, "nba_api_team_win_pcts": False, "tw_from_espn": False, "players_advanced": 0, "players_fallback": 0, "total_players": 0}
+def simulate_team(team_df, sims=10000):
+    """Monte Carlo simulation for team stats - Vectorized NumPy version for speed."""
     if team_df.empty:
-        return empty_results, empty_diag
+        all_stats = list(CATEGORY_VARIANCE.keys()) + ["FG%", "FT%", "3P%"]
+        return {stat: [0.0] * sims for stat in all_stats}
 
+    stats_to_sim = list(CATEGORY_VARIANCE.keys())
+    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
     team_df_clean = team_df.fillna(0)
+    means = team_df_clean[stats_to_sim].values
     games = team_df_clean["Games Left"].values.astype(int)
     totals = np.zeros((sims, len(stats_to_sim)))
-    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
-    season_year = year if year is not None else 2026
-
-    players_advanced = 0
-    players_fallback = 0
-
-    nba_api_errors = []
-    team_win_pcts = {}
-    tw_from_espn = False
-    try:
-        from projections import get_league_team_stats, get_team_win_pcts, project_player_with_nba_api
-        league_stats = get_league_team_stats(season_year, error_list=nba_api_errors)
-        team_win_pcts = get_team_win_pcts(season_year, error_list=nba_api_errors)
-    except ModuleNotFoundError as e:
-        if "nba_api" in str(e):
-            nba_api_errors.append("optional_nba_api_not_installed")
-        else:
-            nba_api_errors.append(f"Import: {e!r}")
-        league_stats = None
-        team_win_pcts = {}
-    except Exception as e:
-        nba_api_errors.append(f"Import or unexpected: {e!r}")
-        league_stats = None
-        team_win_pcts = {}
-    # Fallback: get team win % from ESPN so TW isn't 50% when nba_api unavailable
-    if not team_win_pcts:
-        try:
-            from data import get_team_win_pcts_espn
-            team_win_pcts = get_team_win_pcts_espn()
-            if team_win_pcts:
-                tw_from_espn = True
-        except Exception:
-            pass
-
-    tw_idx = stats_to_sim.index("TW")
 
     for p_idx in range(len(team_df_clean)):
-        row = team_df_clean.iloc[p_idx]
-        player_name = row["Player"]
-        nba_team = row.get("NBA_Team") or ""
         n_games = games[p_idx]
         if n_games <= 0:
             continue
-
-        advanced = None
-        if league_stats is not None:
-            try:
-                advanced = project_player_with_nba_api(
-                    player_name, nba_team, n_games, season_year, league_stats, sims
-                )
-            except Exception:
-                pass
-
-        if advanced is not None:
-            players_advanced += 1
-            for i, stat in enumerate(stats_to_sim):
-                if stat == "TW":
-                    continue  # TW simulated from team win % below
-                if stat in advanced:
-                    totals[:, i] += np.array(advanced[stat])
-        else:
-            players_fallback += 1
-            player_means = team_df_clean[stats_to_sim].values[p_idx]
-            player_stds = player_means * variance_vals
-            random_vals = np.random.normal(
-                loc=player_means,
-                scale=player_stds,
-                size=(sims, n_games, len(stats_to_sim))
-            )
-            random_vals[:, :, tw_idx] = 0  # TW simulated from team win % below, not from stats
-            totals += random_vals.sum(axis=1)
-
-        # TW = team wins: each game counts as team's win probability (e.g. .75 for 75% team)
-        team_abbrev = normalize_team(nba_team)
-        win_pct = team_win_pcts.get(team_abbrev, 0.5) if team_abbrev else 0.5
-        win_pct = np.clip(float(win_pct), 0.0, 1.0)
-        totals[:, tw_idx] += np.random.binomial(n_games, win_pct, size=sims)
+        player_means = means[p_idx]
+        player_stds = player_means * variance_vals
+        random_vals = np.random.normal(
+            loc=player_means,
+            scale=player_stds,
+            size=(sims, n_games, len(stats_to_sim))
+        )
+        totals += random_vals.sum(axis=1)
 
     results = {}
     for i, stat in enumerate(stats_to_sim):
         results[stat] = totals[:, i].tolist()
+
     fgm = totals[:, stats_to_sim.index("FGM")]
     fga = totals[:, stats_to_sim.index("FGA")]
     ftm = totals[:, stats_to_sim.index("FTM")]
@@ -131,17 +60,7 @@ def simulate_team(team_df, sims=10000, year=None):
         results["FG%"] = np.where(fga > 0, fgm / fga, 0).tolist()
         results["FT%"] = np.where(fta > 0, ftm / fta, 0).tolist()
         results["3P%"] = np.where(tpa > 0, tpm / tpa, 0).tolist()
-
-    diagnostics = {
-        "nba_api_league_stats": league_stats is not None,
-        "nba_api_team_win_pcts": len(team_win_pcts) > 0 and not tw_from_espn,
-        "tw_from_espn": tw_from_espn,
-        "players_advanced": players_advanced,
-        "players_fallback": players_fallback,
-        "total_players": players_advanced + players_fallback,
-        "nba_api_errors": nba_api_errors,
-    }
-    return results, diagnostics
+    return results
 
 
 def add_current_to_sim(current, sim):
@@ -317,18 +236,6 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
     streamer_sims = 2000
     stats_to_sim = list(CATEGORY_VARIANCE.keys())
     variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
-    tw_idx = stats_to_sim.index("TW")
-    try:
-        from projections import get_team_win_pcts
-        _team_win_pcts = get_team_win_pcts(year)
-    except Exception:
-        _team_win_pcts = {}
-    if not _team_win_pcts:
-        try:
-            from data import get_team_win_pcts_espn
-            _team_win_pcts = get_team_win_pcts_espn()
-        except Exception:
-            pass
     opp_df_clean = opp_team_df.fillna(0)
     opp_means = opp_df_clean[stats_to_sim].values
     opp_games = opp_df_clean["Games Left"].values.astype(int)
@@ -340,11 +247,7 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
         player_means = opp_means[p_idx]
         player_stds = player_means * variance_vals
         random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(streamer_sims, n_games, len(stats_to_sim)))
-        random_vals[:, :, tw_idx] = 0
         opp_totals += random_vals.sum(axis=1)
-        win_pct = _team_win_pcts.get(normalize_team(opp_df_clean.iloc[p_idx].get("NBA_Team")), 0.5) or 0.5
-        win_pct = np.clip(float(win_pct), 0.0, 1.0)
-        opp_totals[:, tw_idx] += np.random.binomial(n_games, win_pct, size=streamer_sims)
     for i, stat in enumerate(stats_to_sim):
         opp_totals[:, i] += current_totals_opp.get(stat, 0)
     opp_fgm = opp_totals[:, stats_to_sim.index("FGM")]
@@ -376,10 +279,6 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
                 loc=streamer_means, scale=streamer_stds,
                 size=(streamer_sims, streamer_games, len(stats_to_sim))
             ).sum(axis=1)
-            streamer_contrib[:, tw_idx] = 0
-            swin = _team_win_pcts.get(normalize_team(streamer_row.get("NBA_Team")), 0.5) or 0.5
-            swin = np.clip(float(swin), 0.0, 1.0)
-            streamer_contrib[:, tw_idx] = np.random.binomial(streamer_games, swin, size=streamer_sims)
         else:
             streamer_contrib = np.zeros((streamer_sims, len(stats_to_sim)))
         if has_open_roster_spot:
@@ -391,11 +290,7 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
                 player_means = your_means[p_idx]
                 player_stds = player_means * variance_vals
                 random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(streamer_sims, n_games, len(stats_to_sim)))
-                random_vals[:, :, tw_idx] = 0
                 test_totals += random_vals.sum(axis=1)
-                win_pct = _team_win_pcts.get(normalize_team(your_df_clean.iloc[p_idx].get("NBA_Team")), 0.5) or 0.5
-                win_pct = np.clip(float(win_pct), 0.0, 1.0)
-                test_totals[:, tw_idx] += np.random.binomial(n_games, win_pct, size=streamer_sims)
             test_totals += streamer_contrib
             for i, stat in enumerate(stats_to_sim):
                 test_totals[:, i] += current_totals_you.get(stat, 0)
@@ -420,11 +315,7 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
                 player_means = your_means[p_idx]
                 player_stds = player_means * variance_vals
                 random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(streamer_sims, n_games, len(stats_to_sim)))
-                random_vals[:, :, tw_idx] = 0
                 test_totals += random_vals.sum(axis=1)
-                win_pct = _team_win_pcts.get(normalize_team(your_df_clean.iloc[p_idx].get("NBA_Team")), 0.5) or 0.5
-                win_pct = np.clip(float(win_pct), 0.0, 1.0)
-                test_totals[:, tw_idx] += np.random.binomial(n_games, win_pct, size=streamer_sims)
             test_totals += streamer_contrib
             for i, stat in enumerate(stats_to_sim):
                 test_totals[:, i] += current_totals_you.get(stat, 0)
@@ -467,23 +358,11 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
 
 
 def analyze_bench_strategy(your_team_df, opp_team_df, current_totals_you, current_totals_opp,
-                           baseline_results, sims=3000, year=None):
+                           baseline_results, sims=3000):
     """Analyze whether benching all players today would improve win probability."""
     baseline_win_pct, baseline_cat_results, baseline_avg_cats = baseline_results
     stats_to_sim = list(CATEGORY_VARIANCE.keys())
     variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
-    tw_idx = stats_to_sim.index("TW")
-    try:
-        from projections import get_team_win_pcts
-        _team_win_pcts = get_team_win_pcts(year or 2026)
-    except Exception:
-        _team_win_pcts = {}
-    if not _team_win_pcts:
-        try:
-            from data import get_team_win_pcts_espn
-            _team_win_pcts = get_team_win_pcts_espn()
-        except Exception:
-            pass
     opp_df_clean = opp_team_df.fillna(0)
     opp_means = opp_df_clean[stats_to_sim].values
     opp_games = opp_df_clean["Games Left"].values.astype(int)
@@ -495,11 +374,7 @@ def analyze_bench_strategy(your_team_df, opp_team_df, current_totals_you, curren
         player_means = opp_means[p_idx]
         player_stds = player_means * variance_vals
         random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(sims, n_games, len(stats_to_sim)))
-        random_vals[:, :, tw_idx] = 0
         opp_totals += random_vals.sum(axis=1)
-        win_pct = _team_win_pcts.get(normalize_team(opp_df_clean.iloc[p_idx].get("NBA_Team")), 0.5) or 0.5
-        win_pct = np.clip(float(win_pct), 0.0, 1.0)
-        opp_totals[:, tw_idx] += np.random.binomial(n_games, win_pct, size=sims)
     for i, stat in enumerate(stats_to_sim):
         opp_totals[:, i] += current_totals_opp.get(stat, 0)
     opp_fgm = opp_totals[:, stats_to_sim.index("FGM")]
@@ -523,11 +398,7 @@ def analyze_bench_strategy(your_team_df, opp_team_df, current_totals_you, curren
         player_means = your_means[p_idx]
         player_stds = player_means * variance_vals
         random_vals = np.random.normal(loc=player_means, scale=player_stds, size=(sims, n_games, len(stats_to_sim)))
-        random_vals[:, :, tw_idx] = 0
         play_totals += random_vals.sum(axis=1)
-        win_pct = _team_win_pcts.get(normalize_team(your_df_clean.iloc[p_idx].get("NBA_Team")), 0.5) or 0.5
-        win_pct = np.clip(float(win_pct), 0.0, 1.0)
-        play_totals[:, tw_idx] += np.random.binomial(n_games, win_pct, size=sims)
     for i, stat in enumerate(stats_to_sim):
         play_totals[:, i] += current_totals_you.get(stat, 0)
     bench_totals = np.zeros((sims, len(stats_to_sim)))

@@ -190,8 +190,8 @@ def main():
             status_text.text(f"Running {sim_count:,} simulations...")
             
             # Run simulation
-            your_sim_raw, your_diag = simulate_team(your_team_df, sims=sim_count, year=year)
-            opp_sim_raw, opp_diag = simulate_team(opp_team_df, sims=sim_count, year=year)
+            your_sim_raw = simulate_team(your_team_df, sims=sim_count)
+            opp_sim_raw = simulate_team(opp_team_df, sims=sim_count)
             
             your_sim = add_current_to_sim(current_you, your_sim_raw)
             opp_sim = add_current_to_sim(current_opp, opp_sim_raw)
@@ -202,18 +202,6 @@ def main():
             status_text.text("Complete!")
             progress.empty()
             status_text.empty()
-            
-            # Merge diagnostics (both teams use same API/fallback in a given run)
-            diag = {
-                "nba_api_league_stats": your_diag["nba_api_league_stats"] or opp_diag["nba_api_league_stats"],
-                "nba_api_team_win_pcts": your_diag["nba_api_team_win_pcts"] or opp_diag["nba_api_team_win_pcts"],
-                "players_advanced": your_diag["players_advanced"] + opp_diag["players_advanced"],
-                "players_fallback": your_diag["players_fallback"] + opp_diag["players_fallback"],
-                "total_players": your_diag["total_players"] + opp_diag["total_players"],
-                "nba_api_errors": your_diag.get("nba_api_errors") or opp_diag.get("nba_api_errors") or [],
-                "tw_from_espn": your_diag.get("tw_from_espn") or opp_diag.get("tw_from_espn"),
-            }
-            st.session_state["projection_diagnostics"] = diag
             
             # Calculate key metrics
             total_sims = sum(matchup_results.values())
@@ -238,41 +226,6 @@ def main():
             # ==================== TAB 1: MATCHUP ANALYSIS ====================
             with tab_matchup:
                 st.markdown('<h2><i class="bi bi-bar-chart-fill" style="color: #FF6B35;"></i> Simulation Results</h2>', unsafe_allow_html=True)
-                
-                # Show whether NBA API or backup was used
-                diag = st.session_state.get("projection_diagnostics", {})
-                if diag:
-                    nba_league = diag.get("nba_api_league_stats", False)
-                    nba_tw = diag.get("nba_api_team_win_pcts", False)
-                    tw_espn = diag.get("tw_from_espn", False)
-                    adv = diag.get("players_advanced", 0)
-                    fall = diag.get("players_fallback", 0)
-                    total = diag.get("total_players", 0) or (adv + fall)
-                    if nba_league or nba_tw:
-                        tw_src = "team win % from NBA API" if nba_tw else "50% default (NBA API standings failed)"
-                        st.info(f"**Using NBA API:** League/team data loaded. Player projections: **{adv}** with game-log EMA + pace/def, **{fall}** with simple variance. TW: {tw_src}.")
-                    elif tw_espn:
-                        st.info(
-                            "**Player projections:** simple variance (NBA API not used). **TW (team wins):** real team win % from **ESPN** — no nba_api required."
-                        )
-                    else:
-                        errs = diag.get("nba_api_errors") or []
-                        only_optional_missing = errs == ["optional_nba_api_not_installed"]
-                        if only_optional_missing:
-                            st.info(
-                                "**Using simple variance** for player projections and **50%** for TW. "
-                                "Install `nba_api` for advanced projections; TW can also use ESPN (see docs)."
-                            )
-                        else:
-                            st.warning(
-                                "**Using backup:** NBA API unavailable. Player projections use simple variance; TW uses 50%. "
-                                "When deployed on Streamlit Cloud, stats.nba.com often blocks cloud servers; run locally for full NBA API."
-                            )
-                            if errs:
-                                with st.expander("Why did the NBA API fail? (click to see error details)"):
-                                    for err in errs:
-                                        st.code(err, language=None)
-                                    st.caption("Fix: ensure you have internet, or install nba_api with: pip install nba_api")
                 
                 # Current Scoreboard
                 st.markdown('<h3><i class="bi bi-trophy-fill" style="color: #FFD93D;"></i> Current Scoreboard</h3>', unsafe_allow_html=True)
@@ -461,8 +414,7 @@ def main():
                     bench_analysis = analyze_bench_strategy(
                         your_team_df, opp_team_df,
                         current_you, current_opp,
-                        (win_pct, category_results, baseline_avg_cats),
-                        year=year
+                        (win_pct, category_results, baseline_avg_cats)
                     )
                 
                 is_bench_better = bench_analysis["recommendation"] == "BENCH"

@@ -3,7 +3,6 @@ Fantasy Basketball Simulator - Configuration and constants.
 """
 
 # Category variance for Monte Carlo simulation (higher = more game-to-game variance)
-# DD = double-doubles, TW = team wins (not triple-doubles)
 CATEGORY_VARIANCE = {
     "FGM": 0.7, "FGA": 0.7,
     "FTM": 0.2, "FTA": 0.2,
@@ -14,7 +13,6 @@ CATEGORY_VARIANCE = {
     "DD": 0.7, "TW": 0.7
 }
 
-# TW = team wins
 CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
               "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"]
 
