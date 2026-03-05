@@ -93,6 +93,74 @@ def count_games_left_for_player(player, injury_data=None):
     return sum(1 for g in week_games if g >= expected_return)
 
 
+def get_week_date_range(week, year):
+    """
+    Map fantasy matchup period to (start_date, end_date).
+    NBA season typically starts ~Oct 21. Week 1 = Oct 21-27, Week 2 = Oct 28-Nov 3, etc.
+    """
+    season_year = year - 1 if year >= 2020 else year
+    try:
+        start = date(season_year, 10, 21) + timedelta(days=(week - 1) * 7)
+        end = start + timedelta(days=6)
+        return start, end
+    except (ValueError, TypeError):
+        return None, None
+
+
+def count_games_for_player_in_week(player, week, year, injury_data=None):
+    """
+    Count games for a player in a specific fantasy week, accounting for injury return date.
+    For non-ACTIVE players: only counts games on/after expected return. No return date = 0.
+    """
+    start_d, end_d = get_week_date_range(week, year)
+    if start_d is None:
+        return 0
+    team_abbrev = getattr(player, "proTeam", None)
+    if pd.isna(team_abbrev):
+        return 0
+    sched = get_team_schedule(team_abbrev)
+    week_games = [g for g in sched if start_d <= g <= end_d]
+    if not week_games:
+        return 0
+    injury_status = getattr(player, "injuryStatus", None) or ""
+    status_upper = str(injury_status).upper().strip()
+    if status_upper in ACTIVE_STATUSES:
+        return len(week_games)
+    expected_return = _parse_expected_return_date(player)
+    if expected_return is None and injury_data:
+        inj_info = injury_data.get(player.name, {})
+        if isinstance(inj_info, dict):
+            expected_return = inj_info.get("return_date_obj")
+    if expected_return is None:
+        return 0
+    return sum(1 for g in week_games if g >= expected_return)
+
+
+def add_games_in_week(df, roster, week, year, injury_data=None):
+    """
+    Add 'Games This Week' column for a specific fantasy week (injury-aware).
+    Used for projected roster strength in playoff simulation.
+    """
+    df = df.copy()
+    name_to_player = {p.name: p for p in roster}
+
+    def games_for_row(row):
+        player = name_to_player.get(row["Player"])
+        if player is None:
+            team_abbrev = row.get("NBA_Team")
+            if pd.isna(team_abbrev):
+                return 0
+            start_d, end_d = get_week_date_range(week, year)
+            if start_d is None:
+                return 0
+            sched = get_team_schedule(team_abbrev)
+            return sum(1 for g in sched if start_d <= g <= end_d)
+        return count_games_for_player_in_week(player, week, year, injury_data)
+
+    df["Games This Week"] = df.apply(games_for_row, axis=1)
+    return df
+
+
 def filter_injured(roster):
     """Legacy: filter to healthy-only. Prefer add_games_left_with_injury for injury-aware logic."""
     return [p for p in roster if p.injuryStatus not in INJURED_STATUSES]

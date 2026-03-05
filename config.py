@@ -2,6 +2,14 @@
 Fantasy Basketball Simulator - Configuration and constants.
 """
 
+# Playoff matchups are two weeks each; increase variance so upsets can happen
+PLAYOFF_VARIANCE_MULTIPLIER = 1.4
+
+# Regular season: variance by day of week (more uncertainty early in week)
+REGULAR_SEASON_VARIANCE_EARLY_WEEK = 1.45   # Monday/Tuesday
+REGULAR_SEASON_VARIANCE_MID_WEEK = 1.25     # Wednesday–Friday
+REGULAR_SEASON_VARIANCE_LATE_WEEK = 1.0     # Saturday/Sunday
+
 # Category variance for Monte Carlo simulation (higher = more game-to-game variance)
 CATEGORY_VARIANCE = {
     "FGM": 0.7, "FGA": 0.7,

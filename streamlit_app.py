@@ -29,6 +29,7 @@ from simulation import (
     analyze_bench_strategy,
     calculate_league_stats,
     simulate_playoff_probabilities,
+    _get_matchup_variance_multiplier,
 )
 from visualizations import (
     create_scoreboard,
@@ -193,9 +194,10 @@ def main():
             progress.progress(75)
             status_text.text(f"Running {sim_count:,} simulations...")
             
-            # Run simulation
-            your_sim_raw = simulate_team(your_team_df, sims=sim_count)
-            opp_sim_raw = simulate_team(opp_team_df, sims=sim_count)
+            # Run simulation (higher variance early in week - Mon/Tue - when 95% is too confident)
+            matchup_variance = _get_matchup_variance_multiplier()
+            your_sim_raw = simulate_team(your_team_df, sims=sim_count, variance_multiplier=matchup_variance)
+            opp_sim_raw = simulate_team(opp_team_df, sims=sim_count, variance_multiplier=matchup_variance)
             
             your_sim = add_current_to_sim(current_you, your_sim_raw)
             opp_sim = add_current_to_sim(current_opp, opp_sim_raw)
@@ -222,10 +224,10 @@ def main():
             with st.spinner("Calculating league statistics..."):
                 league_stats = calculate_league_stats(league, year)
             
-            # Create tabs for different sections
+            # Create tabs (Streamer is 2nd tab but loads last - block runs at end)
             tab_matchup, tab_streamers, tab_strategy, tab_season, tab_league, tab_playoff = st.tabs([
                 "Matchup Analysis",
-                "Streamer Analysis", 
+                "Streamer Analysis",
                 "Bench Strategy",
                 "My Season Stats",
                 "League Stats",
@@ -357,133 +359,7 @@ def main():
                     else:
                         st.markdown('<p style="color: #888;">No injured players in this matchup.</p>', unsafe_allow_html=True)
             
-            # ==================== TAB 2: STREAMER ANALYSIS ====================
-            with tab_streamers:
-                st.markdown('<h2><i class="bi bi-arrow-repeat" style="color: #FF6B35;"></i> Streamer Analysis</h2>', unsafe_allow_html=True)
-                
-                if untouchables:
-                    st.markdown(f'<div style="padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border-left: 4px solid #00D4FF; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-lock-fill" style="color: #00D4FF;"></i> <strong>Untouchable players:</strong> {", ".join(untouchables)}</div>', unsafe_allow_html=True)
-                if has_open_spot:
-                    st.markdown('<div style="padding: 0.75rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00FF88; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-check-circle-fill" style="color: #00FF88;"></i> You have an open roster spot - streamers can be added without dropping anyone</div>', unsafe_allow_html=True)
-                
-                with st.spinner(f"Analyzing {num_streamers} potential streamers (considering drop candidates)..."):
-                    baseline_results = (win_pct, category_results, baseline_avg_cats)
-                    streamers = analyze_streamers(
-                        league, your_team_df, opp_team_df, 
-                        current_you, current_opp, baseline_results,
-                        blend_weight, year, num_streamers,
-                        untouchables=untouchables,
-                        has_open_roster_spot=has_open_spot,
-                        manual_watchlist=manual_watchlist
-                    )
-                    # Add playoff & championship delta % per streamer (vs baseline)
-                    your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
-                    if your_team_stats and streamers:
-                        w, l, t = your_team_stats["actual_wins"], your_team_stats["actual_losses"], your_team_stats["actual_ties"]
-                        playoff_sims = min(sim_count, 3000)
-                        playoff_baseline = simulate_playoff_probabilities(league, league_stats, year, sims=playoff_sims)
-                        playoff_if_win = simulate_playoff_probabilities(
-                            league, league_stats, year, sims=playoff_sims,
-                            record_override={team_id: (w + 1, l, t)}
-                        )
-                        playoff_if_lose = simulate_playoff_probabilities(
-                            league, league_stats, year, sims=playoff_sims,
-                            record_override={team_id: (w, l + 1, t)}
-                        )
-                        pb = next((r for r in playoff_baseline if r["team_id"] == team_id), {})
-                        pw = next((r for r in playoff_if_win if r["team_id"] == team_id), {})
-                        pl = next((r for r in playoff_if_lose if r["team_id"] == team_id), {})
-                        baseline_playoff, baseline_champ = pb.get("playoff_prob", 0), pb.get("championship_prob", 0)
-                        playoff_win, champ_win = pw.get("playoff_prob", 0), pw.get("championship_prob", 0)
-                        playoff_lose, champ_lose = pl.get("playoff_prob", 0), pl.get("championship_prob", 0)
-                        for s in streamers:
-                            wp = s["Win %"] / 100
-                            s_playoff = wp * playoff_win + (1 - wp) * playoff_lose
-                            s_champ = wp * champ_win + (1 - wp) * champ_lose
-                            s["Δ Playoff %"] = round(s_playoff - baseline_playoff, 1)
-                            s["Δ Champ %"] = round(s_champ - baseline_champ, 1)
-                
-                if streamers:
-                    st.markdown('<h3><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Top Recommendations</h3>', unsafe_allow_html=True)
-                    
-                    top_3 = streamers[:3]
-                    cols = st.columns(3)
-                    
-                    for i, player in enumerate(top_3):
-                        with cols[i]:
-                            delta_color = "#00FF88" if player["Δ Cats"] > 0 else "#FF4757" if player["Δ Cats"] < 0 else "#FFD93D"
-                            border_color = delta_color
-                            
-                            drop_text = player["Drop"]
-                            if drop_text == "(Open Spot)":
-                                drop_display = '<span style="color: #00FF88;">Add (Open Spot)</span>'
-                            else:
-                                drop_display = f'<span style="color: #FF4757;">Drop: {drop_text}</span>'
-                            
-                            watchlist_badge = ' <i class="bi bi-star-fill" style="color: #FFD93D; font-size: 0.9rem;"></i>' if player.get("Watchlist") else ""
-                            status_tag = f" <span style='color: #FFD93D;'>({player['Status']})</span>" if player.get("Status") else ""
-                            
-                            st.markdown(f"""
-                            <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
-                                        border-radius: 12px; padding: 1.2rem; 
-                                        border-left: 4px solid {border_color};">
-                                <h4 style="margin: 0; color: white; font-family: Oswald;">{player['Player']}{watchlist_badge}</h4>
-                                <p style="color: #888; margin: 0.3rem 0; font-size: 0.9rem;">{player['Team']} - {player['Games']} games{status_tag}</p>
-                                <p style="margin: 0.5rem 0; font-size: 0.85rem;">{drop_display}</p>
-                                <div style="display: flex; justify-content: space-between; margin-top: 0.8rem;">
-                                    <div>
-                                        <span style="color: #888; font-size: 0.8rem;">Δ CATS</span><br/>
-                                        <span style="color: {delta_color}; font-size: 1.5rem; font-family: Oswald; font-weight: 600;">
-                                            {player['Δ Cats']:+.2f}
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span style="color: #888; font-size: 0.8rem;">EXP CATS</span><br/>
-                                        <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
-                                            {player['Exp Cats']:.1f}
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span style="color: #888; font-size: 0.8rem;">WIN %</span><br/>
-                                        <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
-                                            {player['Win %']:.0f}%
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            if player["Cat Impacts"]:
-                                impacts_str = ", ".join([f"{'▲' if v > 0 else '▼'}{k}: {v:+.0f}%" for k, v in sorted(player["Cat Impacts"].items(), key=lambda x: abs(x[1]), reverse=True)[:3]])
-                                st.caption(impacts_str)
-                            
-                            if player["Risks"]:
-                                st.caption(f"Risk: {', '.join(player['Risks'])}")
-                    
-                    with st.expander("All Analyzed Streamers"):
-                        streamer_df = pd.DataFrame([{
-                            "WL": p.get("Watchlist", ""),
-                            "Player": p["Player"],
-                            "Team": p["Team"],
-                            "Status": p.get("Status", ""),
-                            "Games": p["Games"],
-                            "Drop": p["Drop"],
-                            "Δ Cats": p["Δ Cats"],
-                            "Exp Cats": p["Exp Cats"],
-                            "Win %": p["Win %"],
-                            "Δ Playoff %": p.get("Δ Playoff %", 0),
-                            "Δ Champ %": p.get("Δ Champ %", 0),
-                            "PTS": p["PTS"],
-                            "REB": p["REB"],
-                            "AST": p["AST"],
-                            "Risks": ", ".join(p["Risks"]) if p["Risks"] else ""
-                        } for p in streamers])
-                        
-                        st.dataframe(streamer_df, use_container_width=True, hide_index=True)
-                else:
-                    st.warning("No streamers found with games remaining this week.")
-            
-            # ==================== TAB 3: BENCH STRATEGY ====================
+            # ==================== TAB 2: BENCH STRATEGY ====================
             with tab_strategy:
                 st.markdown('<h2><i class="bi bi-pause-circle-fill" style="color: #FF6B35;"></i> Bench Strategy Analysis</h2>', unsafe_allow_html=True)
                 st.markdown('<p style="color: #888;">Should you bench your players today to protect your lead? This analyzes whether sitting everyone improves your expected categories won.</p>', unsafe_allow_html=True)
@@ -566,7 +442,7 @@ def main():
                         })
                     st.dataframe(pd.DataFrame(bench_cat_data), use_container_width=True, hide_index=True)
             
-            # ==================== TAB 4: MY SEASON STATS ====================
+            # ==================== TAB 3: MY SEASON STATS ====================
             with tab_season:
                 st.markdown('<h2><i class="bi bi-people-fill" style="color: #FF6B35;"></i> My Season Stats</h2>', unsafe_allow_html=True)
                 st.markdown('<p style="color: #888;">All players who have contributed to your team this season, with their total stats and percentage of team production.</p>', unsafe_allow_html=True)
@@ -897,7 +773,7 @@ def main():
                         weekly_df = pd.DataFrame(weekly_data)
                         st.dataframe(weekly_df, use_container_width=True, hide_index=True)
             
-            # ==================== TAB 5: LEAGUE STATS ====================
+            # ==================== TAB 4: LEAGUE STATS ====================
             with tab_league:
                 st.markdown('<h2><i class="bi bi-trophy-fill" style="color: #FF6B35;"></i> League Statistics</h2>', unsafe_allow_html=True)
                 st.markdown('<p style="color: #888;">League standings, all-play records (your record if you played everyone every week), and luck factor analysis.</p>', unsafe_allow_html=True)
@@ -1009,15 +885,16 @@ def main():
                     
                     st.dataframe(pd.DataFrame(luck_data), use_container_width=True, hide_index=True)
             
-            # ==================== TAB 6: PLAYOFF & CHAMPIONSHIP ====================
+            # ==================== TAB 5: PLAYOFF & CHAMPIONSHIP ====================
             with tab_playoff:
                 st.markdown('<h2><i class="bi bi-trophy-fill" style="color: #FF6B35;"></i> Playoff & Championship Probabilities</h2>', unsafe_allow_html=True)
-                st.markdown('<p style="color: #888;">Monte Carlo simulation of remaining regular season and playoff bracket. Uses all-play win% as team strength.</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #888;">Projected roster (injury-aware) + category-by-category. Playoff matchups are two weeks each (semis + finals).</p>', unsafe_allow_html=True)
                 
                 with st.spinner("Simulating playoff probabilities (this may take a moment)..."):
                     playoff_results = simulate_playoff_probabilities(
                         league, league_stats, year,
-                        sims=min(sim_count, 5000)
+                        sims=sim_count,
+                        blend_weight=blend_weight, injury_data=injury_data
                     )
                 
                 # Playoff standings table (like the reference image)
@@ -1039,12 +916,35 @@ def main():
                         return "#00FF88" if pct < threshold else "#FF4757"
                     return "#00FF88" if pct >= threshold else "#FF4757"
                 
-                # Build HTML table with color-coded percentages
+                def prob_to_american_odds(pct):
+                    """Convert probability to American odds. Returns '' if >99% or <1% (no odds needed)."""
+                    if pct >= 99 or pct < 1:
+                        return ""
+                    p = pct / 100
+                    if p >= 0.5:
+                        raw = -100 * p / (1 - p)
+                        odds = int(round(raw / 5) * 5)
+                        return f"{odds}"
+                    else:
+                        raw = 100 * (1 - p) / p
+                        odds = int(round(raw / 5) * 5)
+                        return f"+{odds}"
+                
+                # Only show odds columns if at least one team has odds in range (1-99%)
+                show_playoff_odds = any(1 <= r['playoff_prob'] < 99 for r in playoff_results)
+                show_champ_odds = any(1 <= r['championship_prob'] < 99 for r in playoff_results)
+                
+                # Build HTML table with color-coded percentages and American odds
                 seed_cols = [f"#{s}*" for s in range(1, 5)]
                 header_cells = "<th style='text-align:left;padding:8px;color:#888;'>Team</th><th style='text-align:center;padding:8px;color:#888;'>W</th><th style='text-align:center;padding:8px;color:#888;'>L</th>"
                 for c in seed_cols:
                     header_cells += f"<th style='text-align:center;padding:8px;color:#888;'>{c}</th>"
-                header_cells += "<th style='text-align:center;padding:8px;color:#888;'>No Playoffs</th><th style='text-align:center;padding:8px;color:#888;'>Playoff %</th><th style='text-align:center;padding:8px;color:#888;'>Championship %</th>"
+                header_cells += "<th style='text-align:center;padding:8px;color:#888;'>No Playoffs</th><th style='text-align:center;padding:8px;color:#888;'>Playoff %</th>"
+                if show_playoff_odds:
+                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Playoff Odds</th>"
+                header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ %</th>"
+                if show_champ_odds:
+                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ Odds</th>"
                 
                 rows = []
                 for r in playoff_results:
@@ -1056,7 +956,13 @@ def main():
                     no_play = r["seed_probs"].get("no_playoffs", 0)
                     cells += f"<td style='text-align:center;padding:8px;color:{pct_color(no_play, invert=True)};'>{fmt_pct(no_play)}</td>"
                     cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['playoff_prob'])};'>{fmt_pct(r['playoff_prob'])}</td>"
+                    if show_playoff_odds:
+                        playoff_odds = prob_to_american_odds(r['playoff_prob'])
+                        cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{playoff_odds if playoff_odds else '—'}</td>"
                     cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['championship_prob'])};'>{fmt_pct(r['championship_prob'])}</td>"
+                    if show_champ_odds:
+                        champ_odds = prob_to_american_odds(r['championship_prob'])
+                        cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{champ_odds if champ_odds else '—'}</td>"
                     rows.append(f"<tr>{cells}</tr>")
                 
                 table_html = f"""
@@ -1071,6 +977,136 @@ def main():
                 # Championship probability bar chart
                 st.markdown('<h3><i class="bi bi-trophy-fill" style="color: #FFD93D;"></i> Championship Probability</h3>', unsafe_allow_html=True)
                 st.plotly_chart(create_championship_chart(playoff_results, your_team_name), use_container_width=True)
+            
+            # ==================== STREAMER ANALYSIS (loads last) ====================
+            with tab_streamers:
+                st.markdown('<h2><i class="bi bi-arrow-repeat" style="color: #FF6B35;"></i> Streamer Analysis</h2>', unsafe_allow_html=True)
+                
+                if untouchables:
+                    st.markdown(f'<div style="padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border-left: 4px solid #00D4FF; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-lock-fill" style="color: #00D4FF;"></i> <strong>Untouchable players:</strong> {", ".join(untouchables)}</div>', unsafe_allow_html=True)
+                if has_open_spot:
+                    st.markdown('<div style="padding: 0.75rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00FF88; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-check-circle-fill" style="color: #00FF88;"></i> You have an open roster spot - streamers can be added without dropping anyone</div>', unsafe_allow_html=True)
+                
+                with st.spinner(f"Analyzing {num_streamers} potential streamers (considering drop candidates)..."):
+                    baseline_results = (win_pct, category_results, baseline_avg_cats)
+                    streamers = analyze_streamers(
+                        league, your_team_df, opp_team_df, 
+                        current_you, current_opp, baseline_results,
+                        blend_weight, year, num_streamers,
+                        untouchables=untouchables,
+                        has_open_roster_spot=has_open_spot,
+                        manual_watchlist=manual_watchlist
+                    )
+                    # Add playoff & championship delta % per streamer (vs baseline)
+                    your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
+                    if your_team_stats and streamers:
+                        w, l, t = your_team_stats["actual_wins"], your_team_stats["actual_losses"], your_team_stats["actual_ties"]
+                        playoff_baseline = simulate_playoff_probabilities(
+                            league, league_stats, year, sims=sim_count,
+                            blend_weight=blend_weight, injury_data=injury_data
+                        )
+                        playoff_if_win = simulate_playoff_probabilities(
+                            league, league_stats, year, sims=sim_count,
+                            record_override={team_id: (w + 1, l, t)},
+                            blend_weight=blend_weight, injury_data=injury_data
+                        )
+                        playoff_if_lose = simulate_playoff_probabilities(
+                            league, league_stats, year, sims=sim_count,
+                            record_override={team_id: (w, l + 1, t)},
+                            blend_weight=blend_weight, injury_data=injury_data
+                        )
+                        pb = next((r for r in playoff_baseline if r["team_id"] == team_id), {})
+                        pw = next((r for r in playoff_if_win if r["team_id"] == team_id), {})
+                        pl = next((r for r in playoff_if_lose if r["team_id"] == team_id), {})
+                        baseline_playoff, baseline_champ = pb.get("playoff_prob", 0), pb.get("championship_prob", 0)
+                        playoff_win, champ_win = pw.get("playoff_prob", 0), pw.get("championship_prob", 0)
+                        playoff_lose, champ_lose = pl.get("playoff_prob", 0), pl.get("championship_prob", 0)
+                        for s in streamers:
+                            wp = s["Win %"] / 100
+                            s_playoff = wp * playoff_win + (1 - wp) * playoff_lose
+                            s_champ = wp * champ_win + (1 - wp) * champ_lose
+                            s["Δ Playoff %"] = round(s_playoff - baseline_playoff, 1)
+                            s["Δ Champ %"] = round(s_champ - baseline_champ, 1)
+                
+                if streamers:
+                    st.markdown('<h3><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Top Recommendations</h3>', unsafe_allow_html=True)
+                    
+                    top_3 = streamers[:3]
+                    cols = st.columns(3)
+                    
+                    for i, player in enumerate(top_3):
+                        with cols[i]:
+                            delta_color = "#00FF88" if player["Δ Cats"] > 0 else "#FF4757" if player["Δ Cats"] < 0 else "#FFD93D"
+                            border_color = delta_color
+                            
+                            drop_text = player["Drop"]
+                            if drop_text == "(Open Spot)":
+                                drop_display = '<span style="color: #00FF88;">Add (Open Spot)</span>'
+                            else:
+                                drop_display = f'<span style="color: #FF4757;">Drop: {drop_text}</span>'
+                            
+                            watchlist_badge = ' <i class="bi bi-star-fill" style="color: #FFD93D; font-size: 0.9rem;"></i>' if player.get("Watchlist") else ""
+                            status_tag = f" <span style='color: #FFD93D;'>({player['Status']})</span>" if player.get("Status") else ""
+                            
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(145deg, #252545, #1A1A2E); 
+                                        border-radius: 12px; padding: 1.2rem; 
+                                        border-left: 4px solid {border_color};">
+                                <h4 style="margin: 0; color: white; font-family: Oswald;">{player['Player']}{watchlist_badge}</h4>
+                                <p style="color: #888; margin: 0.3rem 0; font-size: 0.9rem;">{player['Team']} - {player['Games']} games{status_tag}</p>
+                                <p style="margin: 0.5rem 0; font-size: 0.85rem;">{drop_display}</p>
+                                <div style="display: flex; justify-content: space-between; margin-top: 0.8rem;">
+                                    <div>
+                                        <span style="color: #888; font-size: 0.8rem;">Δ CATS</span><br/>
+                                        <span style="color: {delta_color}; font-size: 1.5rem; font-family: Oswald; font-weight: 600;">
+                                            {player['Δ Cats']:+.2f}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888; font-size: 0.8rem;">EXP CATS</span><br/>
+                                        <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
+                                            {player['Exp Cats']:.1f}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888; font-size: 0.8rem;">WIN %</span><br/>
+                                        <span style="color: white; font-size: 1.5rem; font-family: Oswald;">
+                                            {player['Win %']:.0f}%
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            if player["Cat Impacts"]:
+                                impacts_str = ", ".join([f"{'▲' if v > 0 else '▼'}{k}: {v:+.0f}%" for k, v in sorted(player["Cat Impacts"].items(), key=lambda x: abs(x[1]), reverse=True)[:3]])
+                                st.caption(impacts_str)
+                            
+                            if player["Risks"]:
+                                st.caption(f"Risk: {', '.join(player['Risks'])}")
+                    
+                    with st.expander("All Analyzed Streamers"):
+                        streamer_df = pd.DataFrame([{
+                            "WL": p.get("Watchlist", ""),
+                            "Player": p["Player"],
+                            "Team": p["Team"],
+                            "Status": p.get("Status", ""),
+                            "Games": p["Games"],
+                            "Drop": p["Drop"],
+                            "Δ Cats": p["Δ Cats"],
+                            "Exp Cats": p["Exp Cats"],
+                            "Win %": p["Win %"],
+                            "Δ Playoff %": p.get("Δ Playoff %", 0),
+                            "Δ Champ %": p.get("Δ Champ %", 0),
+                            "PTS": p["PTS"],
+                            "REB": p["REB"],
+                            "AST": p["AST"],
+                            "Risks": ", ".join(p["Risks"]) if p["Risks"] else ""
+                        } for p in streamers])
+                        
+                        st.dataframe(streamer_df, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("No streamers found with games remaining this week.")
             
             st.success("Simulation complete!")
             
