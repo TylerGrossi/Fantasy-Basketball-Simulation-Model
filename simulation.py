@@ -563,3 +563,148 @@ def calculate_league_stats(league, year):
             "points_for": getattr(team, 'points_for', 0),
         })
     return sorted(league_data, key=lambda x: x["standing"])
+
+
+def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
+                                   playoff_teams=4, regular_season_weeks=19,
+                                   record_override=None):
+    """
+    Monte Carlo simulation for playoff and championship probabilities.
+    Uses all-play win% as team strength, simulates remaining regular season matchups,
+    then simulates playoff bracket.
+
+    record_override: optional dict {team_id: (wins, losses, ties)} to override records
+        (e.g. for "what if we win/lose this week" scenarios)
+
+    Returns:
+        list of dicts with playoff_prob, seed_probs, championship_prob per team_id
+    """
+    teams = league.teams
+    current_week = league.currentMatchupPeriod
+    num_teams = len(teams)
+
+    # Build team_id -> strength (all-play win%) map
+    strength_map = {t["team_id"]: max(0.01, t["all_play_pct"]) for t in league_stats}
+    team_id_to_name = {t["team_id"]: t["team_name"] for t in league_stats}
+    team_id_to_record = {
+        t["team_id"]: (t["actual_wins"], t["actual_losses"], t["actual_ties"])
+        for t in league_stats
+    }
+    if record_override:
+        for tid, rec in record_override.items():
+            team_id_to_record[tid] = rec
+
+    # Build schedule: week -> list of (home_id, away_id) matchups
+    # Use league.scoreboard to get matchups per week (handles matchupPeriodId)
+    schedule_by_week = {}
+    for week in range(1, regular_season_weeks + 1):
+        try:
+            matchups = league.scoreboard(matchupPeriod=week)
+            for m in matchups:
+                home_id = m.home_team if isinstance(m.home_team, int) else getattr(
+                    m.home_team, "team_id", None
+                )
+                away_id = m.away_team if isinstance(m.away_team, int) else getattr(
+                    m.away_team, "team_id", None
+                )
+                if home_id is None or away_id is None:
+                    continue
+                if week not in schedule_by_week:
+                    schedule_by_week[week] = []
+                schedule_by_week[week].append((home_id, away_id))
+        except Exception:
+            continue
+
+    remaining_weeks = [w for w in range(current_week, regular_season_weeks + 1)
+                       if w in schedule_by_week and schedule_by_week[w]]
+
+    # Initialize counters
+    team_ids = list(strength_map.keys())
+    playoff_count = {tid: 0 for tid in team_ids}
+    seed_counts = {tid: {s: 0 for s in range(1, num_teams + 2)} for tid in team_ids}
+    championship_count = {tid: 0 for tid in team_ids}
+
+    for _ in range(sims):
+        wins = {tid: team_id_to_record[tid][0] for tid in team_ids}
+        losses = {tid: team_id_to_record[tid][1] for tid in team_ids}
+        ties = {tid: team_id_to_record[tid][2] for tid in team_ids}
+
+        for week in remaining_weeks:
+            for home_id, away_id in schedule_by_week.get(week, []):
+                s_home = strength_map.get(home_id, 0.5)
+                s_away = strength_map.get(away_id, 0.5)
+                total = s_home + s_away
+                if total <= 0:
+                    total = 1
+                p_home = s_home / total
+                r = np.random.random()
+                if r < p_home:
+                    wins[home_id] += 1
+                    losses[away_id] += 1
+                else:
+                    wins[away_id] += 1
+                    losses[home_id] += 1
+
+        # Final standings: sort by wins (then by fewer losses, then by all-play as tiebreaker)
+        def sort_key(tid):
+            w, l, t = wins[tid], losses[tid], ties[tid]
+            return (w, -l, strength_map.get(tid, 0))
+        sorted_ids = sorted(team_ids, key=sort_key, reverse=True)
+
+        for rank, tid in enumerate(sorted_ids, 1):
+            seed_counts[tid][min(rank, num_teams + 1)] += 1
+            if rank <= playoff_teams:
+                playoff_count[tid] += 1
+
+        # Simulate playoff bracket (top playoff_teams)
+        playoff_bracket = sorted_ids[:playoff_teams]
+        champ = _simulate_playoff_bracket(playoff_bracket, strength_map)
+        if champ is not None:
+            championship_count[champ] += 1
+
+    total_sims = sims
+    result = []
+    for tid in team_ids:
+        playoff_pct = playoff_count[tid] / total_sims * 100
+        champ_pct = championship_count[tid] / total_sims * 100
+        seed_probs = {}
+        no_playoffs = 0
+        for s in range(1, num_teams + 2):
+            pct = seed_counts[tid][s] / total_sims * 100
+            if s <= playoff_teams:
+                seed_probs[s] = pct
+            else:
+                no_playoffs += pct
+        seed_probs["no_playoffs"] = no_playoffs
+        result.append({
+            "team_id": tid,
+            "team_name": team_id_to_name[tid],
+            "playoff_prob": playoff_pct,
+            "championship_prob": champ_pct,
+            "seed_probs": seed_probs,
+            "record": team_id_to_record[tid],
+        })
+    return result
+
+
+def _simulate_playoff_bracket(bracket, strength_map):
+    """Simulate single-elimination bracket. bracket is ordered [1st, 2nd, ..., 8th]."""
+    if not bracket:
+        return None
+    current = list(bracket)
+    while len(current) > 1:
+        next_round = []
+        for i in range(0, len(current), 2):
+            if i + 1 >= len(current):
+                next_round.append(current[i])
+                continue
+            a, b = current[i], current[i + 1]
+            sa = strength_map.get(a, 0.5)
+            sb = strength_map.get(b, 0.5)
+            total = sa + sb
+            if total <= 0:
+                total = 1
+            winner = a if np.random.random() < sa / total else b
+            next_round.append(winner)
+        current = next_round
+    return current[0] if current else None

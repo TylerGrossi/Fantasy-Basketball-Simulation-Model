@@ -244,3 +244,34 @@ def create_outcome_distribution(outcome_counts, total_sims):
         )
     )
     return fig
+
+
+def create_championship_chart(playoff_results, your_team_name):
+    """Create bar chart of championship probabilities. Excludes teams with 0%."""
+    champ_data = [(r["team_name"], r["championship_prob"]) for r in playoff_results if r["championship_prob"] > 0.1]
+    champ_data.sort(key=lambda x: x[1], reverse=True)
+    labels = [x[0] for x in champ_data]
+    values = [x[1] for x in champ_data]
+    colors = ["#FF6B35" if t == your_team_name else "#00D4FF" for t in labels]
+    y_max = max(values) * 1.2 + 5 if values else 30  # Headroom so bars and labels don't get cut off
+    fig = go.Figure(data=[
+        go.Bar(
+            x=labels,
+            y=values,
+            marker_color=colors,
+            text=[f"{v:.1f}%" for v in values],
+            textposition="outside",
+            textfont=dict(family="Oswald", size=12, color="white"),
+        )
+    ])
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        yaxis_title="Championship %",
+        yaxis=dict(range=[0, y_max], gridcolor="rgba(255,255,255,0.1)"),
+        margin=dict(b=120, t=60),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(26,26,46,0.5)",
+        font=dict(color="#ccc", family="Roboto Condensed"),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+    )
+    return fig
