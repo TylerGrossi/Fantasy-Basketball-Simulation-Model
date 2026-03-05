@@ -5,15 +5,18 @@ Fantasy Basketball Simulator - Data loading, ESPN API, and schedule utilities.
 import pandas as pd
 import requests
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
 from config import (
     INJURED_STATUSES,
     NUMERIC_COLS,
+    STATUS_DISPLAY,
     TEAM_FIXES,
     NBA_TEAM_MAP,
 )
+
+ACTIVE_STATUSES = {"ACTIVE", ""}
 
 
 # -----------------------------------------------------------------------------
@@ -38,7 +41,60 @@ def flatten_stat_dict(d):
     return {k: (v.get("value", v) if isinstance(v, dict) else v) for k, v in d.items()}
 
 
+def _parse_expected_return_date(player):
+    """Parse expected return date from ESPN player object. Returns date or None."""
+    val = getattr(player, "expected_return_date", None)
+    if val is None:
+        return None
+    if isinstance(val, date):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, (list, tuple)) and len(val) >= 3:
+        try:
+            return date(int(val[0]), int(val[1]), int(val[2]))
+        except (ValueError, TypeError):
+            pass
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val.replace("Z", "+00:00")).date()
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def count_games_left_for_player(player, injury_data=None):
+    """
+    Count games remaining this week where player is available.
+    For non-ACTIVE players: uses expected return date (from player or injury_data) to count only
+    games on or after that date. If no return date, assumes ruled out for the week (0 games).
+    """
+    eastern = ZoneInfo("America/New_York")
+    today = datetime.now(eastern).date()
+    end_of_week = today + timedelta(days=(6 - today.weekday()))
+    team_abbrev = getattr(player, "proTeam", None)
+    if pd.isna(team_abbrev):
+        return 0
+    sched = get_team_schedule(team_abbrev)
+    week_games = [g for g in sched if today <= g <= end_of_week]
+    if not week_games:
+        return 0
+    injury_status = getattr(player, "injuryStatus", None) or ""
+    status_upper = str(injury_status).upper().strip()
+    if status_upper in ACTIVE_STATUSES:
+        return len(week_games)
+    expected_return = _parse_expected_return_date(player)
+    if expected_return is None and injury_data:
+        inj_info = injury_data.get(player.name, {})
+        if isinstance(inj_info, dict):
+            expected_return = inj_info.get("return_date_obj")
+    if expected_return is None:
+        return 0
+    return sum(1 for g in week_games if g >= expected_return)
+
+
 def filter_injured(roster):
+    """Legacy: filter to healthy-only. Prefer add_games_left_with_injury for injury-aware logic."""
     return [p for p in roster if p.injuryStatus not in INJURED_STATUSES]
 
 
@@ -184,7 +240,7 @@ def get_team_schedule(team_abbrev):
 
 
 def count_games_left(team_abbrev):
-    """Count games remaining this week."""
+    """Count games remaining this week (for a team, no injury consideration)."""
     eastern = ZoneInfo("America/New_York")
     today = datetime.now(eastern).date()
     end_of_week = today + timedelta(days=(6 - today.weekday()))
@@ -193,7 +249,97 @@ def count_games_left(team_abbrev):
 
 
 def add_games_left(df):
-    """Add Games Left column to dataframe."""
+    """Add Games Left column to dataframe (team-based, no injury)."""
     df = df.copy()
     df["Games Left"] = df["NBA_Team"].apply(count_games_left)
     return df
+
+
+def add_games_left_with_injury(df, roster, injury_data=None):
+    """
+    Add Games Left column using ESPN estimated return dates.
+    Non-ACTIVE players with return date: count only games on/after that date.
+    Non-ACTIVE players without return date: 0 games (ruled out for week).
+    injury_data from get_espn_injury_data() provides return dates when fantasy API doesn't.
+    """
+    df = df.copy()
+    name_to_player = {p.name: p for p in roster}
+    def games_for_row(row):
+        player = name_to_player.get(row["Player"])
+        if player is None:
+            return count_games_left(row["NBA_Team"])
+        return count_games_left_for_player(player, injury_data)
+    df["Games Left"] = df.apply(games_for_row, axis=1)
+    return df
+
+
+@st.cache_data(ttl=3600)
+def get_espn_injury_data():
+    """Fetch NBA injuries from ESPN public API. Returns dict: player_name -> {description, return_date}."""
+    url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+    try:
+        r = requests.get(url, timeout=15)
+        if r.status_code != 200:
+            return {}
+        data = r.json()
+        result = {}
+        for team in data.get("injuries", []):
+            for inj in team.get("injuries", []):
+                athlete = inj.get("athlete", {})
+                display_name = athlete.get("displayName") or f"{athlete.get('firstName', '')} {athlete.get('lastName', '')}".strip()
+                short_name = athlete.get("shortName", "")
+                if not display_name:
+                    continue
+                details = inj.get("details", {}) or {}
+                return_date_raw = details.get("returnDate")
+                return_date = ""
+                return_date_obj = None
+                try:
+                    if return_date_raw:
+                        d = date.fromisoformat(return_date_raw[:10])
+                        return_date = d.strftime("%m/%d/%Y")
+                        return_date_obj = d
+                except (ValueError, TypeError):
+                    pass
+                inj_entry = {
+                    "description": inj.get("shortComment", ""),
+                    "return_date": return_date or "",
+                    "return_date_obj": return_date_obj,
+                }
+                result[display_name] = inj_entry
+                if short_name and short_name != display_name:
+                    result[short_name] = inj_entry
+        return result
+    except Exception:
+        return {}
+
+
+def build_injury_table(roster_list, injury_data):
+    """
+    Build injury table for roster players who are NOT active.
+    roster_list: list of (roster, team_name) tuples
+    injury_data: dict from get_espn_injury_data() - player_name -> {description, return_date}
+    Returns list of dicts: Player, Team, Injury, Expected Return, Description
+    """
+    rows = []
+    for roster, team_name in roster_list:
+        for p in roster:
+            status = getattr(p, "injuryStatus", None) or ""
+            status_upper = str(status).upper().strip()
+            if status_upper in ACTIVE_STATUSES:
+                continue
+            inj_info = injury_data.get(p.name, {})
+            if isinstance(inj_info, str):
+                inj_info = {"description": inj_info, "return_date": ""}
+            expected = _parse_expected_return_date(p)
+            expected_str = expected.strftime("%m/%d/%Y") if expected else inj_info.get("return_date", "") or "—"
+            desc = inj_info.get("description", "") or "—"
+            status_display = STATUS_DISPLAY.get(status_upper, status) if status else "—"
+            rows.append({
+                "Player": p.name,
+                "Team": team_name,
+                "Injury": status_display,
+                "Expected Return": expected_str,
+                "Description": desc,
+            })
+    return rows

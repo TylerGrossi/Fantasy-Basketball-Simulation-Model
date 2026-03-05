@@ -16,9 +16,10 @@ from data import (
     get_matchup_info,
     get_current_totals,
     build_stat_df,
-    add_games_left,
-    filter_injured,
+    add_games_left_with_injury,
     flatten_stat_dict,
+    get_espn_injury_data,
+    build_injury_table,
 )
 from simulation import (
     simulate_team,
@@ -27,12 +28,14 @@ from simulation import (
     analyze_streamers,
     analyze_bench_strategy,
     calculate_league_stats,
+    simulate_playoff_probabilities,
 )
 from visualizations import (
     create_scoreboard,
     create_win_probability_gauge,
     create_category_chart,
     create_outcome_distribution,
+    create_championship_chart,
 )
 from styles import CUSTOM_CSS
 
@@ -101,7 +104,7 @@ def main():
         
         untouchables_input = st.text_area(
             "Untouchable Players",
-            value="Tyrese Maxey\nNikola Jokic\nJalen Williams\nVJ Edgecombe\nNikola Vucevic\nJa Morant\nIvica Zubac\nKawhi Leonard\nKel'el Ware\nShaedon Sharpe\nKyshawn George\nMatas Buzelis",
+            value="Tyrese Maxey\nNikola Jokic\nJalen Williams\nVJ Edgecombe\nNikola Vucevic\nJa Morant\nIvica Zubac\nKawhi Leonard\nKel'el Ware\nMatas Buzelis",
             help="Enter player names (one per line) that should never be recommended as drops",
             placeholder="LeBron James\nStephen Curry\nKevin Durant"
         )
@@ -149,21 +152,22 @@ def main():
             progress = st.progress(0)
             status_text.text("Loading player stats...")
             
-            your_filtered = filter_injured(your_team_obj.roster)
-            opp_filtered = filter_injured(opp_team_obj.roster)
+            your_roster = your_team_obj.roster
+            opp_roster = opp_team_obj.roster
             
-            your_season = build_stat_df(your_filtered, f"{year}_total", "Season", your_team_name, year)
-            your_last30 = build_stat_df(your_filtered, f"{year}_last_30", "Last30", your_team_name, year)
-            opp_season = build_stat_df(opp_filtered, f"{year}_total", "Season", opp_team_name, year)
-            opp_last30 = build_stat_df(opp_filtered, f"{year}_last_30", "Last30", opp_team_name, year)
+            your_season = build_stat_df(your_roster, f"{year}_total", "Season", your_team_name, year)
+            your_last30 = build_stat_df(your_roster, f"{year}_last_30", "Last30", your_team_name, year)
+            opp_season = build_stat_df(opp_roster, f"{year}_total", "Season", opp_team_name, year)
+            opp_last30 = build_stat_df(opp_roster, f"{year}_last_30", "Last30", opp_team_name, year)
             
             progress.progress(25)
-            status_text.text("Fetching NBA schedules...")
+            status_text.text("Fetching NBA schedules and injury data...")
             
-            your_season = add_games_left(your_season)
-            your_last30 = add_games_left(your_last30)
-            opp_season = add_games_left(opp_season)
-            opp_last30 = add_games_left(opp_last30)
+            injury_data = get_espn_injury_data()
+            your_season = add_games_left_with_injury(your_season, your_roster, injury_data)
+            your_last30 = add_games_left_with_injury(your_last30, your_roster, injury_data)
+            opp_season = add_games_left_with_injury(opp_season, opp_roster, injury_data)
+            opp_last30 = add_games_left_with_injury(opp_last30, opp_roster, injury_data)
             
             progress.progress(50)
             status_text.text("Blending statistics...")
@@ -214,13 +218,18 @@ def main():
             st.session_state['year'] = year
             st.session_state['team_id'] = team_id
             
+            # Pre-compute league stats (used by League Stats and Playoff tabs)
+            with st.spinner("Calculating league statistics..."):
+                league_stats = calculate_league_stats(league, year)
+            
             # Create tabs for different sections
-            tab_matchup, tab_streamers, tab_strategy, tab_season, tab_league = st.tabs([
+            tab_matchup, tab_streamers, tab_strategy, tab_season, tab_league, tab_playoff = st.tabs([
                 "Matchup Analysis",
                 "Streamer Analysis", 
                 "Bench Strategy",
                 "My Season Stats",
-                "League Stats"
+                "League Stats",
+                "Playoff & Championship"
             ])
             
             # ==================== TAB 1: MATCHUP ANALYSIS ====================
@@ -280,32 +289,73 @@ def main():
                         
                         is_swing = abs(you_pct - opp_pct) <= 15
                         
+                        if "%" in cat:
+                            your_proj_str = f"{y_proj * 100:.1f}%"
+                            opp_proj_str = f"{o_proj * 100:.1f}%"
+                            your_ci_str = f"{y_ci[0] * 100:.0f}%-{y_ci[1] * 100:.0f}%"
+                            opp_ci_str = f"{o_ci[0] * 100:.0f}%-{o_ci[1] * 100:.0f}%"
+                        else:
+                            your_proj_str = f"{y_proj:.1f}"
+                            opp_proj_str = f"{o_proj:.1f}"
+                            your_ci_str = f"{y_ci[0]:.1f} - {y_ci[1]:.1f}"
+                            opp_ci_str = f"{o_ci[0]:.1f} - {o_ci[1]:.1f}"
+                        
                         cat_data.append({
                             "Category": cat,
                             "You Win %": f"{you_pct:.0f}%",
                             "Opp Win %": f"{opp_pct:.0f}%",
-                            "Your Proj": f"{y_proj:.2f}" if "%" in cat else f"{y_proj:.1f}",
-                            "Opp Proj": f"{o_proj:.2f}" if "%" in cat else f"{o_proj:.1f}",
-                            "Your CI": f"{y_ci[0]:.1f} - {y_ci[1]:.1f}",
-                            "Opp CI": f"{o_ci[0]:.1f} - {o_ci[1]:.1f}",
+                            "Your Proj": your_proj_str,
+                            "Opp Proj": opp_proj_str,
+                            "Your CI": your_ci_str,
+                            "Opp CI": opp_ci_str,
                             "Swing": "*" if is_swing else ""
                         })
                     
                     st.dataframe(pd.DataFrame(cat_data), use_container_width=True, hide_index=True, height=560)
                 
                 # Rosters
+                def format_roster_for_display(df, cols):
+                    out = df[cols].copy()
+                    for pct_col in ["FG%", "FT%"]:
+                        if pct_col in out.columns:
+                            out[pct_col] = out[pct_col].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "")
+                    for col in out.columns:
+                        if col not in ["FG%", "FT%", "Player", "NBA_Team"] and out[col].dtype in [np.float64, np.float32]:
+                            out[col] = out[col].round(2)
+                    return out.rename(columns={"NBA_Team": "NBA Team"})
+                
                 with st.expander("Your Roster"):
                     roster_cols = ["Player", "NBA_Team", "Games Left", "PTS", "REB", "AST", "3PM", "FG%", "FT%"]
                     display_cols = [c for c in roster_cols if c in your_team_df.columns]
-                    display_df = your_team_df[display_cols].round(2).copy()
-                    if untouchables:
-                        untouchables_lower = [p.lower().strip() for p in untouchables]
-                        display_df["Lock"] = display_df["Player"].str.lower().str.strip().isin(untouchables_lower).map({True: "Y", False: ""})
+                    display_df = format_roster_for_display(your_team_df, display_cols)
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                 
                 with st.expander("Opponent Roster"):
                     display_cols = [c for c in roster_cols if c in opp_team_df.columns]
-                    st.dataframe(opp_team_df[display_cols].round(2), use_container_width=True, hide_index=True)
+                    opp_display_df = format_roster_for_display(opp_team_df, display_cols)
+                    st.dataframe(opp_display_df, use_container_width=True, hide_index=True)
+                
+                with st.expander("Injury Report"):
+                    injury_rows = build_injury_table(
+                        [(your_roster, your_team_name), (opp_roster, opp_team_name)],
+                        injury_data,
+                    )
+                    if injury_rows:
+                        injury_df = pd.DataFrame(injury_rows)
+                        st.dataframe(
+                            injury_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Player": st.column_config.TextColumn(width="medium"),
+                                "Team": st.column_config.TextColumn(width="small"),
+                                "Injury": st.column_config.TextColumn(width="small"),
+                                "Expected Return": st.column_config.TextColumn(width="small"),
+                                "Description": st.column_config.TextColumn(width="large"),
+                            }
+                        )
+                    else:
+                        st.markdown('<p style="color: #888;">No injured players in this matchup.</p>', unsafe_allow_html=True)
             
             # ==================== TAB 2: STREAMER ANALYSIS ====================
             with tab_streamers:
@@ -326,6 +376,32 @@ def main():
                         has_open_roster_spot=has_open_spot,
                         manual_watchlist=manual_watchlist
                     )
+                    # Add playoff & championship delta % per streamer (vs baseline)
+                    your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
+                    if your_team_stats and streamers:
+                        w, l, t = your_team_stats["actual_wins"], your_team_stats["actual_losses"], your_team_stats["actual_ties"]
+                        playoff_sims = min(sim_count, 3000)
+                        playoff_baseline = simulate_playoff_probabilities(league, league_stats, year, sims=playoff_sims)
+                        playoff_if_win = simulate_playoff_probabilities(
+                            league, league_stats, year, sims=playoff_sims,
+                            record_override={team_id: (w + 1, l, t)}
+                        )
+                        playoff_if_lose = simulate_playoff_probabilities(
+                            league, league_stats, year, sims=playoff_sims,
+                            record_override={team_id: (w, l + 1, t)}
+                        )
+                        pb = next((r for r in playoff_baseline if r["team_id"] == team_id), {})
+                        pw = next((r for r in playoff_if_win if r["team_id"] == team_id), {})
+                        pl = next((r for r in playoff_if_lose if r["team_id"] == team_id), {})
+                        baseline_playoff, baseline_champ = pb.get("playoff_prob", 0), pb.get("championship_prob", 0)
+                        playoff_win, champ_win = pw.get("playoff_prob", 0), pw.get("championship_prob", 0)
+                        playoff_lose, champ_lose = pl.get("playoff_prob", 0), pl.get("championship_prob", 0)
+                        for s in streamers:
+                            wp = s["Win %"] / 100
+                            s_playoff = wp * playoff_win + (1 - wp) * playoff_lose
+                            s_champ = wp * champ_win + (1 - wp) * champ_lose
+                            s["Δ Playoff %"] = round(s_playoff - baseline_playoff, 1)
+                            s["Δ Champ %"] = round(s_champ - baseline_champ, 1)
                 
                 if streamers:
                     st.markdown('<h3><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Top Recommendations</h3>', unsafe_allow_html=True)
@@ -395,6 +471,8 @@ def main():
                             "Δ Cats": p["Δ Cats"],
                             "Exp Cats": p["Exp Cats"],
                             "Win %": p["Win %"],
+                            "Δ Playoff %": p.get("Δ Playoff %", 0),
+                            "Δ Champ %": p.get("Δ Champ %", 0),
                             "PTS": p["PTS"],
                             "REB": p["REB"],
                             "AST": p["AST"],
@@ -824,9 +902,6 @@ def main():
                 st.markdown('<h2><i class="bi bi-trophy-fill" style="color: #FF6B35;"></i> League Statistics</h2>', unsafe_allow_html=True)
                 st.markdown('<p style="color: #888;">League standings, all-play records (your record if you played everyone every week), and luck factor analysis.</p>', unsafe_allow_html=True)
                 
-                with st.spinner("Calculating league statistics (this may take a moment)..."):
-                    league_stats = calculate_league_stats(league, year)
-                
                 your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
                 
                 if your_team_stats:
@@ -933,6 +1008,69 @@ def main():
                         })
                     
                     st.dataframe(pd.DataFrame(luck_data), use_container_width=True, hide_index=True)
+            
+            # ==================== TAB 6: PLAYOFF & CHAMPIONSHIP ====================
+            with tab_playoff:
+                st.markdown('<h2><i class="bi bi-trophy-fill" style="color: #FF6B35;"></i> Playoff & Championship Probabilities</h2>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #888;">Monte Carlo simulation of remaining regular season and playoff bracket. Uses all-play win% as team strength.</p>', unsafe_allow_html=True)
+                
+                with st.spinner("Simulating playoff probabilities (this may take a moment)..."):
+                    playoff_results = simulate_playoff_probabilities(
+                        league, league_stats, year,
+                        sims=min(sim_count, 5000)
+                    )
+                
+                # Playoff standings table (like the reference image)
+                st.markdown('<h3><i class="bi bi-bar-chart-steps" style="color: #00D4FF;"></i> Playoff Standings</h3>', unsafe_allow_html=True)
+                
+                def fmt_pct(pct):
+                    if pct >= 99.5:
+                        return ">99%"
+                    if pct <= 0.5:
+                        return "X" if pct < 0.01 else "<1%"
+                    return f"{pct:.0f}%"
+                
+                def pct_color(pct, invert=False):
+                    """Green for higher prob, red for lower. invert=True for No Playoffs (high = bad)."""
+                    if pct < 0.01:
+                        return "#666"
+                    threshold = 25
+                    if invert:
+                        return "#00FF88" if pct < threshold else "#FF4757"
+                    return "#00FF88" if pct >= threshold else "#FF4757"
+                
+                # Build HTML table with color-coded percentages
+                seed_cols = [f"#{s}*" for s in range(1, 5)]
+                header_cells = "<th style='text-align:left;padding:8px;color:#888;'>Team</th><th style='text-align:center;padding:8px;color:#888;'>W</th><th style='text-align:center;padding:8px;color:#888;'>L</th>"
+                for c in seed_cols:
+                    header_cells += f"<th style='text-align:center;padding:8px;color:#888;'>{c}</th>"
+                header_cells += "<th style='text-align:center;padding:8px;color:#888;'>No Playoffs</th><th style='text-align:center;padding:8px;color:#888;'>Playoff %</th><th style='text-align:center;padding:8px;color:#888;'>Championship %</th>"
+                
+                rows = []
+                for r in playoff_results:
+                    w, l, t = r["record"]
+                    cells = f"<td style='padding:8px;color:white;'>{r['team_name']}</td><td style='text-align:center;padding:8px;color:white;'>{w}</td><td style='text-align:center;padding:8px;color:white;'>{l}</td>"
+                    for s in range(1, 5):
+                        pct = r["seed_probs"].get(s, 0)
+                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(pct)};'>{fmt_pct(pct)}</td>"
+                    no_play = r["seed_probs"].get("no_playoffs", 0)
+                    cells += f"<td style='text-align:center;padding:8px;color:{pct_color(no_play, invert=True)};'>{fmt_pct(no_play)}</td>"
+                    cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['playoff_prob'])};'>{fmt_pct(r['playoff_prob'])}</td>"
+                    cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['championship_prob'])};'>{fmt_pct(r['championship_prob'])}</td>"
+                    rows.append(f"<tr>{cells}</tr>")
+                
+                table_html = f"""
+                <div style="overflow-x:auto;margin-bottom:1.5rem;">
+                <table style="width:100%;border-collapse:collapse;font-family:Roboto Condensed;">
+                <thead><tr style="border-bottom:1px solid rgba(255,255,255,0.2);">{header_cells}</tr></thead>
+                <tbody>{"".join(rows)}</tbody>
+                </table></div>
+                """
+                st.markdown(table_html, unsafe_allow_html=True)
+                
+                # Championship probability bar chart
+                st.markdown('<h3><i class="bi bi-trophy-fill" style="color: #FFD93D;"></i> Championship Probability</h3>', unsafe_allow_html=True)
+                st.plotly_chart(create_championship_chart(playoff_results, your_team_name), use_container_width=True)
             
             st.success("Simulation complete!")
             
