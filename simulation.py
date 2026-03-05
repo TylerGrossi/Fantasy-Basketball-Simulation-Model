@@ -10,24 +10,43 @@ from config import (
     CATEGORIES,
     CATEGORY_VARIANCE,
     NUMERIC_COLS,
+    PLAYOFF_VARIANCE_MULTIPLIER,
+    REGULAR_SEASON_VARIANCE_EARLY_WEEK,
+    REGULAR_SEASON_VARIANCE_MID_WEEK,
+    REGULAR_SEASON_VARIANCE_LATE_WEEK,
     STATUS_DISPLAY,
 )
 from data import (
     build_stat_df,
     add_games_left,
+    add_games_in_week,
     is_player_injured,
     flatten_stat_dict,
+    get_espn_injury_data,
 )
 
 
-def simulate_team(team_df, sims=10000):
+def _get_matchup_variance_multiplier():
+    """Variance by day: 1.45 Mon/Tue, 1.25 Wed–Fri, 1.0 Sat/Sun."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo("America/New_York")
+    weekday = datetime.now(eastern).weekday()  # 0=Mon, 6=Sun
+    if weekday <= 1:  # Monday or Tuesday
+        return REGULAR_SEASON_VARIANCE_EARLY_WEEK
+    if weekday <= 4:  # Wednesday, Thursday, Friday
+        return REGULAR_SEASON_VARIANCE_MID_WEEK
+    return REGULAR_SEASON_VARIANCE_LATE_WEEK  # Saturday, Sunday
+
+
+def simulate_team(team_df, sims=10000, variance_multiplier=1.0):
     """Monte Carlo simulation for team stats - Vectorized NumPy version for speed."""
     if team_df.empty:
         all_stats = list(CATEGORY_VARIANCE.keys()) + ["FG%", "FT%", "3P%"]
         return {stat: [0.0] * sims for stat in all_stats}
 
     stats_to_sim = list(CATEGORY_VARIANCE.keys())
-    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
+    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim]) * variance_multiplier
     team_df_clean = team_df.fillna(0)
     means = team_df_clean[stats_to_sim].values
     games = team_df_clean["Games Left"].values.astype(int)
@@ -478,6 +497,123 @@ def analyze_bench_strategy(your_team_df, opp_team_df, current_totals_you, curren
     }
 
 
+def _build_projected_weekly_for_team(team, week, year, injury_data, blend_weight):
+    """
+    Build projected category totals for a team in a specific week.
+    Uses season + last30 blend, injury-aware games in that week.
+    Returns dict: category -> projected total (float).
+    """
+    roster = getattr(team, "roster", [])
+    if not roster:
+        return {cat: 0.0 for cat in CATEGORIES}
+    team_name = getattr(team, "team_name", "Unknown")
+    season_df = build_stat_df(roster, f"{year}_total", "Season", team_name, year)
+    last30_df = build_stat_df(roster, f"{year}_last_30", "Last30", team_name, year)
+    if season_df.empty:
+        return {cat: 0.0 for cat in CATEGORIES}
+    if last30_df.empty:
+        merged = season_df.copy()
+        for col in NUMERIC_COLS:
+            merged[col] = merged[col] if col in merged.columns else 0.0
+    else:
+        merged = season_df.merge(last30_df, on=["Player", "NBA_Team"], how="outer", suffixes=("_season", "_30"))
+        merged = merged.fillna(0)
+        for col in NUMERIC_COLS:
+            if f"{col}_30" in merged.columns and f"{col}_season" in merged.columns:
+                merged[col] = merged[f"{col}_30"] * blend_weight + merged[f"{col}_season"] * (1 - blend_weight)
+            elif f"{col}_season" in merged.columns:
+                merged[col] = merged[f"{col}_season"]
+            elif f"{col}_30" in merged.columns:
+                merged[col] = merged[f"{col}_30"]
+            else:
+                merged[col] = 0.0
+    merged = add_games_in_week(merged, roster, week, year, injury_data)
+    merged = merged[merged["Games This Week"] > 0]
+    if merged.empty:
+        return {cat: 0.0 for cat in CATEGORIES}
+    stats_to_sim = list(CATEGORY_VARIANCE.keys())
+    proj = {}
+    for stat in stats_to_sim:
+        if stat in merged.columns:
+            proj[stat] = float((merged[stat] * merged["Games This Week"]).sum())
+        else:
+            proj[stat] = 0.0
+    fgm, fga = proj.get("FGM", 0), proj.get("FGA", 0)
+    ftm, fta = proj.get("FTM", 0), proj.get("FTA", 0)
+    tpm, tpa = proj.get("3PM", 0), proj.get("3PA", 0)
+    proj["FG%"] = fgm / fga if fga > 0 else 0.0
+    proj["FT%"] = ftm / fta if fta > 0 else 0.0
+    proj["3P%"] = tpm / tpa if tpa > 0 else 0.0
+    return proj
+
+
+def _build_projected_for_all_teams(league, year, injury_data, blend_weight, remaining_weeks):
+    """
+    Build projected weekly stats for all teams for each remaining week.
+    Returns: dict team_id -> {week -> {cat -> projected}}
+    """
+    injury_data = injury_data or {}
+    result = {}
+    for team in league.teams:
+        tid = team.team_id
+        result[tid] = {}
+        for week in remaining_weeks:
+            result[tid][week] = _build_projected_weekly_for_team(
+                team, week, year, injury_data, blend_weight
+            )
+    return result
+
+
+def _combine_projected_stats(proj1, proj2):
+    """Combine two weeks of projected stats (for two-week playoff matchups)."""
+    raw_stats = ["FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO", "PTS", "DD", "TW"]
+    combined = {}
+    for s in raw_stats:
+        combined[s] = proj1.get(s, 0) + proj2.get(s, 0)
+    fgm, fga = combined.get("FGM", 0), combined.get("FGA", 0)
+    ftm, fta = combined.get("FTM", 0), combined.get("FTA", 0)
+    tpm, tpa = combined.get("3PM", 0), combined.get("3PA", 0)
+    combined["FG%"] = fgm / fga if fga > 0 else 0.0
+    combined["FT%"] = ftm / fta if fta > 0 else 0.0
+    combined["3P%"] = tpm / tpa if tpa > 0 else 0.0
+    return combined
+
+
+def _simulate_matchup_winner(home_id, away_id, proj_home, proj_away, variance_multiplier=1.0):
+    """
+    Simulate a single matchup outcome using category-by-category comparison.
+    Draws from Normal(proj, variance*proj) for each team/category, then compares.
+    variance_multiplier: scale variance (e.g. 1.4 for playoff = more upsets).
+    Returns winner team_id (home_id or away_id).
+    """
+    stats_to_sim = list(CATEGORY_VARIANCE.keys())
+    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim]) * variance_multiplier
+    home_wins = 0
+    away_wins = 0
+    for i, stat in enumerate(stats_to_sim):
+        m_h = proj_home.get(stat, 0)
+        m_a = proj_away.get(stat, 0)
+        std_h = max(0.01, abs(m_h) * variance_vals[i])
+        std_a = max(0.01, abs(m_a) * variance_vals[i])
+        draw_h = np.random.normal(m_h, std_h)
+        draw_a = np.random.normal(m_a, std_a)
+        if stat == "TO":
+            if draw_h < draw_a:
+                home_wins += 1
+            elif draw_a < draw_h:
+                away_wins += 1
+        else:
+            if draw_h > draw_a:
+                home_wins += 1
+            elif draw_a > draw_h:
+                away_wins += 1
+    if home_wins > away_wins:
+        return home_id
+    if away_wins > home_wins:
+        return away_id
+    return home_id if np.random.random() < 0.5 else away_id
+
+
 def calculate_league_stats(league, year):
     """Calculate league-wide statistics including all-play records."""
     teams = league.teams
@@ -567,14 +703,16 @@ def calculate_league_stats(league, year):
 
 def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                                    playoff_teams=4, regular_season_weeks=19,
-                                   record_override=None):
+                                   record_override=None, blend_weight=0.7,
+                                   injury_data=None):
     """
     Monte Carlo simulation for playoff and championship probabilities.
-    Uses all-play win% as team strength, simulates remaining regular season matchups,
-    then simulates playoff bracket.
+    Uses projected roster strength (season + last30 blend, injury-aware) and
+    simulates category-by-category matchup outcomes (like weekly matchup sim).
 
     record_override: optional dict {team_id: (wins, losses, ties)} to override records
-        (e.g. for "what if we win/lose this week" scenarios)
+    blend_weight: weight for last30 vs season (default 0.7 = 70% last30)
+    injury_data: from get_espn_injury_data(); fetched if None
 
     Returns:
         list of dicts with playoff_prob, seed_probs, championship_prob per team_id
@@ -583,8 +721,9 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
     current_week = league.currentMatchupPeriod
     num_teams = len(teams)
 
-    # Build team_id -> strength (all-play win%) map
-    strength_map = {t["team_id"]: max(0.01, t["all_play_pct"]) for t in league_stats}
+    if injury_data is None:
+        injury_data = get_espn_injury_data()
+
     team_id_to_name = {t["team_id"]: t["team_name"] for t in league_stats}
     team_id_to_record = {
         t["team_id"]: (t["actual_wins"], t["actual_losses"], t["actual_ties"])
@@ -595,7 +734,6 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             team_id_to_record[tid] = rec
 
     # Build schedule: week -> list of (home_id, away_id) matchups
-    # Use league.scoreboard to get matchups per week (handles matchupPeriodId)
     schedule_by_week = {}
     for week in range(1, regular_season_weeks + 1):
         try:
@@ -618,8 +756,24 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
     remaining_weeks = [w for w in range(current_week, regular_season_weeks + 1)
                        if w in schedule_by_week and schedule_by_week[w]]
 
-    # Initialize counters
-    team_ids = list(strength_map.keys())
+    # Playoff matchups are two weeks each: semis = weeks 20-21, finals = weeks 22-23
+    semis_weeks = (regular_season_weeks + 1, regular_season_weeks + 2)
+    finals_weeks = (regular_season_weeks + 3, regular_season_weeks + 4)
+    playoff_week_pairs = [semis_weeks, finals_weeks]
+    all_weeks_for_proj = remaining_weeks + list(semis_weeks) + list(finals_weeks)
+
+    # Build projected weekly stats for all teams (regular season + playoff weeks)
+    projected = _build_projected_for_all_teams(
+        league, year, injury_data, blend_weight, all_weeks_for_proj
+    )
+
+    # Tiebreaker: use all-play for standings tiebreak when records are equal
+    strength_map = {t["team_id"]: max(0.01, t["all_play_pct"]) for t in league_stats}
+
+    # Same day-of-week variance as weekly matchup (higher uncertainty early in week)
+    matchup_variance = _get_matchup_variance_multiplier()
+
+    team_ids = list(team_id_to_name.keys())
     playoff_count = {tid: 0 for tid in team_ids}
     seed_counts = {tid: {s: 0 for s in range(1, num_teams + 2)} for tid in team_ids}
     championship_count = {tid: 0 for tid in team_ids}
@@ -629,23 +783,23 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
         losses = {tid: team_id_to_record[tid][1] for tid in team_ids}
         ties = {tid: team_id_to_record[tid][2] for tid in team_ids}
 
+        # Simulate remaining regular season: category-by-category (Option B)
         for week in remaining_weeks:
             for home_id, away_id in schedule_by_week.get(week, []):
-                s_home = strength_map.get(home_id, 0.5)
-                s_away = strength_map.get(away_id, 0.5)
-                total = s_home + s_away
-                if total <= 0:
-                    total = 1
-                p_home = s_home / total
-                r = np.random.random()
-                if r < p_home:
+                proj_home = projected.get(home_id, {}).get(week, {})
+                proj_away = projected.get(away_id, {}).get(week, {})
+                winner = _simulate_matchup_winner(
+                    home_id, away_id, proj_home, proj_away,
+                    variance_multiplier=matchup_variance
+                )
+                if winner == home_id:
                     wins[home_id] += 1
                     losses[away_id] += 1
                 else:
                     wins[away_id] += 1
                     losses[home_id] += 1
 
-        # Final standings: sort by wins (then by fewer losses, then by all-play as tiebreaker)
+        # Final standings: sort by wins (then fewer losses, then all-play tiebreaker)
         def sort_key(tid):
             w, l, t = wins[tid], losses[tid], ties[tid]
             return (w, -l, strength_map.get(tid, 0))
@@ -656,9 +810,12 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             if rank <= playoff_teams:
                 playoff_count[tid] += 1
 
-        # Simulate playoff bracket (top playoff_teams)
+        # Simulate playoff bracket: two-week matchups, injury-aware, category-by-category
         playoff_bracket = sorted_ids[:playoff_teams]
-        champ = _simulate_playoff_bracket(playoff_bracket, strength_map)
+        champ = _simulate_playoff_bracket_projected(
+            playoff_bracket, projected, playoff_week_pairs,
+            day_variance_multiplier=matchup_variance
+        )
         if champ is not None:
             championship_count[champ] += 1
 
@@ -687,24 +844,41 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
     return result
 
 
-def _simulate_playoff_bracket(bracket, strength_map):
-    """Simulate single-elimination bracket. bracket is ordered [1st, 2nd, ..., 8th]."""
+def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
+                                        day_variance_multiplier=1.0):
+    """
+    Simulate single-elimination bracket. Each round is a two-week matchup.
+    playoff_week_pairs: [(semis_w1, semis_w2), (finals_w1, finals_w2)] e.g. [(20,21), (22,23)]
+    day_variance_multiplier: from _get_matchup_variance_multiplier() - higher early in week.
+    """
     if not bracket:
         return None
+    if len(playoff_week_pairs) < 2:
+        playoff_week_pairs = [(20, 21), (22, 23)]
+    semis_w1, semis_w2 = playoff_week_pairs[0]
+    finals_w1, finals_w2 = playoff_week_pairs[1]
+    bracket_variance = PLAYOFF_VARIANCE_MULTIPLIER * day_variance_multiplier
     current = list(bracket)
+    round_idx = 0
     while len(current) > 1:
+        w1, w2 = (semis_w1, semis_w2) if round_idx == 0 else (finals_w1, finals_w2)
         next_round = []
         for i in range(0, len(current), 2):
             if i + 1 >= len(current):
                 next_round.append(current[i])
                 continue
             a, b = current[i], current[i + 1]
-            sa = strength_map.get(a, 0.5)
-            sb = strength_map.get(b, 0.5)
-            total = sa + sb
-            if total <= 0:
-                total = 1
-            winner = a if np.random.random() < sa / total else b
+            proj_a_w1 = projected.get(a, {}).get(w1, {})
+            proj_a_w2 = projected.get(a, {}).get(w2, {})
+            proj_b_w1 = projected.get(b, {}).get(w1, {})
+            proj_b_w2 = projected.get(b, {}).get(w2, {})
+            proj_a = _combine_projected_stats(proj_a_w1, proj_a_w2)
+            proj_b = _combine_projected_stats(proj_b_w1, proj_b_w2)
+            winner = _simulate_matchup_winner(
+                a, b, proj_a, proj_b,
+                variance_multiplier=bracket_variance
+            )
             next_round.append(winner)
         current = next_round
+        round_idx += 1
     return current[0] if current else None
