@@ -2,6 +2,13 @@
 Fantasy Basketball Simulator - Configuration and constants.
 """
 
+# Maximum players whose stats can count on any single day (league setting)
+MAX_PLAYERS_PER_DAY = 10
+
+# Roster limits: 13 active spots, 3 IR. When IR player returns healthy, a drop is required.
+MAX_ROSTER_SIZE = 13
+MAX_IR = 3
+
 # Playoff matchups are two weeks each; increase variance so upsets can happen
 PLAYOFF_VARIANCE_MULTIPLIER = 1.4
 

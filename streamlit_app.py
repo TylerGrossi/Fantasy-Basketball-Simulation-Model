@@ -20,6 +20,7 @@ from data import (
     flatten_stat_dict,
     get_espn_injury_data,
     build_injury_table,
+    get_ir_players_returning_this_week,
 )
 from simulation import (
     simulate_team,
@@ -96,16 +97,20 @@ def main():
         
         st.markdown('<h4><i class="bi bi-sliders" style="color: #00D4FF;"></i> Simulation Settings</h4>', unsafe_allow_html=True)
         sim_count = st.slider("Simulations", 1000, 50000, 10000, 1000, help="More = more accurate but slower")
-        blend_weight = st.slider("Last 30 Days Weight", 0.0, 1.0, 0.7, 0.05, help="Blend of recent vs season stats")
         num_streamers = st.slider("Streamers to Analyze", 5, 100, 20, 5, help="Number of free agents to analyze")
         
         st.markdown('<h4><i class="bi bi-shield-fill" style="color: #FFD93D;"></i> Roster Settings</h4>', unsafe_allow_html=True)
+        trust_return_dates = st.checkbox(
+            "Trust injury return dates",
+            value=False,
+            help="When checked, injured players with a listed return date this week are projected to play on/after that date. Uncheck to treat all injured players as out for the rest of the week."
+        )
         has_open_spot = st.checkbox("I have an open roster spot", value=False, 
                                     help="Check if you have an empty roster spot and can add without dropping")
         
         untouchables_input = st.text_area(
             "Untouchable Players",
-            value="Tyrese Maxey\nNikola Jokic\nJalen Williams\nVJ Edgecombe\nNikola Vucevic\nJa Morant\nIvica Zubac\nKawhi Leonard\nKel'el Ware\nMatas Buzelis",
+            value="Tyrese Maxey\nNikola Jokic\nJalen Williams\nVJ Edgecombe\nKawhi Leonard\nKel'el Ware\nMatas Buzelis",
             help="Enter player names (one per line) that should never be recommended as drops",
             placeholder="LeBron James\nStephen Curry\nKevin Durant"
         )
@@ -140,11 +145,16 @@ def main():
                 current_you, current_opp = get_current_totals(matchup, team_id)
             
             # Display matchup header
+            # Detect two-week playoff matchup (weeks 20+ in a 19-week regular season)
+            REGULAR_SEASON_WEEKS = 19
+            week_span = 2 if current_week > REGULAR_SEASON_WEEKS else 1
+
             col1, col2, col3 = st.columns([2, 1, 2])
             with col1:
                 st.markdown(f'<h3><i class="bi bi-house-fill" style="color: #00FF88;"></i> {your_team_name}</h3>', unsafe_allow_html=True)
             with col2:
-                st.markdown(f"<h3 style='text-align: center; color: #FF6B35;'>Week {current_week}</h3>", unsafe_allow_html=True)
+                period_label = f"Playoff Rd {current_week - REGULAR_SEASON_WEEKS} (2-week)" if week_span == 2 else f"Week {current_week}"
+                st.markdown(f"<h3 style='text-align: center; color: #FF6B35;'>{period_label}</h3>", unsafe_allow_html=True)
             with col3:
                 st.markdown(f'<h3><i class="bi bi-person-fill" style="color: #FF4757;"></i> {opp_team_name}</h3>', unsafe_allow_html=True)
             
@@ -165,15 +175,16 @@ def main():
             status_text.text("Fetching NBA schedules and injury data...")
             
             injury_data = get_espn_injury_data()
-            your_season = add_games_left_with_injury(your_season, your_roster, injury_data)
-            your_last30 = add_games_left_with_injury(your_last30, your_roster, injury_data)
-            opp_season = add_games_left_with_injury(opp_season, opp_roster, injury_data)
-            opp_last30 = add_games_left_with_injury(opp_last30, opp_roster, injury_data)
+            your_season = add_games_left_with_injury(your_season, your_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
+            your_last30 = add_games_left_with_injury(your_last30, your_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
+            opp_season = add_games_left_with_injury(opp_season, opp_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
+            opp_last30 = add_games_left_with_injury(opp_last30, opp_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
             
             progress.progress(50)
             status_text.text("Blending statistics...")
             
-            # Blend stats
+            # Blend stats (70% last 30 days, 30% season)
+            blend_weight = 0.7
             season_df = pd.concat([your_season, opp_season], ignore_index=True)
             last30_df = pd.concat([your_last30, opp_last30], ignore_index=True)
             
@@ -986,6 +997,10 @@ def main():
                     st.markdown(f'<div style="padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border-left: 4px solid #00D4FF; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-lock-fill" style="color: #00D4FF;"></i> <strong>Untouchable players:</strong> {", ".join(untouchables)}</div>', unsafe_allow_html=True)
                 if has_open_spot:
                     st.markdown('<div style="padding: 0.75rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00FF88; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-check-circle-fill" style="color: #00FF88;"></i> You have an open roster spot - streamers can be added without dropping anyone</div>', unsafe_allow_html=True)
+                ir_returning = get_ir_players_returning_this_week(your_roster, injury_data)
+                if ir_returning:
+                    names = ", ".join(r["Player"] for r in ir_returning)
+                    st.markdown(f'<div style="padding: 0.75rem; background: rgba(255, 215, 61, 0.1); border-left: 4px solid #FFD93D; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-exclamation-triangle-fill" style="color: #FFD93D;"></i> <strong>IR players returning this week:</strong> {names}. When they activate, you\'ll need to drop someone (max 13 roster). Consider dropping for a streamer now if you\'d drop them anyway.</div>', unsafe_allow_html=True)
                 
                 with st.spinner(f"Analyzing {num_streamers} potential streamers (considering drop candidates)..."):
                     baseline_results = (win_pct, category_results, baseline_avg_cats)
@@ -995,7 +1010,8 @@ def main():
                         blend_weight, year, num_streamers,
                         untouchables=untouchables,
                         has_open_roster_spot=has_open_spot,
-                        manual_watchlist=manual_watchlist
+                        manual_watchlist=manual_watchlist,
+                        week_span=week_span
                     )
                     # Add playoff & championship delta % per streamer (vs baseline)
                     your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
