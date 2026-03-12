@@ -199,7 +199,8 @@ def _evaluate_matchup(test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp,
 
 def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, current_totals_opp,
                       baseline_results, blend_weight, year, num_streamers=20,
-                      untouchables=None, has_open_roster_spot=False, manual_watchlist=None):
+                      untouchables=None, has_open_roster_spot=False, manual_watchlist=None,
+                      week_span=1):
     """Analyze potential streamer pickups, considering who to drop."""
     baseline_win_pct, baseline_cat_results, baseline_avg_cats = baseline_results
     untouchables = untouchables or []
@@ -221,8 +222,8 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
             player_status_map[p.name] = display
     fa_season = build_stat_df(healthy_players, f"{year}_total", "Season", "Waiver", year)
     fa_last30 = build_stat_df(healthy_players, f"{year}_last_30", "Last30", "Waiver", year)
-    fa_season = add_games_left(fa_season)
-    fa_last30 = add_games_left(fa_last30)
+    fa_season = add_games_left(fa_season, week_span)
+    fa_last30 = add_games_left(fa_last30, week_span)
     merged = fa_season.merge(fa_last30, on=["Player", "NBA_Team"], suffixes=("_season", "_30"))
     rows = []
     for _, r in merged.iterrows():
@@ -584,7 +585,8 @@ def _simulate_matchup_winner(home_id, away_id, proj_home, proj_away, variance_mu
     Simulate a single matchup outcome using category-by-category comparison.
     Draws from Normal(proj, variance*proj) for each team/category, then compares.
     variance_multiplier: scale variance (e.g. 1.4 for playoff = more upsets).
-    Returns winner team_id (home_id or away_id).
+    Returns (winner_id, loser_id, is_tie). If is_tie, winner_id and loser_id are both set
+    (caller should add 1 to ties for both teams).
     """
     stats_to_sim = list(CATEGORY_VARIANCE.keys())
     variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim]) * variance_multiplier
@@ -608,10 +610,10 @@ def _simulate_matchup_winner(home_id, away_id, proj_home, proj_away, variance_mu
             elif draw_a > draw_h:
                 away_wins += 1
     if home_wins > away_wins:
-        return home_id
+        return (home_id, away_id, False)
     if away_wins > home_wins:
-        return away_id
-    return home_id if np.random.random() < 0.5 else away_id
+        return (away_id, home_id, False)
+    return (home_id, away_id, True)
 
 
 def calculate_league_stats(league, year):
@@ -704,15 +706,18 @@ def calculate_league_stats(league, year):
 def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                                    playoff_teams=4, regular_season_weeks=19,
                                    record_override=None, blend_weight=0.7,
-                                   injury_data=None):
+                                   injury_data=None,
+                                   current_week_matchup_outcomes=None):
     """
     Monte Carlo simulation for playoff and championship probabilities.
-    Uses projected roster strength (season + last30 blend, injury-aware) and
-    simulates category-by-category matchup outcomes (like weekly matchup sim).
+    Uses: current standings + current week matchup probabilities (if provided) + rest of season simulation.
 
     record_override: optional dict {team_id: (wins, losses, ties)} to override records
     blend_weight: weight for last30 vs season (default 0.7 = 70% last30)
     injury_data: from get_espn_injury_data(); fetched if None
+    current_week_matchup_outcomes: optional (user_team_id, opp_team_id, outcome_counts) where
+        outcome_counts is {(user_cat_wins, opp_cat_wins): count} from compare_matchups.
+        When provided, samples from this distribution for the current week instead of simulating.
 
     Returns:
         list of dicts with playoff_prob, seed_probs, championship_prob per team_id
@@ -755,6 +760,30 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
 
     remaining_weeks = [w for w in range(current_week, regular_season_weeks + 1)
                        if w in schedule_by_week and schedule_by_week[w]]
+    current_week_matchups = schedule_by_week.get(current_week, [])
+    future_weeks = [w for w in remaining_weeks if w != current_week]
+
+    # Build outcome distribution for user's current week matchup (if provided)
+    # outcome_list: [(user_w, user_l, user_t, prob), ...] - one entry per (yw, ow) outcome
+    # When record_override is used, we use that instead (override encodes current week result)
+    current_week_user_outcomes = None
+    user_matchup_pair = None
+    override_team_ids = set(record_override.keys()) if record_override else set()
+    if current_week_matchup_outcomes and not override_team_ids:
+        user_tid, opp_tid, outcome_counts = current_week_matchup_outcomes
+        total = sum(outcome_counts.values())
+        if total > 0:
+            outcome_list = []
+            for (yw, ow), count in outcome_counts.items():
+                prob = count / total
+                if yw > ow:
+                    outcome_list.append((1, 0, 0, prob))
+                elif yw < ow:
+                    outcome_list.append((0, 1, 0, prob))
+                else:
+                    outcome_list.append((0, 0, 1, prob))
+            current_week_user_outcomes = outcome_list
+            user_matchup_pair = frozenset({user_tid, opp_tid})
 
     # Playoff matchups are two weeks each: semis = weeks 20-21, finals = weeks 22-23
     semis_weeks = (regular_season_weeks + 1, regular_season_weeks + 2)
@@ -783,26 +812,85 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
         losses = {tid: team_id_to_record[tid][1] for tid in team_ids}
         ties = {tid: team_id_to_record[tid][2] for tid in team_ids}
 
-        # Simulate remaining regular season: category-by-category (Option B)
-        for week in remaining_weeks:
+        # Current week: use matchup outcome distribution for user's matchup, or apply record_override, or simulate
+        if current_week_matchups:
+            for home_id, away_id in current_week_matchups:
+                pair = frozenset({home_id, away_id})
+                # When record_override is used: override already includes current week; add opponent's result
+                if override_team_ids and (home_id in override_team_ids or away_id in override_team_ids):
+                    overridden = home_id if home_id in override_team_ids else away_id
+                    opponent = away_id if overridden == home_id else home_id
+                    if record_override and overridden in record_override:
+                        ov = record_override[overridden]
+                        # orig from league_stats (before override) - use league_stats
+                        orig_from_league = next(
+                            ((t["actual_wins"], t["actual_losses"], t["actual_ties"])
+                             for t in league_stats if t["team_id"] == overridden),
+                            (0, 0, 0)
+                        )
+                        diff = (ov[0] - orig_from_league[0], ov[1] - orig_from_league[1], ov[2] - orig_from_league[2])
+                        # Opponent gets complementary: if overridden won (+1,0,0), opp gets (0,1,0)
+                        wins[opponent] += diff[1]
+                        losses[opponent] += diff[0]
+                        ties[opponent] += diff[2]
+                    continue
+                if user_matchup_pair is not None and pair == user_matchup_pair:
+                    # Sample from outcome distribution (user is first in pair if user_tid < opp_tid, etc.)
+                    probs = [o[3] for o in current_week_user_outcomes]
+                    idx = np.random.choice(len(current_week_user_outcomes), p=probs)
+                    uw, ul, ut = current_week_user_outcomes[idx][:3]
+                    # Map user/opp based on (home_id, away_id) vs (user_tid, opp_tid)
+                    user_tid, opp_tid = current_week_matchup_outcomes[0], current_week_matchup_outcomes[1]
+                    if home_id == user_tid:
+                        wins[home_id] += uw
+                        losses[home_id] += ul
+                        ties[home_id] += ut
+                        wins[away_id] += ul
+                        losses[away_id] += uw
+                        ties[away_id] += ut
+                    else:
+                        wins[away_id] += uw
+                        losses[away_id] += ul
+                        ties[away_id] += ut
+                        wins[home_id] += ul
+                        losses[home_id] += uw
+                        ties[home_id] += ut
+                else:
+                    proj_home = projected.get(home_id, {}).get(current_week, {})
+                    proj_away = projected.get(away_id, {}).get(current_week, {})
+                    winner_id, loser_id, is_tie = _simulate_matchup_winner(
+                        home_id, away_id, proj_home, proj_away,
+                        variance_multiplier=matchup_variance
+                    )
+                    if is_tie:
+                        ties[home_id] += 1
+                        ties[away_id] += 1
+                    else:
+                        wins[winner_id] += 1
+                        losses[loser_id] += 1
+
+        # Future weeks: simulate all matchups
+        for week in future_weeks:
             for home_id, away_id in schedule_by_week.get(week, []):
                 proj_home = projected.get(home_id, {}).get(week, {})
                 proj_away = projected.get(away_id, {}).get(week, {})
-                winner = _simulate_matchup_winner(
+                winner_id, loser_id, is_tie = _simulate_matchup_winner(
                     home_id, away_id, proj_home, proj_away,
                     variance_multiplier=matchup_variance
                 )
-                if winner == home_id:
-                    wins[home_id] += 1
-                    losses[away_id] += 1
+                if is_tie:
+                    ties[home_id] += 1
+                    ties[away_id] += 1
                 else:
-                    wins[away_id] += 1
-                    losses[home_id] += 1
+                    wins[winner_id] += 1
+                    losses[loser_id] += 1
 
-        # Final standings: sort by wins (then fewer losses, then all-play tiebreaker)
+        # Final standings: sort by win percentage = (W + 0.5*T) / total games, then all-play tiebreaker
         def sort_key(tid):
             w, l, t = wins[tid], losses[tid], ties[tid]
-            return (w, -l, strength_map.get(tid, 0))
+            total = w + l + t
+            win_pct = (w + 0.5 * t) / total if total > 0 else 0
+            return (win_pct, strength_map.get(tid, 0))
         sorted_ids = sorted(team_ids, key=sort_key, reverse=True)
 
         for rank, tid in enumerate(sorted_ids, 1):
@@ -874,11 +962,12 @@ def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
             proj_b_w2 = projected.get(b, {}).get(w2, {})
             proj_a = _combine_projected_stats(proj_a_w1, proj_a_w2)
             proj_b = _combine_projected_stats(proj_b_w1, proj_b_w2)
-            winner = _simulate_matchup_winner(
+            winner_id, loser_id, is_tie = _simulate_matchup_winner(
                 a, b, proj_a, proj_b,
                 variance_multiplier=bracket_variance
             )
-            next_round.append(winner)
+            advancing = winner_id if not is_tie else (a if np.random.random() < 0.5 else b)
+            next_round.append(advancing)
         current = next_round
         round_idx += 1
     return current[0] if current else None

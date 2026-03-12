@@ -8,8 +8,11 @@ import streamlit as st
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
+from collections import defaultdict
+
 from config import (
     INJURED_STATUSES,
+    MAX_PLAYERS_PER_DAY,
     NUMERIC_COLS,
     STATUS_DISPLAY,
     TEAM_FIXES,
@@ -63,26 +66,31 @@ def _parse_expected_return_date(player):
     return None
 
 
-def count_games_left_for_player(player, injury_data=None):
+def count_games_left_for_player(player, injury_data=None, trust_return_dates=True, week_span=1):
     """
-    Count games remaining this week where player is available.
-    For non-ACTIVE players: uses expected return date (from player or injury_data) to count only
-    games on or after that date. If no return date, assumes ruled out for the week (0 games).
+    Count games remaining in the matchup period where player is available.
+    week_span: 1 for a regular one-week matchup, 2 for a two-week playoff matchup.
+    For non-ACTIVE players:
+      - trust_return_dates=True: counts games on/after expected return date.
+        If no return date, assumes ruled out (0 games).
+      - trust_return_dates=False: any non-ACTIVE player is held out for the full period (0 games).
     """
     eastern = ZoneInfo("America/New_York")
     today = datetime.now(eastern).date()
-    end_of_week = today + timedelta(days=(6 - today.weekday()))
+    end_of_period = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
     team_abbrev = getattr(player, "proTeam", None)
     if pd.isna(team_abbrev):
         return 0
     sched = get_team_schedule(team_abbrev)
-    week_games = [g for g in sched if today <= g <= end_of_week]
-    if not week_games:
+    period_games = [g for g in sched if today <= g <= end_of_period]
+    if not period_games:
         return 0
     injury_status = getattr(player, "injuryStatus", None) or ""
     status_upper = str(injury_status).upper().strip()
     if status_upper in ACTIVE_STATUSES:
-        return len(week_games)
+        return len(period_games)
+    if not trust_return_dates:
+        return 0
     expected_return = _parse_expected_return_date(player)
     if expected_return is None and injury_data:
         inj_info = injury_data.get(player.name, {})
@@ -90,7 +98,7 @@ def count_games_left_for_player(player, injury_data=None):
             expected_return = inj_info.get("return_date_obj")
     if expected_return is None:
         return 0
-    return sum(1 for g in week_games if g >= expected_return)
+    return sum(1 for g in period_games if g >= expected_return)
 
 
 def get_week_date_range(week, year):
@@ -107,10 +115,12 @@ def get_week_date_range(week, year):
         return None, None
 
 
-def count_games_for_player_in_week(player, week, year, injury_data=None):
+def count_games_for_player_in_week(player, week, year, injury_data=None, trust_return_dates=True):
     """
     Count games for a player in a specific fantasy week, accounting for injury return date.
-    For non-ACTIVE players: only counts games on/after expected return. No return date = 0.
+    For non-ACTIVE players:
+      - trust_return_dates=True: only counts games on/after expected return. No return date = 0.
+      - trust_return_dates=False: held out for the full week (0 games).
     """
     start_d, end_d = get_week_date_range(week, year)
     if start_d is None:
@@ -126,6 +136,8 @@ def count_games_for_player_in_week(player, week, year, injury_data=None):
     status_upper = str(injury_status).upper().strip()
     if status_upper in ACTIVE_STATUSES:
         return len(week_games)
+    if not trust_return_dates:
+        return 0
     expected_return = _parse_expected_return_date(player)
     if expected_return is None and injury_data:
         inj_info = injury_data.get(player.name, {})
@@ -136,12 +148,57 @@ def count_games_for_player_in_week(player, week, year, injury_data=None):
     return sum(1 for g in week_games if g >= expected_return)
 
 
-def add_games_in_week(df, roster, week, year, injury_data=None):
+def _get_games_by_day_for_week(roster, week, year, injury_data=None, trust_return_dates=True):
+    """
+    Get which players have games on each day in a specific week (injury-aware).
+    Returns dict: date -> list of (player_name, team_abbrev).
+    """
+    start_d, end_d = get_week_date_range(week, year)
+    if start_d is None:
+        return {}
+    games_by_day = defaultdict(list)
+    for p in roster:
+        team_abbrev = getattr(p, "proTeam", None)
+        if pd.isna(team_abbrev):
+            continue
+        sched = get_team_schedule(team_abbrev)
+        week_games = [g for g in sched if start_d <= g <= end_d]
+        if not week_games:
+            continue
+        injury_status = getattr(p, "injuryStatus", None) or ""
+        status_upper = str(injury_status).upper().strip()
+        if status_upper not in ACTIVE_STATUSES:
+            if not trust_return_dates:
+                continue
+            expected_return = _parse_expected_return_date(p)
+            if expected_return is None and injury_data:
+                inj_info = injury_data.get(p.name, {})
+                if isinstance(inj_info, dict):
+                    expected_return = inj_info.get("return_date_obj")
+            if expected_return is None:
+                continue
+            week_games = [g for g in week_games if g >= expected_return]
+        for d in week_games:
+            games_by_day[d].append((p.name, team_abbrev))
+    return dict(games_by_day)
+
+
+def add_games_in_week(df, roster, week, year, injury_data=None, max_per_day=None, trust_return_dates=True):
     """
     Add 'Games This Week' column for a specific fantasy week (injury-aware).
     Used for projected roster strength in playoff simulation.
+    When max_per_day is set, applies league cap for days with > max_per_day players.
+    trust_return_dates: if False, non-ACTIVE players are treated as out the full week.
     """
     df = df.copy()
+    cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
+    games_by_day = _get_games_by_day_for_week(roster, week, year, injury_data, trust_return_dates)
+    player_effective = defaultdict(float)
+    for day, players_on_day in games_by_day.items():
+        n = len(players_on_day)
+        scale = min(1.0, cap / n) if n > 0 else 0
+        for (pname, _) in players_on_day:
+            player_effective[pname] += scale
     name_to_player = {p.name: p for p in roster}
 
     def games_for_row(row):
@@ -155,7 +212,10 @@ def add_games_in_week(df, roster, week, year, injury_data=None):
                 return 0
             sched = get_team_schedule(team_abbrev)
             return sum(1 for g in sched if start_d <= g <= end_d)
-        return count_games_for_player_in_week(player, week, year, injury_data)
+        if row["Player"] in player_effective:
+            eff = player_effective[row["Player"]]
+            return max(0, int(round(eff))) if eff > 0 else 0
+        return count_games_for_player_in_week(player, week, year, injury_data, trust_return_dates)
 
     df["Games This Week"] = df.apply(games_for_row, axis=1)
     return df
@@ -164,6 +224,37 @@ def add_games_in_week(df, roster, week, year, injury_data=None):
 def filter_injured(roster):
     """Legacy: filter to healthy-only. Prefer add_games_left_with_injury for injury-aware logic."""
     return [p for p in roster if p.injuryStatus not in INJURED_STATUSES]
+
+
+def get_ir_players_returning_this_week(roster, injury_data=None):
+    """
+    Return list of injured players (on IR or out) with expected return this week.
+    When these players get healthy, a roster spot is needed - a drop will be required
+    if roster is at max (13 active + IR).
+    Returns: list of dicts with Player, NBA_Team, expected_return.
+    """
+    eastern = ZoneInfo("America/New_York")
+    today = datetime.now(eastern).date()
+    end_of_week = today + timedelta(days=(6 - today.weekday()))
+    result = []
+    for p in roster:
+        status = getattr(p, "injuryStatus", None) or ""
+        if str(status).upper().strip() in ACTIVE_STATUSES:
+            continue
+        expected_return = _parse_expected_return_date(p)
+        if expected_return is None and injury_data:
+            inj_info = injury_data.get(p.name, {})
+            if isinstance(inj_info, dict):
+                expected_return = inj_info.get("return_date_obj")
+        if expected_return is None:
+            continue
+        if today <= expected_return <= end_of_week:
+            result.append({
+                "Player": p.name,
+                "NBA_Team": getattr(p, "proTeam", ""),
+                "expected_return": expected_return,
+            })
+    return result
 
 
 def is_player_injured(player):
@@ -307,36 +398,91 @@ def get_team_schedule(team_abbrev):
         return []
 
 
-def count_games_left(team_abbrev):
-    """Count games remaining this week (for a team, no injury consideration)."""
+def count_games_left(team_abbrev, week_span=1):
+    """Count games remaining in the matchup period (no injury consideration)."""
     eastern = ZoneInfo("America/New_York")
     today = datetime.now(eastern).date()
-    end_of_week = today + timedelta(days=(6 - today.weekday()))
+    end_of_period = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
     sched = get_team_schedule(team_abbrev)
-    return sum(today <= g <= end_of_week for g in sched)
+    return sum(today <= g <= end_of_period for g in sched)
 
 
-def add_games_left(df):
+def _get_games_by_day_for_roster(roster, injury_data=None, trust_return_dates=True, week_span=1):
+    """
+    Get which players have games on each day in the matchup period (injury-aware).
+    week_span: 1 = one-week matchup, 2 = two-week playoff matchup.
+    Returns dict: date -> list of (player_name, team_abbrev).
+    """
+    eastern = ZoneInfo("America/New_York")
+    today = datetime.now(eastern).date()
+    end_of_period = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+    games_by_day = defaultdict(list)
+    for p in roster:
+        team_abbrev = getattr(p, "proTeam", None)
+        if pd.isna(team_abbrev):
+            continue
+        sched = get_team_schedule(team_abbrev)
+        period_games = [g for g in sched if today <= g <= end_of_period]
+        if not period_games:
+            continue
+        injury_status = getattr(p, "injuryStatus", None) or ""
+        status_upper = str(injury_status).upper().strip()
+        if status_upper not in ACTIVE_STATUSES:
+            if not trust_return_dates:
+                continue
+            expected_return = _parse_expected_return_date(p)
+            if expected_return is None and injury_data:
+                inj_info = injury_data.get(p.name, {})
+                if isinstance(inj_info, dict):
+                    expected_return = inj_info.get("return_date_obj")
+            if expected_return is None:
+                continue
+            period_games = [g for g in period_games if g >= expected_return]
+        for d in period_games:
+            games_by_day[d].append((p.name, team_abbrev))
+    return dict(games_by_day)
+
+
+def add_games_left(df, week_span=1):
     """Add Games Left column to dataframe (team-based, no injury)."""
     df = df.copy()
-    df["Games Left"] = df["NBA_Team"].apply(count_games_left)
+    df["Games Left"] = df["NBA_Team"].apply(lambda t: count_games_left(t, week_span))
     return df
 
 
-def add_games_left_with_injury(df, roster, injury_data=None):
+def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
+                               trust_return_dates=True, week_span=1):
     """
     Add Games Left column using ESPN estimated return dates.
     Non-ACTIVE players with return date: count only games on/after that date.
-    Non-ACTIVE players without return date: 0 games (ruled out for week).
+    Non-ACTIVE players without return date: 0 games (ruled out for period).
     injury_data from get_espn_injury_data() provides return dates when fantasy API doesn't.
+    week_span: 1 = single-week matchup, 2 = two-week playoff matchup.
+
+    When max_per_day is set (default from config), applies league cap: on days with more
+    than max_per_day players, each player gets fractional credit (max_per_day / num_players).
+    trust_return_dates: if False, any non-ACTIVE player is treated as out the full period.
     """
     df = df.copy()
+    cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
+    games_by_day = _get_games_by_day_for_roster(roster, injury_data, trust_return_dates, week_span)
+    player_effective = defaultdict(float)
+    for day, players_on_day in games_by_day.items():
+        n = len(players_on_day)
+        scale = min(1.0, cap / n) if n > 0 else 0
+        for (pname, _) in players_on_day:
+            player_effective[pname] += scale
     name_to_player = {p.name: p for p in roster}
+
     def games_for_row(row):
         player = name_to_player.get(row["Player"])
         if player is None:
-            return count_games_left(row["NBA_Team"])
-        return count_games_left_for_player(player, injury_data)
+            return count_games_left(row["NBA_Team"], week_span)
+        if row["Player"] in player_effective:
+            eff = player_effective[row["Player"]]
+            return max(0, int(round(eff))) if eff > 0 else 0
+        return count_games_left_for_player(player, injury_data, trust_return_dates, week_span)
+
     df["Games Left"] = df.apply(games_for_row, axis=1)
     return df
 
