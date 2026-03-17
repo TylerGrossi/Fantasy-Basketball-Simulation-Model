@@ -23,6 +23,7 @@ from data import (
     is_player_injured,
     flatten_stat_dict,
     get_espn_injury_data,
+    add_games_left_with_injury,
 )
 
 
@@ -200,7 +201,7 @@ def _evaluate_matchup(test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp,
 def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, current_totals_opp,
                       baseline_results, blend_weight, year, num_streamers=20,
                       untouchables=None, has_open_roster_spot=False, manual_watchlist=None,
-                      week_span=1):
+                      week_span=1, period_end_date=None):
     """Analyze potential streamer pickups, considering who to drop."""
     baseline_win_pct, baseline_cat_results, baseline_avg_cats = baseline_results
     untouchables = untouchables or []
@@ -222,8 +223,8 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
             player_status_map[p.name] = display
     fa_season = build_stat_df(healthy_players, f"{year}_total", "Season", "Waiver", year)
     fa_last30 = build_stat_df(healthy_players, f"{year}_last_30", "Last30", "Waiver", year)
-    fa_season = add_games_left(fa_season, week_span)
-    fa_last30 = add_games_left(fa_last30, week_span)
+    fa_season = add_games_left(fa_season, week_span, period_end_date)
+    fa_last30 = add_games_left(fa_last30, week_span, period_end_date)
     merged = fa_season.merge(fa_last30, on=["Player", "NBA_Team"], suffixes=("_season", "_30"))
     rows = []
     for _, r in merged.iterrows():
@@ -616,6 +617,62 @@ def _simulate_matchup_winner(home_id, away_id, proj_home, proj_away, variance_mu
     return (home_id, away_id, True)
 
 
+def _compute_playoff_matchup_win_prob(team_a, team_b, current_a, current_b,
+                                       year, injury_data, blend_weight,
+                                       period_end_date=None, sims=5000):
+    """
+    Compute win probability for a live playoff matchup by combining current accumulated
+    scores with projected remaining stats, then running category-by-category Monte Carlo.
+    Returns: probability that team_a wins the matchup (float 0-1).
+    """
+    variance_multiplier = _get_matchup_variance_multiplier()
+
+    def _build_team_df(team_obj):
+        roster = getattr(team_obj, "roster", [])
+        if not roster:
+            return pd.DataFrame()
+        name = getattr(team_obj, "team_name", "Unknown")
+        season_df = build_stat_df(roster, f"{year}_total", "Season", name, year)
+        last30_df = build_stat_df(roster, f"{year}_last_30", "Last30", name, year)
+        if season_df.empty:
+            return pd.DataFrame()
+        if last30_df.empty:
+            merged = season_df.copy()
+            for col in NUMERIC_COLS:
+                if col not in merged.columns:
+                    merged[col] = 0.0
+        else:
+            merged = season_df.merge(last30_df, on=["Player", "NBA_Team"],
+                                     how="outer", suffixes=("_season", "_30")).fillna(0)
+            for col in NUMERIC_COLS:
+                if f"{col}_30" in merged.columns and f"{col}_season" in merged.columns:
+                    merged[col] = merged[f"{col}_30"] * blend_weight + merged[f"{col}_season"] * (1 - blend_weight)
+                elif f"{col}_season" in merged.columns:
+                    merged[col] = merged[f"{col}_season"]
+                elif f"{col}_30" in merged.columns:
+                    merged[col] = merged[f"{col}_30"]
+                else:
+                    merged[col] = 0.0
+        merged = add_games_left_with_injury(merged, roster, injury_data,
+                                            period_end_date=period_end_date)
+        return merged
+
+    df_a = _build_team_df(team_a)
+    df_b = _build_team_df(team_b)
+
+    sim_a = simulate_team(df_a, sims=sims, variance_multiplier=variance_multiplier)
+    sim_b = simulate_team(df_b, sims=sims, variance_multiplier=variance_multiplier)
+
+    sim_a = add_current_to_sim(current_a, sim_a)
+    sim_b = add_current_to_sim(current_b, sim_b)
+
+    matchup_results, _, _ = compare_matchups(sim_a, sim_b, CATEGORIES)
+    total = sum(matchup_results.values())
+    if total == 0:
+        return 0.5
+    return (matchup_results["you"] + 0.5 * matchup_results["tie"]) / total
+
+
 def calculate_league_stats(league, year):
     """Calculate league-wide statistics including all-play records."""
     teams = league.teams
@@ -707,7 +764,8 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                                    playoff_teams=4, regular_season_weeks=19,
                                    record_override=None, blend_weight=0.7,
                                    injury_data=None,
-                                   current_week_matchup_outcomes=None):
+                                   current_week_matchup_outcomes=None,
+                                   period_end_date=None):
     """
     Monte Carlo simulation for playoff and championship probabilities.
     Uses: current standings + current week matchup probabilities (if provided) + rest of season simulation.
@@ -802,10 +860,88 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
     # Same day-of-week variance as weekly matchup (higher uncertainty early in week)
     matchup_variance = _get_matchup_variance_multiplier()
 
+    # When we're already in the playoffs, extract win probabilities for the live matchup
+    # and fetch the actual ESPN bracket so pairings match reality (not just standings order).
+    current_playoff_round_idx = None
+    current_playoff_pair_probs = None
+    actual_playoff_bracket = None
+    if current_week > regular_season_weeks:
+        # 0-based round index: weeks RS+1/RS+2 = round 0 (semis), RS+3/RS+4 = round 1 (finals)
+        current_playoff_round_idx = (current_week - regular_season_weeks - 1) // 2
+
+        # Determine which teams are actually in the playoffs based on final regular season standings
+        playoff_team_set = set()
+        strength = {t["team_id"]: max(0.01, t["all_play_pct"]) for t in league_stats}
+        def _standing_key(tid):
+            r = team_id_to_record[tid]
+            total = r[0] + r[1] + r[2]
+            wp = (r[0] + 0.5 * r[2]) / total if total > 0 else 0
+            return (wp, strength.get(tid, 0))
+        all_by_standing = sorted(team_id_to_record.keys(), key=_standing_key, reverse=True)
+        playoff_team_set = set(all_by_standing[:playoff_teams])
+
+        # Fetch actual ESPN playoff matchups and compute live win probabilities for ALL of them.
+        # This ensures every bracket matchup uses current scores + remaining projections,
+        # not just the user's matchup.
+        team_obj_map = {t.team_id: t for t in league.teams}
+        try:
+            playoff_boxscores = league.box_scores(matchup_period=current_week)
+            bracket_pairs = []
+            current_playoff_pair_probs = {}
+            for m in playoff_boxscores:
+                home_id = m.home_team.team_id if hasattr(m.home_team, "team_id") else None
+                away_id = m.away_team.team_id if hasattr(m.away_team, "team_id") else None
+                if (home_id is None or away_id is None
+                        or home_id not in playoff_team_set or away_id not in playoff_team_set):
+                    continue
+                bracket_pairs.append((home_id, away_id))
+
+                # For the user's matchup, use the pre-computed detailed outcome distribution
+                if (current_week_matchup_outcomes and not override_team_ids
+                        and set([home_id, away_id]) == set([current_week_matchup_outcomes[0],
+                                                            current_week_matchup_outcomes[1]])):
+                    user_tid, opp_tid, oc = current_week_matchup_outcomes
+                    total_oc = sum(oc.values())
+                    if total_oc > 0:
+                        user_wins_oc = sum(cnt for (yw, ow), cnt in oc.items() if yw > ow)
+                        user_ties_oc = sum(cnt for (yw, ow), cnt in oc.items() if yw == ow)
+                        user_prob = (user_wins_oc + 0.5 * user_ties_oc) / total_oc
+                        current_playoff_pair_probs[user_tid] = user_prob
+                        current_playoff_pair_probs[opp_tid] = 1.0 - user_prob
+                    continue
+
+                # For other playoff matchups, compute win probability from current scores + projections
+                home_totals = flatten_stat_dict(m.home_stats)
+                away_totals = flatten_stat_dict(m.away_stats)
+                current_home = {k: home_totals.get(k, 0) for k in
+                                ["FGM","FGA","FTM","FTA","3PM","3PA","REB","AST","STL","BLK","TO","PTS","DD","TW"]}
+                current_away = {k: away_totals.get(k, 0) for k in
+                                ["FGM","FGA","FTM","FTA","3PM","3PA","REB","AST","STL","BLK","TO","PTS","DD","TW"]}
+                home_obj = team_obj_map.get(home_id)
+                away_obj = team_obj_map.get(away_id)
+                if home_obj and away_obj:
+                    home_prob = _compute_playoff_matchup_win_prob(
+                        home_obj, away_obj, current_home, current_away,
+                        year, injury_data, blend_weight,
+                        period_end_date=period_end_date, sims=min(sims, 2000)
+                    )
+                    current_playoff_pair_probs[home_id] = home_prob
+                    current_playoff_pair_probs[away_id] = 1.0 - home_prob
+
+            if bracket_pairs:
+                actual_playoff_bracket = []
+                for h, a in bracket_pairs:
+                    actual_playoff_bracket.extend([h, a])
+            if not current_playoff_pair_probs:
+                current_playoff_pair_probs = None
+        except Exception:
+            pass
+
     team_ids = list(team_id_to_name.keys())
     playoff_count = {tid: 0 for tid in team_ids}
     seed_counts = {tid: {s: 0 for s in range(1, num_teams + 2)} for tid in team_ids}
     championship_count = {tid: 0 for tid in team_ids}
+    advance_count = {tid: 0 for tid in team_ids}
 
     for _ in range(sims):
         wins = {tid: team_id_to_record[tid][0] for tid in team_ids}
@@ -899,19 +1035,35 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                 playoff_count[tid] += 1
 
         # Simulate playoff bracket: two-week matchups, injury-aware, category-by-category
-        playoff_bracket = sorted_ids[:playoff_teams]
-        champ = _simulate_playoff_bracket_projected(
+        # When already in playoffs, use actual ESPN bracket pairings (1v4, 2v3 etc.)
+        # and start from the current round so the correct week projections are used.
+        if actual_playoff_bracket is not None:
+            playoff_bracket = actual_playoff_bracket
+            bracket_starting_round = current_playoff_round_idx if current_playoff_round_idx is not None else 0
+        else:
+            playoff_bracket = sorted_ids[:playoff_teams]
+            bracket_starting_round = 0
+        champ, round_advancers = _simulate_playoff_bracket_projected(
             playoff_bracket, projected, playoff_week_pairs,
-            day_variance_multiplier=matchup_variance
+            day_variance_multiplier=matchup_variance,
+            current_round_idx=current_playoff_round_idx,
+            current_pair_probs=current_playoff_pair_probs,
+            starting_round=bracket_starting_round
         )
         if champ is not None:
             championship_count[champ] += 1
+        # Track who advanced past the first simulated round (current round when in playoffs)
+        if round_advancers:
+            for tid in round_advancers[0]:
+                advance_count[tid] += 1
 
     total_sims = sims
+    in_playoffs = current_week > regular_season_weeks
     result = []
     for tid in team_ids:
         playoff_pct = playoff_count[tid] / total_sims * 100
         champ_pct = championship_count[tid] / total_sims * 100
+        advance_pct = advance_count[tid] / total_sims * 100
         seed_probs = {}
         no_playoffs = 0
         for s in range(1, num_teams + 2):
@@ -926,6 +1078,8 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             "team_name": team_id_to_name[tid],
             "playoff_prob": playoff_pct,
             "championship_prob": champ_pct,
+            "advance_prob": advance_pct,
+            "in_playoffs": in_playoffs,
             "seed_probs": seed_probs,
             "record": team_id_to_record[tid],
         })
@@ -933,21 +1087,30 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
 
 
 def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
-                                        day_variance_multiplier=1.0):
+                                        day_variance_multiplier=1.0,
+                                        current_round_idx=None, current_pair_probs=None,
+                                        starting_round=0):
     """
     Simulate single-elimination bracket. Each round is a two-week matchup.
     playoff_week_pairs: [(semis_w1, semis_w2), (finals_w1, finals_w2)] e.g. [(20,21), (22,23)]
     day_variance_multiplier: from _get_matchup_variance_multiplier() - higher early in week.
+    current_round_idx: 0-based index of the round currently in progress (0=semis, 1=finals).
+    current_pair_probs: dict {team_id: prob_of_winning} for the live matchup in current_round_idx.
+        When provided, the live matchup is sampled from these probabilities instead of being
+        projected from stats, ensuring the current week's sim results feed into bracket odds.
+    starting_round: 0 = start from semis (4 teams), 1 = start from finals (2 teams).
+        When already in finals, pass starting_round=1 so it uses finals-week projections.
     """
     if not bracket:
-        return None
+        return None, []
     if len(playoff_week_pairs) < 2:
         playoff_week_pairs = [(20, 21), (22, 23)]
     semis_w1, semis_w2 = playoff_week_pairs[0]
     finals_w1, finals_w2 = playoff_week_pairs[1]
     bracket_variance = PLAYOFF_VARIANCE_MULTIPLIER * day_variance_multiplier
     current = list(bracket)
-    round_idx = 0
+    round_idx = starting_round
+    round_advancers = []
     while len(current) > 1:
         w1, w2 = (semis_w1, semis_w2) if round_idx == 0 else (finals_w1, finals_w2)
         next_round = []
@@ -956,18 +1119,27 @@ def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
                 next_round.append(current[i])
                 continue
             a, b = current[i], current[i + 1]
-            proj_a_w1 = projected.get(a, {}).get(w1, {})
-            proj_a_w2 = projected.get(a, {}).get(w2, {})
-            proj_b_w1 = projected.get(b, {}).get(w1, {})
-            proj_b_w2 = projected.get(b, {}).get(w2, {})
-            proj_a = _combine_projected_stats(proj_a_w1, proj_a_w2)
-            proj_b = _combine_projected_stats(proj_b_w1, proj_b_w2)
-            winner_id, loser_id, is_tie = _simulate_matchup_winner(
-                a, b, proj_a, proj_b,
-                variance_multiplier=bracket_variance
-            )
-            advancing = winner_id if not is_tie else (a if np.random.random() < 0.5 else b)
+            # For the live matchup in the current round, use the provided win probability
+            # instead of projecting from stats — this feeds the current week sim into bracket odds.
+            if (current_round_idx is not None and round_idx == current_round_idx
+                    and current_pair_probs is not None
+                    and a in current_pair_probs and b in current_pair_probs):
+                prob_a = current_pair_probs[a]
+                advancing = a if np.random.random() < prob_a else b
+            else:
+                proj_a_w1 = projected.get(a, {}).get(w1, {})
+                proj_a_w2 = projected.get(a, {}).get(w2, {})
+                proj_b_w1 = projected.get(b, {}).get(w1, {})
+                proj_b_w2 = projected.get(b, {}).get(w2, {})
+                proj_a = _combine_projected_stats(proj_a_w1, proj_a_w2)
+                proj_b = _combine_projected_stats(proj_b_w1, proj_b_w2)
+                winner_id, loser_id, is_tie = _simulate_matchup_winner(
+                    a, b, proj_a, proj_b,
+                    variance_multiplier=bracket_variance
+                )
+                advancing = winner_id if not is_tie else (a if np.random.random() < 0.5 else b)
             next_round.append(advancing)
+        round_advancers.append(set(next_round))
         current = next_round
         round_idx += 1
-    return current[0] if current else None
+    return (current[0] if current else None), round_advancers
