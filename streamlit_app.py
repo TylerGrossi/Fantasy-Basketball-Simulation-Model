@@ -7,7 +7,7 @@ A web-based Monte Carlo simulation tool for ESPN Fantasy Basketball
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 from zoneinfo import ZoneInfo
 
 from config import CATEGORIES, NUMERIC_COLS
@@ -145,15 +145,39 @@ def main():
                 current_you, current_opp = get_current_totals(matchup, team_id)
             
             # Display matchup header
-            # Detect two-week playoff matchup (weeks 20+ in a 19-week regular season)
+            # Playoff periods are defined by actual ESPN schedule dates.
+            # Using explicit dates is more reliable than deriving from ESPN's week number,
+            # which may not advance mid-period for 2-week matchups.
             REGULAR_SEASON_WEEKS = 19
-            week_span = 2 if current_week > REGULAR_SEASON_WEEKS else 1
+            PLAYOFF_PERIODS = [
+                (date(2026, 3, 9),  date(2026, 3, 22)),  # Round 1
+                (date(2026, 3, 23), date(2026, 4, 5)),   # Round 2
+            ]
+            eastern = ZoneInfo("America/New_York")
+            today_date = datetime.now(eastern).date()
+
+            period_end_date = None
+            playoff_round = None
+            week_in_round = None
+            for round_idx, (p_start, p_end) in enumerate(PLAYOFF_PERIODS, start=1):
+                if p_start <= today_date <= p_end:
+                    period_end_date = p_end
+                    playoff_round = round_idx
+                    week_in_round = (today_date - p_start).days // 7 + 1
+                    break
+
+            # week_span kept for simulation functions that still use it
+            if period_end_date is not None:
+                days_remaining = (period_end_date - today_date).days
+                week_span = 2 if days_remaining >= 7 else 1
+            else:
+                week_span = 2 if current_week > REGULAR_SEASON_WEEKS else 1
 
             col1, col2, col3 = st.columns([2, 1, 2])
             with col1:
                 st.markdown(f'<h3><i class="bi bi-house-fill" style="color: #00FF88;"></i> {your_team_name}</h3>', unsafe_allow_html=True)
             with col2:
-                period_label = f"Playoff Rd {current_week - REGULAR_SEASON_WEEKS} (2-week)" if week_span == 2 else f"Week {current_week}"
+                period_label = f"Playoff Rd {playoff_round} (Wk {week_in_round}/2)" if playoff_round is not None else f"Week {current_week}"
                 st.markdown(f"<h3 style='text-align: center; color: #FF6B35;'>{period_label}</h3>", unsafe_allow_html=True)
             with col3:
                 st.markdown(f'<h3><i class="bi bi-person-fill" style="color: #FF4757;"></i> {opp_team_name}</h3>', unsafe_allow_html=True)
@@ -175,10 +199,10 @@ def main():
             status_text.text("Fetching NBA schedules and injury data...")
             
             injury_data = get_espn_injury_data()
-            your_season = add_games_left_with_injury(your_season, your_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
-            your_last30 = add_games_left_with_injury(your_last30, your_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
-            opp_season = add_games_left_with_injury(opp_season, opp_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
-            opp_last30 = add_games_left_with_injury(opp_last30, opp_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span)
+            your_season = add_games_left_with_injury(your_season, your_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span, period_end_date=period_end_date)
+            your_last30 = add_games_left_with_injury(your_last30, your_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span, period_end_date=period_end_date)
+            opp_season = add_games_left_with_injury(opp_season, opp_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span, period_end_date=period_end_date)
+            opp_last30 = add_games_left_with_injury(opp_last30, opp_roster, injury_data, trust_return_dates=trust_return_dates, week_span=week_span, period_end_date=period_end_date)
             
             progress.progress(50)
             status_text.text("Blending statistics...")
@@ -905,7 +929,9 @@ def main():
                     playoff_results = simulate_playoff_probabilities(
                         league, league_stats, year,
                         sims=sim_count,
-                        blend_weight=blend_weight, injury_data=injury_data
+                        blend_weight=blend_weight, injury_data=injury_data,
+                        current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
+                        period_end_date=period_end_date
                     )
                 
                 # Playoff standings table (like the reference image)
@@ -941,35 +967,56 @@ def main():
                         odds = int(round(raw / 5) * 5)
                         return f"+{odds}"
                 
+                # Detect if we're in playoffs from the results
+                in_playoffs = any(r.get("in_playoffs", False) for r in playoff_results)
+
                 # Only show odds columns if at least one team has odds in range (1-99%)
                 show_playoff_odds = any(1 <= r['playoff_prob'] < 99 for r in playoff_results)
+                show_advance_odds = in_playoffs and any(1 <= r.get('advance_prob', 0) < 99 for r in playoff_results)
                 show_champ_odds = any(1 <= r['championship_prob'] < 99 for r in playoff_results)
                 
                 # Build HTML table with color-coded percentages and American odds
-                seed_cols = [f"#{s}*" for s in range(1, 5)]
+                # During playoffs: replace seeds/Playoff% with Advance% (win current round)
                 header_cells = "<th style='text-align:left;padding:8px;color:#888;'>Team</th><th style='text-align:center;padding:8px;color:#888;'>W</th><th style='text-align:center;padding:8px;color:#888;'>L</th>"
-                for c in seed_cols:
-                    header_cells += f"<th style='text-align:center;padding:8px;color:#888;'>{c}</th>"
-                header_cells += "<th style='text-align:center;padding:8px;color:#888;'>No Playoffs</th><th style='text-align:center;padding:8px;color:#888;'>Playoff %</th>"
-                if show_playoff_odds:
-                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Playoff Odds</th>"
+                if not in_playoffs:
+                    seed_cols = [f"#{s}*" for s in range(1, 5)]
+                    for c in seed_cols:
+                        header_cells += f"<th style='text-align:center;padding:8px;color:#888;'>{c}</th>"
+                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>No Playoffs</th><th style='text-align:center;padding:8px;color:#888;'>Playoff %</th>"
+                    if show_playoff_odds:
+                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Playoff Odds</th>"
+                else:
+                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Advance %</th>"
+                    if show_advance_odds:
+                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Advance Odds</th>"
                 header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ %</th>"
                 if show_champ_odds:
                     header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ Odds</th>"
                 
                 rows = []
-                for r in playoff_results:
+                display_results = playoff_results
+                if in_playoffs:
+                    display_results = [r for r in playoff_results
+                                       if r.get("advance_prob", 0) > 0 or r.get("championship_prob", 0) > 0]
+                for r in display_results:
                     w, l, t = r["record"]
                     cells = f"<td style='padding:8px;color:white;'>{r['team_name']}</td><td style='text-align:center;padding:8px;color:white;'>{w}</td><td style='text-align:center;padding:8px;color:white;'>{l}</td>"
-                    for s in range(1, 5):
-                        pct = r["seed_probs"].get(s, 0)
-                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(pct)};'>{fmt_pct(pct)}</td>"
-                    no_play = r["seed_probs"].get("no_playoffs", 0)
-                    cells += f"<td style='text-align:center;padding:8px;color:{pct_color(no_play, invert=True)};'>{fmt_pct(no_play)}</td>"
-                    cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['playoff_prob'])};'>{fmt_pct(r['playoff_prob'])}</td>"
-                    if show_playoff_odds:
-                        playoff_odds = prob_to_american_odds(r['playoff_prob'])
-                        cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{playoff_odds if playoff_odds else '—'}</td>"
+                    if not in_playoffs:
+                        for s in range(1, 5):
+                            pct = r["seed_probs"].get(s, 0)
+                            cells += f"<td style='text-align:center;padding:8px;color:{pct_color(pct)};'>{fmt_pct(pct)}</td>"
+                        no_play = r["seed_probs"].get("no_playoffs", 0)
+                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(no_play, invert=True)};'>{fmt_pct(no_play)}</td>"
+                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['playoff_prob'])};'>{fmt_pct(r['playoff_prob'])}</td>"
+                        if show_playoff_odds:
+                            playoff_odds = prob_to_american_odds(r['playoff_prob'])
+                            cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{playoff_odds if playoff_odds else '—'}</td>"
+                    else:
+                        advance_pct = r.get("advance_prob", 0)
+                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(advance_pct)};'>{fmt_pct(advance_pct)}</td>"
+                        if show_advance_odds:
+                            advance_odds = prob_to_american_odds(advance_pct)
+                            cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{advance_odds if advance_odds else '—'}</td>"
                     cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['championship_prob'])};'>{fmt_pct(r['championship_prob'])}</td>"
                     if show_champ_odds:
                         champ_odds = prob_to_american_odds(r['championship_prob'])
@@ -1011,7 +1058,8 @@ def main():
                         untouchables=untouchables,
                         has_open_roster_spot=has_open_spot,
                         manual_watchlist=manual_watchlist,
-                        week_span=week_span
+                        week_span=week_span,
+                        period_end_date=period_end_date
                     )
                     # Add playoff & championship delta % per streamer (vs baseline)
                     your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
@@ -1019,17 +1067,23 @@ def main():
                         w, l, t = your_team_stats["actual_wins"], your_team_stats["actual_losses"], your_team_stats["actual_ties"]
                         playoff_baseline = simulate_playoff_probabilities(
                             league, league_stats, year, sims=sim_count,
-                            blend_weight=blend_weight, injury_data=injury_data
+                            blend_weight=blend_weight, injury_data=injury_data,
+                            current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
+                            period_end_date=period_end_date
                         )
                         playoff_if_win = simulate_playoff_probabilities(
                             league, league_stats, year, sims=sim_count,
                             record_override={team_id: (w + 1, l, t)},
-                            blend_weight=blend_weight, injury_data=injury_data
+                            blend_weight=blend_weight, injury_data=injury_data,
+                            current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
+                            period_end_date=period_end_date
                         )
                         playoff_if_lose = simulate_playoff_probabilities(
                             league, league_stats, year, sims=sim_count,
                             record_override={team_id: (w, l + 1, t)},
-                            blend_weight=blend_weight, injury_data=injury_data
+                            blend_weight=blend_weight, injury_data=injury_data,
+                            current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
+                            period_end_date=period_end_date
                         )
                         pb = next((r for r in playoff_baseline if r["team_id"] == team_id), {})
                         pw = next((r for r in playoff_if_win if r["team_id"] == team_id), {})
