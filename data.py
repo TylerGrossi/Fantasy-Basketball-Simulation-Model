@@ -67,11 +67,11 @@ def _parse_expected_return_date(player):
     return None
 
 
-def count_games_left_for_player(player, injury_data=None, trust_return_dates=True, week_span=1, period_end_date=None):
+def count_games_left_for_player(player, injury_data=None, trust_return_dates=True, week_span=1, period_end_date=None,
+                                window_start=None, window_end=None):
     """
-    Count games remaining in the matchup period where player is available.
-    period_end_date: explicit end date for the matchup period (takes priority over week_span).
-    week_span: 1 for a regular one-week matchup, 2 for a two-week playoff matchup (fallback).
+    Count games in the matchup window where player is available.
+    window_start/window_end: inclusive range (overrides today/period_end_date logic when both set).
     For non-ACTIVE players:
       - trust_return_dates=True: counts games on/after expected return date.
         If no return date, assumes ruled out (0 games).
@@ -79,15 +79,18 @@ def count_games_left_for_player(player, injury_data=None, trust_return_dates=Tru
     """
     eastern = ZoneInfo("America/New_York")
     today = datetime.now(eastern).date()
-    if period_end_date is not None:
-        end_of_period = period_end_date
+    if window_start is not None and window_end is not None:
+        start_d, end_d = window_start, window_end
+    elif period_end_date is not None:
+        start_d, end_d = today, period_end_date
     else:
-        end_of_period = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+        end_d = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+        start_d = today
     team_abbrev = getattr(player, "proTeam", None)
     if pd.isna(team_abbrev):
         return 0
     sched = get_team_schedule(team_abbrev)
-    period_games = [g for g in sched if today <= g <= end_of_period]
+    period_games = [g for g in sched if start_d <= g <= end_d]
     if not period_games:
         return 0
     injury_status = getattr(player, "injuryStatus", None) or ""
@@ -118,6 +121,28 @@ def get_week_date_range(week, year):
         return start, end
     except (ValueError, TypeError):
         return None, None
+
+
+def get_game_count_window(year, view_week, league_current_week, period_end_date=None, week_span=1):
+    """
+    Inclusive NBA game-count window for the selected matchup view.
+
+    - If view_week == league_current_week (ESPN's live period): from **today**
+      through playoff period end or through the end of the current matchup span.
+    - Otherwise (another week, past or future): full Mon–Sun span from
+      get_week_date_range(view_week, year) so you can preview a week ahead.
+    """
+    eastern = ZoneInfo("America/New_York")
+    today = datetime.now(eastern).date()
+    if view_week != league_current_week:
+        start_d, end_d = get_week_date_range(view_week, year)
+        if start_d is not None and end_d is not None:
+            return start_d, end_d
+        return today, today
+    if period_end_date is not None:
+        return today, period_end_date
+    end = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+    return today, end
 
 
 def count_games_for_player_in_week(player, week, year, injury_data=None, trust_return_dates=True):
@@ -283,10 +308,13 @@ def connect_to_espn(league_id, year, espn_s2, swid):
     return league
 
 
-def get_matchup_info(league, team_id):
-    """Auto-detect current matchup and opponent."""
-    current_week = league.currentMatchupPeriod
-    boxscores = league.box_scores(matchup_period=current_week)
+def get_matchup_info(league, team_id, matchup_period=None):
+    """
+    Matchup and opponent for a fantasy scoring period.
+    matchup_period: ESPN matchup week number, or None for league.currentMatchupPeriod.
+    """
+    period = matchup_period if matchup_period is not None else league.currentMatchupPeriod
+    boxscores = league.box_scores(matchup_period=period)
     your_team_obj = next(t for t in league.teams if t.team_id == team_id)
     matchup = next(
         m for m in boxscores
@@ -296,7 +324,7 @@ def get_matchup_info(league, team_id):
         matchup.away_team if matchup.home_team.team_id == team_id
         else matchup.home_team
     )
-    return your_team_obj, opp_team_obj, matchup, current_week
+    return your_team_obj, opp_team_obj, matchup, period
 
 
 def get_current_totals(matchup, team_id):
@@ -403,40 +431,47 @@ def get_team_schedule(team_abbrev):
         return []
 
 
-def count_games_left(team_abbrev, week_span=1, period_end_date=None):
-    """Count games remaining in the matchup period (no injury consideration).
-    period_end_date: explicit end date (takes priority over week_span).
+def count_games_left(team_abbrev, week_span=1, period_end_date=None, window_start=None, window_end=None):
+    """Count games in the matchup window (no injury consideration).
+    If window_start and window_end are set, they define the inclusive date range.
+    Otherwise legacy: today through period_end_date or end of week_span.
     """
     eastern = ZoneInfo("America/New_York")
     today = datetime.now(eastern).date()
-    if period_end_date is not None:
-        end_of_period = period_end_date
+    if window_start is not None and window_end is not None:
+        start_d, end_d = window_start, window_end
+    elif period_end_date is not None:
+        start_d, end_d = today, period_end_date
     else:
-        end_of_period = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+        end_d = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+        start_d = today
     sched = get_team_schedule(team_abbrev)
-    return sum(today <= g <= end_of_period for g in sched)
+    return sum(start_d <= g <= end_d for g in sched)
 
 
-def _get_games_by_day_for_roster(roster, injury_data=None, trust_return_dates=True, week_span=1, period_end_date=None):
+def _get_games_by_day_for_roster(roster, injury_data=None, trust_return_dates=True, week_span=1, period_end_date=None,
+                                 window_start=None, window_end=None):
     """
     Get which players have games on each day in the matchup period (injury-aware).
-    period_end_date: explicit end date (takes priority over week_span).
-    week_span: 1 = one-week matchup, 2 = two-week playoff matchup (fallback).
+    window_start/window_end: inclusive range when both set; else today through period end / week span.
     Returns dict: date -> list of (player_name, team_abbrev).
     """
     eastern = ZoneInfo("America/New_York")
     today = datetime.now(eastern).date()
-    if period_end_date is not None:
-        end_of_period = period_end_date
+    if window_start is not None and window_end is not None:
+        start_d, end_d = window_start, window_end
+    elif period_end_date is not None:
+        start_d, end_d = today, period_end_date
     else:
-        end_of_period = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+        end_d = today + timedelta(days=(6 - today.weekday()) + (week_span - 1) * 7)
+        start_d = today
     games_by_day = defaultdict(list)
     for p in roster:
         team_abbrev = getattr(p, "proTeam", None)
         if pd.isna(team_abbrev):
             continue
         sched = get_team_schedule(team_abbrev)
-        period_games = [g for g in sched if today <= g <= end_of_period]
+        period_games = [g for g in sched if start_d <= g <= end_d]
         if not period_games:
             continue
         injury_status = getattr(p, "injuryStatus", None) or ""
@@ -457,24 +492,24 @@ def _get_games_by_day_for_roster(roster, injury_data=None, trust_return_dates=Tr
     return dict(games_by_day)
 
 
-def add_games_left(df, week_span=1, period_end_date=None):
-    """Add Games Left column to dataframe (team-based, no injury).
-    period_end_date: explicit end date (takes priority over week_span).
-    """
+def add_games_left(df, week_span=1, period_end_date=None, window_start=None, window_end=None):
+    """Add Games Left column to dataframe (team-based, no injury)."""
     df = df.copy()
-    df["Games Left"] = df["NBA_Team"].apply(lambda t: count_games_left(t, week_span, period_end_date))
+    df["Games Left"] = df["NBA_Team"].apply(
+        lambda t: count_games_left(t, week_span, period_end_date, window_start, window_end)
+    )
     return df
 
 
 def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
-                               trust_return_dates=True, week_span=1, period_end_date=None):
+                               trust_return_dates=True, week_span=1, period_end_date=None,
+                               window_start=None, window_end=None):
     """
     Add Games Left column using ESPN estimated return dates.
     Non-ACTIVE players with return date: count only games on/after that date.
     Non-ACTIVE players without return date: 0 games (ruled out for period).
     injury_data from get_espn_injury_data() provides return dates when fantasy API doesn't.
-    period_end_date: explicit end date for the matchup period (takes priority over week_span).
-    week_span: 1 = single-week matchup, 2 = two-week playoff matchup (fallback).
+    window_start/window_end: inclusive NBA schedule window (e.g. full week when previewing ahead).
 
     When max_per_day is set (default from config), applies league cap: on days with more
     than max_per_day players, each player gets fractional credit (max_per_day / num_players).
@@ -482,7 +517,10 @@ def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
     """
     df = df.copy()
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
-    games_by_day = _get_games_by_day_for_roster(roster, injury_data, trust_return_dates, week_span, period_end_date)
+    games_by_day = _get_games_by_day_for_roster(
+        roster, injury_data, trust_return_dates, week_span, period_end_date,
+        window_start=window_start, window_end=window_end,
+    )
     player_effective = defaultdict(float)
     for day, players_on_day in games_by_day.items():
         n = len(players_on_day)
@@ -494,11 +532,16 @@ def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
     def games_for_row(row):
         player = name_to_player.get(row["Player"])
         if player is None:
-            return count_games_left(row["NBA_Team"], week_span, period_end_date)
+            return count_games_left(
+                row["NBA_Team"], week_span, period_end_date, window_start, window_end,
+            )
         if row["Player"] in player_effective:
             eff = player_effective[row["Player"]]
             return max(0, int(round(eff))) if eff > 0 else 0
-        return count_games_left_for_player(player, injury_data, trust_return_dates, week_span, period_end_date)
+        return count_games_left_for_player(
+            player, injury_data, trust_return_dates, week_span, period_end_date,
+            window_start=window_start, window_end=window_end,
+        )
 
     df["Games Left"] = df.apply(games_for_row, axis=1)
     return df
