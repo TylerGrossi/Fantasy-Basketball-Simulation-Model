@@ -3,6 +3,7 @@ Fantasy Basketball Simulator - Monte Carlo simulation, streamers, bench strategy
 """
 
 from collections import defaultdict
+from datetime import date
 import numpy as np
 import pandas as pd
 
@@ -201,7 +202,7 @@ def _evaluate_matchup(test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp,
 def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, current_totals_opp,
                       baseline_results, blend_weight, year, num_streamers=20,
                       untouchables=None, has_open_roster_spot=False, manual_watchlist=None,
-                      week_span=1, period_end_date=None):
+                      week_span=1, period_end_date=None, game_window_start=None, game_window_end=None):
     """Analyze potential streamer pickups, considering who to drop."""
     baseline_win_pct, baseline_cat_results, baseline_avg_cats = baseline_results
     untouchables = untouchables or []
@@ -223,8 +224,12 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
             player_status_map[p.name] = display
     fa_season = build_stat_df(healthy_players, f"{year}_total", "Season", "Waiver", year)
     fa_last30 = build_stat_df(healthy_players, f"{year}_last_30", "Last30", "Waiver", year)
-    fa_season = add_games_left(fa_season, week_span, period_end_date)
-    fa_last30 = add_games_left(fa_last30, week_span, period_end_date)
+    fa_season = add_games_left(
+        fa_season, week_span, period_end_date, game_window_start, game_window_end,
+    )
+    fa_last30 = add_games_left(
+        fa_last30, week_span, period_end_date, game_window_start, game_window_end,
+    )
     merged = fa_season.merge(fa_last30, on=["Player", "NBA_Team"], suffixes=("_season", "_30"))
     rows = []
     for _, r in merged.iterrows():
@@ -619,11 +624,13 @@ def _simulate_matchup_winner(home_id, away_id, proj_home, proj_away, variance_mu
 
 def _compute_playoff_matchup_win_prob(team_a, team_b, current_a, current_b,
                                        year, injury_data, blend_weight,
-                                       period_end_date=None, sims=5000):
+                                       period_end_date=None, sims=5000,
+                                       game_window_start=None, game_window_end=None):
     """
     Compute win probability for a live playoff matchup by combining current accumulated
     scores with projected remaining stats, then running category-by-category Monte Carlo.
     Returns: probability that team_a wins the matchup (float 0-1).
+    game_window_start/end: optional inclusive NBA dates for games left (e.g. full semi window).
     """
     variance_multiplier = _get_matchup_variance_multiplier()
 
@@ -653,8 +660,12 @@ def _compute_playoff_matchup_win_prob(team_a, team_b, current_a, current_b,
                     merged[col] = merged[f"{col}_30"]
                 else:
                     merged[col] = 0.0
-        merged = add_games_left_with_injury(merged, roster, injury_data,
-                                            period_end_date=period_end_date)
+        merged = add_games_left_with_injury(
+            merged, roster, injury_data,
+            period_end_date=period_end_date,
+            window_start=game_window_start,
+            window_end=game_window_end,
+        )
         return merged
 
     df_a = _build_team_df(team_a)
@@ -671,6 +682,165 @@ def _compute_playoff_matchup_win_prob(team_a, team_b, current_a, current_b,
     if total == 0:
         return 0.5
     return (matchup_results["you"] + 0.5 * matchup_results["tie"]) / total
+
+
+def _playoff_team_ids_ordered(league_stats, playoff_teams=4):
+    """Best standing first (ESPN standing: lower is better)."""
+    return [t["team_id"] for t in sorted(league_stats, key=lambda x: x["standing"])[:playoff_teams]]
+
+
+def _infer_semifinal_pairs_standard(seed_order_ids):
+    """4-team bracket: 1 vs 4, 2 vs 3."""
+    if len(seed_order_ids) < 4:
+        return []
+    s1, s2, s3, s4 = seed_order_ids[0], seed_order_ids[1], seed_order_ids[2], seed_order_ids[3]
+    return [(s1, s4), (s2, s3)]
+
+
+def _extract_pairs_from_playoff_boxscores(league, period, playoff_id_set):
+    pairs = []
+    try:
+        for m in league.box_scores(matchup_period=period):
+            h = m.home_team.team_id
+            a = m.away_team.team_id
+            if h in playoff_id_set and a in playoff_id_set:
+                pairs.append((h, a))
+    except Exception:
+        return []
+    # Deduplicate
+    seen = set()
+    out = []
+    for p in pairs:
+        key = tuple(sorted(p))
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def resolve_projected_finals_opponent_from_other_semi(
+    league,
+    team_id,
+    year,
+    league_stats,
+    injury_data,
+    blend_weight,
+    playoff_teams=4,
+    regular_season_weeks=19,
+    semi_window_start=None,
+    semi_window_end=None,
+    sims=3000,
+):
+    """
+    For a finals lookahead: pick the *other* semifinal (not yours), project who wins,
+    and return that team as the projected finals opponent.
+
+    Bracket: uses ESPN box scores for playoff weeks when available; otherwise 1v4 / 2v3
+    by regular-season standing among the top ``playoff_teams``.
+    """
+    if injury_data is None:
+        injury_data = get_espn_injury_data()
+
+    ordered = _playoff_team_ids_ordered(league_stats, playoff_teams)
+    playoff_set = set(ordered)
+    if len(ordered) < 4 or team_id not in playoff_set:
+        return None
+
+    team_obj_map = {t.team_id: t for t in league.teams}
+    pairs = []
+
+    cw = league.currentMatchupPeriod
+    for period in sorted({regular_season_weeks + 1, regular_season_weeks + 2, cw}):
+        got = _extract_pairs_from_playoff_boxscores(league, period, playoff_set)
+        if len(got) >= 2:
+            pairs = got[:2]
+            break
+
+    if len(pairs) < 2:
+        pairs = _infer_semifinal_pairs_standard(ordered)
+
+    if len(pairs) < 2:
+        return None
+
+    user_pair = None
+    for p in pairs:
+        if team_id in p:
+            user_pair = tuple(sorted(p))
+            break
+    if user_pair is None:
+        return None
+
+    other = None
+    for p in pairs:
+        if tuple(sorted(p)) != user_pair:
+            other = p
+            break
+    if other is None:
+        return None
+
+    h_id, a_id = other[0], other[1]
+    home_obj = team_obj_map.get(h_id)
+    away_obj = team_obj_map.get(a_id)
+    if not home_obj or not away_obj:
+        return None
+
+    # Live totals for other semi if that matchup exists in box scores
+    stat_keys = ["FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO", "PTS", "DD", "TW"]
+    current_home = {k: 0 for k in stat_keys}
+    current_away = {k: 0 for k in stat_keys}
+    for period in sorted({regular_season_weeks + 1, regular_season_weeks + 2, cw}):
+        found = False
+        try:
+            for m in league.box_scores(matchup_period=period):
+                ids = {m.home_team.team_id, m.away_team.team_id}
+                if ids == {h_id, a_id}:
+                    hs = flatten_stat_dict(m.home_stats)
+                    aws = flatten_stat_dict(m.away_stats)
+                    current_home = {k: hs.get(k, 0) for k in stat_keys}
+                    current_away = {k: aws.get(k, 0) for k in stat_keys}
+                    found = True
+                    break
+        except Exception:
+            continue
+        if found:
+            break
+
+    gws, gwe = semi_window_start, semi_window_end
+    home_prob = _compute_playoff_matchup_win_prob(
+        home_obj, away_obj, current_home, current_away,
+        year, injury_data, blend_weight,
+        period_end_date=semi_window_end if isinstance(semi_window_end, date) else None,
+        sims=min(sims, 4000),
+        game_window_start=gws if isinstance(gws, date) else None,
+        game_window_end=gwe if isinstance(gwe, date) else None,
+    )
+
+    if home_prob >= 0.5:
+        fav_id, fav_obj = h_id, home_obj
+        fav_prob = home_prob
+        dog_name = away_obj.team_name
+    else:
+        fav_id, fav_obj = a_id, away_obj
+        fav_prob = 1.0 - home_prob
+        dog_name = home_obj.team_name
+
+    home_name = home_obj.team_name
+    away_name = away_obj.team_name
+    note = (
+        f"Other semi: **{home_name}** vs **{away_name}**. "
+        f"Projected finals opponent **{fav_obj.team_name}** "
+        f"({fav_prob * 100:.0f}% to win that semi vs {dog_name})."
+    )
+
+    return {
+        "opp_team_id": fav_id,
+        "opp_team_obj": fav_obj,
+        "opp_team_name": fav_obj.team_name,
+        "other_semi_home_id": h_id,
+        "other_semi_away_id": a_id,
+        "favorite_win_prob": fav_prob,
+        "note": note,
+    }
 
 
 def calculate_league_stats(league, year):
@@ -1143,3 +1313,310 @@ def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
         current = next_round
         round_idx += 1
     return (current[0] if current else None), round_advancers
+
+
+# =============================================================================
+# MATCHUP OPTIMIZATION
+# =============================================================================
+
+def _compute_cat_results_from_totals(test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp, stats_to_sim):
+    """Compute per-category simulation win counts from raw total arrays."""
+    with np.errstate(divide='ignore', invalid='ignore'):
+        your_fgp = np.where(
+            test_totals[:, stats_to_sim.index("FGA")] > 0,
+            test_totals[:, stats_to_sim.index("FGM")] / test_totals[:, stats_to_sim.index("FGA")], 0
+        )
+        your_ftp = np.where(
+            test_totals[:, stats_to_sim.index("FTA")] > 0,
+            test_totals[:, stats_to_sim.index("FTM")] / test_totals[:, stats_to_sim.index("FTA")], 0
+        )
+        your_3pp = np.where(
+            test_totals[:, stats_to_sim.index("3PA")] > 0,
+            test_totals[:, stats_to_sim.index("3PM")] / test_totals[:, stats_to_sim.index("3PA")], 0
+        )
+    cat_results = {}
+    for cat in CATEGORIES:
+        if cat == "FG%":
+            y, o = your_fgp, opp_fgp
+        elif cat == "FT%":
+            y, o = your_ftp, opp_ftp
+        elif cat == "3P%":
+            y, o = your_3pp, opp_3pp
+        else:
+            cat_idx = stats_to_sim.index(cat) if cat in stats_to_sim else None
+            if cat_idx is None:
+                continue
+            y = test_totals[:, cat_idx]
+            o = opp_totals[:, cat_idx]
+        if cat == "TO":
+            yw, ow = y < o, y > o
+        else:
+            yw, ow = y > o, y < o
+        cat_results[cat] = {
+            "you": int(yw.sum()),
+            "opponent": int(ow.sum()),
+            "tie": int((~yw & ~ow).sum()),
+        }
+    return cat_results
+
+
+def optimize_waiver_adds(
+    league, your_team_df, opp_team_df, current_you, current_opp,
+    baseline_results, blend_weight, year, max_adds,
+    untouchables=None, has_open_roster_spot=False,
+    week_span=1, period_end_date=None,
+    game_window_start=None, game_window_end=None,
+    num_candidates=40, sims=1500,
+):
+    """
+    Greedy step-by-step waiver optimization to maximize win percentage.
+
+    At each step the single best add/drop combo is found and applied.
+    Returns a list of step dicts — one per add used — with win% at each stage.
+    The team simulation is pre-decomposed into per-player contribution arrays so
+    each (waiver, drop) evaluation is just vector addition/subtraction: O(sims×stats).
+    """
+    baseline_win_pct, baseline_cat_results, baseline_avg_cats = baseline_results
+    if max_adds <= 0 or num_candidates <= 0:
+        return []
+
+    untouchables = untouchables or []
+    untouchables_lower = {p.lower().strip() for p in untouchables}
+
+    stats_to_sim = list(CATEGORY_VARIANCE.keys())
+    variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
+
+    # ------------------------------------------------------------------
+    # Build blended waiver pool
+    # ------------------------------------------------------------------
+    free_agents = league.free_agents(size=min(400, num_candidates * 6))
+    healthy_fas = [p for p in free_agents if not is_player_injured(p)]
+    if not healthy_fas:
+        return []
+
+    fa_season = build_stat_df(healthy_fas, f"{year}_total", "Season", "Waiver", year)
+    fa_last30 = build_stat_df(healthy_fas, f"{year}_last_30", "Last30", "Waiver", year)
+    fa_season = add_games_left(
+        fa_season, week_span, period_end_date, game_window_start, game_window_end,
+    )
+    fa_last30 = add_games_left(
+        fa_last30, week_span, period_end_date, game_window_start, game_window_end,
+    )
+    merged_fa = fa_season.merge(fa_last30, on=["Player", "NBA_Team"], suffixes=("_season", "_30"))
+
+    waiver_rows = []
+    for _, r in merged_fa.iterrows():
+        g = r.get("Games Left_30", 0)
+        if g <= 0:
+            continue
+        out = {"Player": r["Player"], "NBA_Team": r["NBA_Team"], "Games Left": g, "Team": "Waiver"}
+        for col in NUMERIC_COLS:
+            c30, csea = f"{col}_30", f"{col}_season"
+            if c30 in r and csea in r:
+                out[col] = r[c30] * blend_weight + r[csea] * (1 - blend_weight)
+            else:
+                out[col] = r.get(c30, r.get(csea, 0))
+        waiver_rows.append(out)
+
+    if not waiver_rows:
+        return []
+
+    all_waivers_df = pd.DataFrame(waiver_rows).sort_values(
+        ["Games Left", "PTS"], ascending=[False, False]
+    )
+    top_candidates = all_waivers_df.head(num_candidates)
+
+    # ------------------------------------------------------------------
+    # Pre-compute opponent totals (fixed for all steps)
+    # ------------------------------------------------------------------
+    opp_df_clean = opp_team_df.fillna(0)
+    opp_means_arr = opp_df_clean[stats_to_sim].values
+    opp_games_arr = opp_df_clean["Games Left"].values.astype(int)
+    opp_totals = np.zeros((sims, len(stats_to_sim)))
+    for p_idx in range(len(opp_df_clean)):
+        n_games = opp_games_arr[p_idx]
+        if n_games <= 0:
+            continue
+        pm = opp_means_arr[p_idx]
+        ps = pm * variance_vals
+        opp_totals += np.random.normal(loc=pm, scale=ps, size=(sims, n_games, len(stats_to_sim))).sum(axis=1)
+    for i, stat in enumerate(stats_to_sim):
+        opp_totals[:, i] += current_opp.get(stat, 0)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        opp_fgp = np.where(opp_totals[:, stats_to_sim.index("FGA")] > 0,
+                           opp_totals[:, stats_to_sim.index("FGM")] / opp_totals[:, stats_to_sim.index("FGA")], 0)
+        opp_ftp = np.where(opp_totals[:, stats_to_sim.index("FTA")] > 0,
+                           opp_totals[:, stats_to_sim.index("FTM")] / opp_totals[:, stats_to_sim.index("FTA")], 0)
+        opp_3pp = np.where(opp_totals[:, stats_to_sim.index("3PA")] > 0,
+                           opp_totals[:, stats_to_sim.index("3PM")] / opp_totals[:, stats_to_sim.index("3PA")], 0)
+
+    # ------------------------------------------------------------------
+    # Pre-compute waiver candidate contribution arrays (fixed for all steps)
+    # ------------------------------------------------------------------
+    waiver_contribs = {}
+    waiver_meta = {}
+    for _, row in top_candidates.iterrows():
+        games = int(row["Games Left"])
+        wm = np.array([row.get(s, 0) for s in stats_to_sim])
+        ws = wm * variance_vals
+        if games > 0:
+            waiver_contribs[row["Player"]] = np.random.normal(
+                loc=wm, scale=ws, size=(sims, games, len(stats_to_sim))
+            ).sum(axis=1)
+        else:
+            waiver_contribs[row["Player"]] = np.zeros((sims, len(stats_to_sim)))
+        waiver_meta[row["Player"]] = {
+            "NBA_Team": row["NBA_Team"],
+            "Games Left": games,
+            "PTS": round(row.get("PTS", 0), 1),
+            "REB": round(row.get("REB", 0), 1),
+            "AST": round(row.get("AST", 0), 1),
+            "3PM": round(row.get("3PM", 0), 1),
+        }
+
+    # ------------------------------------------------------------------
+    # Mutable optimization state
+    # ------------------------------------------------------------------
+    current_team_df = your_team_df.copy()
+    current_win_pct = baseline_win_pct
+    current_avg_cats = baseline_avg_cats
+    current_cat_results = baseline_cat_results
+    has_open = has_open_roster_spot
+    added_players: set = set()
+
+    # Current-week accumulated stats offset (shape: (stats,) — broadcasts over sims axis)
+    cur_you_offsets = np.array([current_you.get(s, 0) for s in stats_to_sim])
+
+    steps = []
+
+    for step_num in range(1, max_adds + 1):
+        # Candidates not yet added this optimization run
+        available = [n for n in top_candidates["Player"].tolist()
+                     if n not in added_players and n in waiver_contribs]
+        if not available:
+            break
+
+        # ------- Recompute per-player simulation arrays for current team -------
+        team_clean = current_team_df.fillna(0)
+        team_means = team_clean[stats_to_sim].values
+        team_games = team_clean["Games Left"].values.astype(int)
+        team_players_arr = team_clean["Player"].values
+
+        # Players that can be dropped (not untouchable, not recently added)
+        untouchables_step = untouchables_lower | {p.lower().strip() for p in added_players}
+        droppable_names = set(
+            team_clean.loc[
+                ~team_clean["Player"].str.lower().str.strip().isin(untouchables_step),
+                "Player",
+            ].values
+        )
+
+        if not droppable_names and not has_open:
+            break
+
+        player_sims_dict: dict = {}
+        for p_idx in range(len(team_clean)):
+            n_games = team_games[p_idx]
+            name = team_players_arr[p_idx]
+            if n_games <= 0:
+                player_sims_dict[name] = np.zeros((sims, len(stats_to_sim)))
+            else:
+                pm = team_means[p_idx]
+                ps = pm * variance_vals
+                player_sims_dict[name] = np.random.normal(
+                    loc=pm, scale=ps, size=(sims, n_games, len(stats_to_sim))
+                ).sum(axis=1)
+
+        # Team base = sum of all future contributions + current-week accumulated stats
+        team_base = np.zeros((sims, len(stats_to_sim)))
+        for pcontrib in player_sims_dict.values():
+            team_base += pcontrib
+        team_base += cur_you_offsets  # broadcast: (sims, stats) + (stats,)
+
+        # ------- Search over all (waiver, drop) combos -------
+        best: dict | None = None
+        best_score = float("-inf")
+
+        for waiver_name in available:
+            waiver_contrib = waiver_contribs[waiver_name]
+
+            # Option A: use an open roster spot (no drop required)
+            if has_open:
+                test = team_base + waiver_contrib
+                net_cats, exp_cats, wp, cat_impacts = _evaluate_matchup(
+                    test, opp_totals, opp_fgp, opp_ftp, opp_3pp,
+                    stats_to_sim, current_avg_cats, current_cat_results, sims,
+                )
+                if net_cats > best_score:
+                    best_score = net_cats
+                    best = {
+                        "add": waiver_name, "drop": "(Open Spot)",
+                        "win_pct": wp, "exp_cats": exp_cats,
+                        "delta_cats": net_cats, "cat_impacts": cat_impacts,
+                        "test_totals": test,
+                    }
+
+            # Option B: drop one of the droppable players
+            for drop_name in droppable_names:
+                drop_contrib = player_sims_dict.get(drop_name, np.zeros((sims, len(stats_to_sim))))
+                test = team_base - drop_contrib + waiver_contrib
+                net_cats, exp_cats, wp, cat_impacts = _evaluate_matchup(
+                    test, opp_totals, opp_fgp, opp_ftp, opp_3pp,
+                    stats_to_sim, current_avg_cats, current_cat_results, sims,
+                )
+                if net_cats > best_score:
+                    best_score = net_cats
+                    best = {
+                        "add": waiver_name, "drop": drop_name,
+                        "win_pct": wp, "exp_cats": exp_cats,
+                        "delta_cats": net_cats, "cat_impacts": cat_impacts,
+                        "test_totals": test,
+                    }
+
+        if best is None:
+            break
+
+        meta = waiver_meta.get(best["add"], {})
+        steps.append({
+            "step": step_num,
+            "add": best["add"],
+            "add_team": meta.get("NBA_Team", ""),
+            "add_games": meta.get("Games Left", 0),
+            "add_pts": meta.get("PTS", 0),
+            "add_reb": meta.get("REB", 0),
+            "add_ast": meta.get("AST", 0),
+            "add_3pm": meta.get("3PM", 0),
+            "drop": best["drop"],
+            "win_pct": best["win_pct"],
+            "delta_win_pct": best["win_pct"] - current_win_pct,
+            "cumulative_delta": best["win_pct"] - baseline_win_pct,
+            "exp_cats": best["exp_cats"],
+            "cat_impacts": best["cat_impacts"],
+        })
+
+        # ------- Apply the change to team state -------
+        team_name_val = your_team_df["Team"].iloc[0] if len(your_team_df) > 0 else "Your Team"
+        if best["drop"] == "(Open Spot)":
+            new_row_df = all_waivers_df[all_waivers_df["Player"] == best["add"]].head(1).copy()
+            if not new_row_df.empty:
+                new_row_df["Team"] = team_name_val
+                current_team_df = pd.concat([current_team_df, new_row_df], ignore_index=True)
+            has_open = False
+        else:
+            current_team_df = current_team_df[current_team_df["Player"] != best["drop"]].copy()
+            new_row_df = all_waivers_df[all_waivers_df["Player"] == best["add"]].head(1).copy()
+            if not new_row_df.empty:
+                new_row_df["Team"] = team_name_val
+                current_team_df = pd.concat([current_team_df, new_row_df], ignore_index=True)
+
+        added_players.add(best["add"])
+        current_win_pct = best["win_pct"]
+        current_avg_cats = best["exp_cats"]
+
+        # Update baseline cat_results so next step's cat_impacts are vs current best state
+        current_cat_results = _compute_cat_results_from_totals(
+            best["test_totals"], opp_totals, opp_fgp, opp_ftp, opp_3pp, stats_to_sim
+        )
+
+    return steps
