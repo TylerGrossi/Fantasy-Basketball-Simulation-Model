@@ -13,6 +13,7 @@ from collections import defaultdict
 from config import (
     INJURED_STATUSES,
     MAX_PLAYERS_PER_DAY,
+    MAX_ROSTER_SIZE,
     NUMERIC_COLS,
     STATUS_DISPLAY,
     TEAM_FIXES,
@@ -213,22 +214,77 @@ def _get_games_by_day_for_week(roster, week, year, injury_data=None, trust_retur
     return dict(games_by_day)
 
 
-def add_games_in_week(df, roster, week, year, injury_data=None, max_per_day=None, trust_return_dates=True):
+def _pts_rank_scores_from_df(df):
+    """Per-player PTS from stats df (higher = prioritized when trimming roster or busy days)."""
+    if df is None or df.empty or "Player" not in df.columns:
+        return {}
+    if "PTS" not in df.columns:
+        return {}
+    out = {}
+    for _, row in df.iterrows():
+        name = row["Player"]
+        v = row["PTS"]
+        out[name] = float(v) if pd.notna(v) else 0.0
+    return out
+
+
+def _roster_for_projection_caps(roster, rank_scores, max_roster_size):
+    """
+    If roster exceeds max_roster_size, keep the top players by rank_scores (PTS), tie-break by name.
+    Returns (trimmed_roster, kept_player_names).
+    """
+    if max_roster_size is None or len(roster) <= max_roster_size:
+        trimmed = list(roster)
+        return trimmed, {p.name for p in trimmed}
+    sorted_p = sorted(
+        roster,
+        key=lambda p: (-float(rank_scores.get(p.name, 0.0)), p.name),
+    )
+    trimmed = sorted_p[:max_roster_size]
+    return trimmed, {p.name for p in trimmed}
+
+
+def _accumulate_counted_games_by_day(games_by_day, rank_scores, max_per_day):
+    """
+    Each calendar day, at most max_per_day rostered players get a counted NBA game.
+    When more than max_per_day have a game, keep the top max_per_day by PTS (rank_scores).
+    """
+    player_effective = defaultdict(float)
+    cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
+    for _, players_on_day in games_by_day.items():
+        names = [pname for pname, _ in players_on_day]
+        n = len(names)
+        if n == 0:
+            continue
+        if n <= cap:
+            chosen = names
+        else:
+            chosen = sorted(
+                names,
+                key=lambda pname: (-float(rank_scores.get(pname, 0.0)), pname),
+            )[:cap]
+        for pname in chosen:
+            player_effective[pname] += 1.0
+    return player_effective
+
+
+def add_games_in_week(df, roster, week, year, injury_data=None, max_per_day=None, trust_return_dates=True,
+                      max_roster_size=None):
     """
     Add 'Games This Week' column for a specific fantasy week (injury-aware).
     Used for projected roster strength in playoff simulation.
-    When max_per_day is set, applies league cap for days with > max_per_day players.
+    At most max_roster_size players contribute (default 13); lower projections are dropped.
+    When more than max_per_day players have an NBA game the same day, only the top max_per_day
+    by PTS get a counted game for that day (default max_per_day from config).
     trust_return_dates: if False, non-ACTIVE players are treated as out the full week.
     """
     df = df.copy()
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
-    games_by_day = _get_games_by_day_for_week(roster, week, year, injury_data, trust_return_dates)
-    player_effective = defaultdict(float)
-    for day, players_on_day in games_by_day.items():
-        n = len(players_on_day)
-        scale = min(1.0, cap / n) if n > 0 else 0
-        for (pname, _) in players_on_day:
-            player_effective[pname] += scale
+    rank_scores = _pts_rank_scores_from_df(df)
+    cap_roster = max_roster_size if max_roster_size is not None else MAX_ROSTER_SIZE
+    roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster)
+    games_by_day = _get_games_by_day_for_week(roster_eff, week, year, injury_data, trust_return_dates)
+    player_effective = _accumulate_counted_games_by_day(games_by_day, rank_scores, cap)
     name_to_player = {p.name: p for p in roster}
 
     def games_for_row(row):
@@ -242,10 +298,10 @@ def add_games_in_week(df, roster, week, year, injury_data=None, max_per_day=None
                 return 0
             sched = get_team_schedule(team_abbrev)
             return sum(1 for g in sched if start_d <= g <= end_d)
-        if row["Player"] in player_effective:
-            eff = player_effective[row["Player"]]
-            return max(0, int(round(eff))) if eff > 0 else 0
-        return count_games_for_player_in_week(player, week, year, injury_data, trust_return_dates)
+        if row["Player"] not in kept_names:
+            return 0
+        eff = player_effective.get(row["Player"], 0.0)
+        return max(0, int(round(eff))) if eff > 0 else 0
 
     df["Games This Week"] = df.apply(games_for_row, axis=1)
     return df
@@ -289,7 +345,83 @@ def get_ir_players_returning_this_week(roster, injury_data=None):
 
 def is_player_injured(player):
     """Check if a player object is injured."""
-    return player.injuryStatus in INJURED_STATUSES
+    raw = getattr(player, "injuryStatus", "")
+    if isinstance(raw, (list, tuple, set)):
+        for x in raw:
+            if str(x).upper().strip() in INJURED_STATUSES:
+                return True
+        return False
+    return str(raw).upper().strip() in INJURED_STATUSES
+
+
+def player_stashed_on_ir(player):
+    """
+    True if the player is on an IR slot (ESPN). IR players cannot score until moved
+    to an active roster spot (often requires a drop), so streaming math should not
+    count their NBA games while stashed.
+    """
+    raw = getattr(player, "injuryStatus", None) or ""
+    if isinstance(raw, (list, tuple, set)):
+        uppers = {str(x).upper().strip() for x in raw if x is not None}
+        if "INJURY_RESERVE" in uppers:
+            return True
+    elif str(raw).upper().strip() == "INJURY_RESERVE":
+        return True
+    for attr in ("lineupSlot", "lineup_slot", "slot_position"):
+        v = getattr(player, attr, None)
+        if isinstance(v, str) and "IR" in v.upper().replace(" ", ""):
+            return True
+    return False
+
+
+def _player_considered_active_for_schedule(player):
+    """Match ACTIVE_STATUSES; supports list/tuple injuryStatus from API."""
+    raw = getattr(player, "injuryStatus", None) or ""
+    if isinstance(raw, (list, tuple, set)):
+        tokens = {str(x).upper().strip() for x in raw if x is not None and str(x).strip()}
+        if not tokens:
+            return True
+        return tokens <= ACTIVE_STATUSES
+    return str(raw).upper().strip() in ACTIVE_STATUSES
+
+
+def filter_schedule_for_roster_player_injury(
+    player,
+    sched,
+    labels,
+    injury_data=None,
+    trust_return_dates=True,
+):
+    """
+    Restrict NBA game dates to when the player can realistically count for your team.
+
+    - IR-stashed: no games (activation + possible drop is not modeled).
+    - Active / DTD / empty status: full schedule in the window.
+    - Other statuses: if trust_return_dates, only games on/after expected return
+      (player + injury_data); if no return date, no games. If trust_return_dates is
+      False, no games for the window.
+
+    sched: set of datetime.date; labels: dict date -> opponent label.
+    """
+    injury_data = injury_data or {}
+    if not sched:
+        return set(), {}
+    if player_stashed_on_ir(player):
+        return set(), {}
+    if _player_considered_active_for_schedule(player):
+        return set(sched), {d: labels[d] for d in sched if d in labels}
+    if not trust_return_dates:
+        return set(), {}
+    expected_return = _parse_expected_return_date(player)
+    if expected_return is None:
+        inj_info = injury_data.get(player.name, {})
+        if isinstance(inj_info, dict):
+            expected_return = inj_info.get("return_date_obj")
+    if expected_return is None:
+        return set(), {}
+    sched_f = {d for d in sched if d >= expected_return}
+    lbl_f = {d: labels[d] for d in sched_f if d in labels}
+    return sched_f, lbl_f
 
 
 # -----------------------------------------------------------------------------
@@ -398,37 +530,152 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
     return pd.DataFrame(rows)
 
 
+def blend_season_last30(season_df, last30_df, blend_weight, merge_on=None):
+    """
+    Left-merge last-30 stats onto season. If a player has no last-30 row (e.g. zero
+    games in that window on ESPN), use season per-game numbers only instead of
+    treating missing last-30 as zeros in the blend.
+    """
+    merge_on = merge_on or ["Player", "NBA_Team"]
+    if season_df.empty:
+        return season_df.copy()
+    if last30_df.empty:
+        out = season_df.copy()
+        for col in NUMERIC_COLS:
+            if col not in out.columns:
+                out[col] = 0.0
+        return out
+    merged = season_df.merge(
+        last30_df, on=merge_on, how="left", suffixes=("_season", "_30")
+    )
+    has_last30 = merged["PTS_30"].notna()
+    for col in NUMERIC_COLS:
+        c_sea = f"{col}_season"
+        c30 = f"{col}_30"
+        sea = merged[c_sea].fillna(0) if c_sea in merged.columns else 0
+        t30 = merged[c30].fillna(0) if c30 in merged.columns else 0
+        blended = t30 * blend_weight + sea * (1 - blend_weight)
+        merged[col] = blended.where(has_last30, sea)
+    for base in ("Team", "Games Left"):
+        sb = f"{base}_season"
+        st = f"{base}_30"
+        if sb in merged.columns and st in merged.columns:
+            merged[base] = merged[st].combine_first(merged[sb])
+        elif sb in merged.columns:
+            merged[base] = merged[sb]
+        elif st in merged.columns:
+            merged[base] = merged[st]
+    drop_cols = [
+        c for c in merged.columns
+        if c.endswith("_season") or c.endswith("_30")
+    ]
+    return merged.drop(columns=drop_cols, errors="ignore")
+
+
 # -----------------------------------------------------------------------------
 # Games left / schedule
 # -----------------------------------------------------------------------------
 
 @st.cache_data(ttl=3600)
-def get_team_schedule(team_abbrev):
-    """Get NBA team schedule from ESPN API (cached 1hr)."""
+def get_team_schedule_bundle(team_abbrev):
+    """
+    One ESPN HTTP request per team: game dates and opponent labels (cached 1hr).
+    Returns (list[date], dict[date, opponent_label]).
+    """
     if pd.isna(team_abbrev):
-        return []
+        return [], {}
     team_abbrev = normalize_team(team_abbrev)
-    if team_abbrev not in NBA_TEAM_MAP:
-        return []
+    if not team_abbrev or team_abbrev not in NBA_TEAM_MAP:
+        return [], {}
     slug = NBA_TEAM_MAP[team_abbrev]
     url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{slug}/schedule"
     try:
         r = requests.get(url, timeout=10)
         if r.status_code != 200:
-            return []
+            return [], {}
         eastern = ZoneInfo("America/New_York")
         dates = []
+        labels = {}
         for event in r.json().get("events", []):
             try:
                 utc_dt = datetime.fromisoformat(
                     event["date"].replace("Z", "+00:00")
                 ).astimezone(eastern)
-                dates.append(utc_dt.date())
+                d = utc_dt.date()
+                dates.append(d)
             except Exception:
-                pass
-        return dates
+                continue
+            try:
+                comp = (event.get("competitions") or [{}])[0]
+                competitors = comp.get("competitors") or []
+                if len(competitors) < 2:
+                    continue
+                my_side = None
+                opp_abbr = None
+                for c in competitors:
+                    t = c.get("team") or {}
+                    ab = normalize_team(t.get("abbreviation"))
+                    if not ab:
+                        continue
+                    if ab == team_abbrev:
+                        my_side = c.get("homeAway")
+                    else:
+                        opp_abbr = t.get("abbreviation") or ab
+                if my_side is None or not opp_abbr:
+                    continue
+                if my_side == "away":
+                    labels[d] = f"@{str(opp_abbr).strip()}"
+                else:
+                    labels[d] = str(opp_abbr).strip()
+            except Exception:
+                continue
+        return dates, labels
     except Exception:
-        return []
+        return [], {}
+
+
+def get_team_schedule(team_abbrev):
+    """Get NBA team schedule from ESPN API (cached 1hr)."""
+    dates, _ = get_team_schedule_bundle(team_abbrev)
+    return dates
+
+
+def get_team_schedule_game_labels(team_abbrev):
+    """
+    Map each game date to a short opponent label: home opponent abbrev, or @OPP when away.
+    Same cached HTTP request as get_team_schedule.
+    """
+    _, labels = get_team_schedule_bundle(team_abbrev)
+    return labels if isinstance(labels, dict) else {}
+
+
+def prefetch_team_schedules_for_rosters(*rosters, max_workers=12):
+    """
+    Parallel warm-up of schedule cache for every distinct NBA team on the given ESPN rosters.
+    Cuts cold-load latency when many teams are fetched right after (e.g. matchup + streamers).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    seen = set()
+    abbrevs = []
+    for roster in rosters:
+        for p in roster or []:
+            t = getattr(p, "proTeam", None)
+            if pd.isna(t):
+                continue
+            t = normalize_team(t)
+            if t and t in NBA_TEAM_MAP and t not in seen:
+                seen.add(t)
+                abbrevs.append(t)
+    if not abbrevs:
+        return
+    nw = max(1, min(max_workers, len(abbrevs)))
+
+    def _warm(ab):
+        get_team_schedule_bundle(ab)
+
+    with ThreadPoolExecutor(max_workers=nw) as ex:
+        ex.map(_warm, abbrevs)
 
 
 def count_games_left(team_abbrev, week_span=1, period_end_date=None, window_start=None, window_end=None):
@@ -503,7 +750,7 @@ def add_games_left(df, week_span=1, period_end_date=None, window_start=None, win
 
 def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
                                trust_return_dates=True, week_span=1, period_end_date=None,
-                               window_start=None, window_end=None):
+                               window_start=None, window_end=None, max_roster_size=None):
     """
     Add Games Left column using ESPN estimated return dates.
     Non-ACTIVE players with return date: count only games on/after that date.
@@ -511,37 +758,34 @@ def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
     injury_data from get_espn_injury_data() provides return dates when fantasy API doesn't.
     window_start/window_end: inclusive NBA schedule window (e.g. full week when previewing ahead).
 
-    When max_per_day is set (default from config), applies league cap: on days with more
-    than max_per_day players, each player gets fractional credit (max_per_day / num_players).
+    At most max_roster_size players contribute (default 13); others get 0 counted games.
+    When more than max_per_day players have an NBA game the same day, only the top max_per_day
+    by PTS get a counted game that day (default max_per_day from config).
     trust_return_dates: if False, any non-ACTIVE player is treated as out the full period.
     """
     df = df.copy()
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
+    rank_scores = _pts_rank_scores_from_df(df)
+    cap_roster = max_roster_size if max_roster_size is not None else MAX_ROSTER_SIZE
+    roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster)
     games_by_day = _get_games_by_day_for_roster(
-        roster, injury_data, trust_return_dates, week_span, period_end_date,
+        roster_eff, injury_data, trust_return_dates, week_span, period_end_date,
         window_start=window_start, window_end=window_end,
     )
-    player_effective = defaultdict(float)
-    for day, players_on_day in games_by_day.items():
-        n = len(players_on_day)
-        scale = min(1.0, cap / n) if n > 0 else 0
-        for (pname, _) in players_on_day:
-            player_effective[pname] += scale
+    player_effective = _accumulate_counted_games_by_day(games_by_day, rank_scores, cap)
     name_to_player = {p.name: p for p in roster}
 
     def games_for_row(row):
-        player = name_to_player.get(row["Player"])
+        pname = row["Player"]
+        if pname not in kept_names:
+            return 0
+        player = name_to_player.get(pname)
         if player is None:
             return count_games_left(
                 row["NBA_Team"], week_span, period_end_date, window_start, window_end,
             )
-        if row["Player"] in player_effective:
-            eff = player_effective[row["Player"]]
-            return max(0, int(round(eff))) if eff > 0 else 0
-        return count_games_left_for_player(
-            player, injury_data, trust_return_dates, week_span, period_end_date,
-            window_start=window_start, window_end=window_end,
-        )
+        eff = player_effective.get(pname, 0.0)
+        return max(0, int(round(eff))) if eff > 0 else 0
 
     df["Games Left"] = df.apply(games_for_row, axis=1)
     return df

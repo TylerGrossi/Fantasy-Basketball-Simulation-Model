@@ -3,29 +3,105 @@ Fantasy Basketball Simulator - Monte Carlo simulation, streamers, bench strategy
 """
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta
 import numpy as np
 import pandas as pd
 
 from config import (
     CATEGORIES,
     CATEGORY_VARIANCE,
+    MAX_PLAYERS_PER_DAY,
     NUMERIC_COLS,
+    PLAYOFF_MONTE_CARLO_CAP,
     PLAYOFF_VARIANCE_MULTIPLIER,
     REGULAR_SEASON_VARIANCE_EARLY_WEEK,
     REGULAR_SEASON_VARIANCE_MID_WEEK,
     REGULAR_SEASON_VARIANCE_LATE_WEEK,
     STATUS_DISPLAY,
+    STREAMER_PICKUP_MONTE_CARLO_SIMS,
 )
 from data import (
     build_stat_df,
     add_games_left,
     add_games_in_week,
+    blend_season_last30,
+    get_team_schedule,
+    get_team_schedule_game_labels,
     is_player_injured,
+    filter_schedule_for_roster_player_injury,
+    player_stashed_on_ir,
     flatten_stat_dict,
     get_espn_injury_data,
     add_games_left_with_injury,
+    prefetch_team_schedules_for_rosters,
 )
+
+
+def _to_calendar_date(x):
+    """Coerce ESPN / pandas / numpy / [y,m,d] shapes to datetime.date."""
+    if x is None:
+        return None
+    if isinstance(x, datetime):
+        return x.date()
+    if isinstance(x, date):
+        return x
+    if isinstance(x, pd.Timestamp):
+        try:
+            return x.date()
+        except Exception:
+            return None
+    if isinstance(x, (list, tuple)):
+        if len(x) == 0:
+            return None
+        if len(x) >= 3:
+            try:
+                return date(int(x[0]), int(x[1]), int(x[2]))
+            except (ValueError, TypeError):
+                pass
+        return _to_calendar_date(x[0])
+    try:
+        if isinstance(x, np.datetime64):
+            return pd.Timestamp(x).date()
+    except Exception:
+        pass
+    try:
+        if hasattr(x, "date") and callable(x.date) and not isinstance(x, date):
+            return x.date()
+    except Exception:
+        pass
+    return None
+
+
+def _unwrap_window_bound(val, which_end=False):
+    """If UI passes [start, end] in one value, take first or last; else coerce to date."""
+    if isinstance(val, (list, tuple)) and len(val) > 0:
+        pick = val[-1] if which_end else val[0]
+        return _to_calendar_date(pick)
+    return _to_calendar_date(val)
+
+
+def _coerce_schedule_bundle(raw_labels, start_d, end_d):
+    """
+    Return (set of dates in window, dict date -> opponent label).
+    Defensive against stale cache or non-dict payloads from the schedule API path.
+    """
+    start_d = _to_calendar_date(start_d)
+    end_d = _to_calendar_date(end_d)
+    if start_d is None or end_d is None:
+        return set(), {}
+    if not isinstance(raw_labels, dict):
+        raw_labels = {}
+    labels_out = {}
+    sched = set()
+    for k, v in raw_labels.items():
+        kd = _to_calendar_date(k)
+        if kd is None:
+            continue
+        labels_out[kd] = v if isinstance(v, str) else (str(v) if v is not None else "")
+        if start_d <= kd <= end_d:
+            sched.add(kd)
+    lbl_window = {d: labels_out[d] for d in sched}
+    return sched, lbl_window
 
 
 def _get_matchup_variance_multiplier():
@@ -141,6 +217,17 @@ def compare_matchups(sim1, sim2, categories):
     return matchup_results, category_outcomes, outcome_counts
 
 
+def _strict_weekly_matchup_win_prob(outcome_counts):
+    """
+    P(you win the matchup) matching the main matchup gauge: share of sims where
+    your category wins > opponent's (ties excluded). outcome_counts maps (yw, ow) -> count.
+    """
+    total = sum(outcome_counts.values())
+    if total <= 0:
+        return None
+    return sum(c for (yw, ow), c in outcome_counts.items() if yw > ow) / total
+
+
 def _evaluate_matchup(test_totals, opp_totals, opp_fgp, opp_ftp, opp_3pp,
                       stats_to_sim, baseline_avg_cats, baseline_cat_results, sims):
     """Helper: evaluate a matchup using vectorized operations."""
@@ -216,6 +303,7 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
     healthy_players = [p for p in free_agents if not is_player_injured(p)]
     if not healthy_players:
         return []
+    prefetch_team_schedules_for_rosters(healthy_players)
     player_status_map = {}
     for p in healthy_players:
         raw = getattr(p, "injuryStatus", None) or ""
@@ -230,10 +318,10 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
     fa_last30 = add_games_left(
         fa_last30, week_span, period_end_date, game_window_start, game_window_end,
     )
-    merged = fa_season.merge(fa_last30, on=["Player", "NBA_Team"], suffixes=("_season", "_30"))
+    merged = blend_season_last30(fa_season, fa_last30, blend_weight)
     rows = []
     for _, r in merged.iterrows():
-        g = r.get("Games Left_30", 0)
+        g = r.get("Games Left", 0)
         if g <= 0:
             continue
         is_on_watchlist = r["Player"].lower().strip() in watchlist_names_lower
@@ -246,11 +334,7 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
             "Status": player_status_map.get(r["Player"], ""),
         }
         for col in NUMERIC_COLS:
-            c30, csea = f"{col}_30", f"{col}_season"
-            if c30 in r and csea in r:
-                out[col] = r[c30] * blend_weight + r[csea] * (1 - blend_weight)
-            else:
-                out[col] = r.get(c30, r.get(csea, 0))
+            out[col] = r.get(col, 0)
         rows.append(out)
     waiver_df = pd.DataFrame(rows)
     waiver_df["_watchlist_sort"] = waiver_df["On Watchlist"].map({True: 0, False: 1})
@@ -259,7 +343,7 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
     streamers = waiver_df.head(num_streamers)
     if streamers.empty:
         return []
-    streamer_sims = 2000
+    streamer_sims = int(STREAMER_PICKUP_MONTE_CARLO_SIMS)
     stats_to_sim = list(CATEGORY_VARIANCE.keys())
     variance_vals = np.array([CATEGORY_VARIANCE[s] for s in stats_to_sim])
     opp_df_clean = opp_team_df.fillna(0)
@@ -518,22 +602,7 @@ def _build_projected_weekly_for_team(team, week, year, injury_data, blend_weight
     last30_df = build_stat_df(roster, f"{year}_last_30", "Last30", team_name, year)
     if season_df.empty:
         return {cat: 0.0 for cat in CATEGORIES}
-    if last30_df.empty:
-        merged = season_df.copy()
-        for col in NUMERIC_COLS:
-            merged[col] = merged[col] if col in merged.columns else 0.0
-    else:
-        merged = season_df.merge(last30_df, on=["Player", "NBA_Team"], how="outer", suffixes=("_season", "_30"))
-        merged = merged.fillna(0)
-        for col in NUMERIC_COLS:
-            if f"{col}_30" in merged.columns and f"{col}_season" in merged.columns:
-                merged[col] = merged[f"{col}_30"] * blend_weight + merged[f"{col}_season"] * (1 - blend_weight)
-            elif f"{col}_season" in merged.columns:
-                merged[col] = merged[f"{col}_season"]
-            elif f"{col}_30" in merged.columns:
-                merged[col] = merged[f"{col}_30"]
-            else:
-                merged[col] = 0.0
+    merged = blend_season_last30(season_df, last30_df, blend_weight)
     merged = add_games_in_week(merged, roster, week, year, injury_data)
     merged = merged[merged["Games This Week"] > 0]
     if merged.empty:
@@ -643,23 +712,7 @@ def _compute_playoff_matchup_win_prob(team_a, team_b, current_a, current_b,
         last30_df = build_stat_df(roster, f"{year}_last_30", "Last30", name, year)
         if season_df.empty:
             return pd.DataFrame()
-        if last30_df.empty:
-            merged = season_df.copy()
-            for col in NUMERIC_COLS:
-                if col not in merged.columns:
-                    merged[col] = 0.0
-        else:
-            merged = season_df.merge(last30_df, on=["Player", "NBA_Team"],
-                                     how="outer", suffixes=("_season", "_30")).fillna(0)
-            for col in NUMERIC_COLS:
-                if f"{col}_30" in merged.columns and f"{col}_season" in merged.columns:
-                    merged[col] = merged[f"{col}_30"] * blend_weight + merged[f"{col}_season"] * (1 - blend_weight)
-                elif f"{col}_season" in merged.columns:
-                    merged[col] = merged[f"{col}_season"]
-                elif f"{col}_30" in merged.columns:
-                    merged[col] = merged[f"{col}_30"]
-                else:
-                    merged[col] = 0.0
+        merged = blend_season_last30(season_df, last30_df, blend_weight)
         merged = add_games_left_with_injury(
             merged, roster, injury_data,
             period_end_date=period_end_date,
@@ -687,6 +740,36 @@ def _compute_playoff_matchup_win_prob(team_a, team_b, current_a, current_b,
 def _playoff_team_ids_ordered(league_stats, playoff_teams=4):
     """Best standing first (ESPN standing: lower is better)."""
     return [t["team_id"] for t in sorted(league_stats, key=lambda x: x["standing"])[:playoff_teams]]
+
+
+def current_matchup_period_effective(league, regular_season_weeks=19, playoff_weeks_per_round=2):
+    """
+    Resolve current matchup period from scoringPeriodId -> matchup_ids when available.
+    This handles ESPN states where currentMatchupPeriod can lag the active scoring period.
+    """
+    cw = int(getattr(league, "currentMatchupPeriod", 0) or 0)
+    sp = int(getattr(league, "scoringPeriodId", 0) or 0)
+    rs = int(regular_season_weeks)
+    plen = max(1, int(playoff_weeks_per_round))
+    if sp > 0:
+        if sp <= rs:
+            return sp
+        # Two-week playoff rounds represented by matchup-period *start* id:
+        # rs+1..rs+plen -> rs+1, next block -> rs+1+plen, etc.
+        round_idx = (sp - rs - 1) // plen
+        return rs + 1 + round_idx * plen
+    mids = getattr(league, "matchup_ids", {}) or {}
+    if not isinstance(mids, dict):
+        return cw
+    try:
+        sp_s = str(sp)
+        for mp, scoring_ids in mids.items():
+            vals = {str(x) for x in (scoring_ids or [])}
+            if sp_s in vals:
+                return int(mp)
+    except Exception:
+        return cw
+    return cw
 
 
 def _infer_semifinal_pairs_standard(seed_order_ids):
@@ -749,7 +832,7 @@ def resolve_projected_finals_opponent_from_other_semi(
     team_obj_map = {t.team_id: t for t in league.teams}
     pairs = []
 
-    cw = league.currentMatchupPeriod
+    cw = current_matchup_period_effective(league)
     for period in sorted({regular_season_weeks + 1, regular_season_weeks + 2, cw}):
         got = _extract_pairs_from_playoff_boxscores(league, period, playoff_set)
         if len(got) >= 2:
@@ -846,10 +929,25 @@ def resolve_projected_finals_opponent_from_other_semi(
 def calculate_league_stats(league, year):
     """Calculate league-wide statistics including all-play records."""
     teams = league.teams
-    current_week = league.currentMatchupPeriod
-    num_completed_weeks = current_week - 1 if current_week > 1 else current_week
+    current_week = current_matchup_period_effective(league)
     all_play_records = {team.team_id: {"wins": 0, "losses": 0, "ties": 0} for team in teams}
-    for week in range(1, num_completed_weeks + 1):
+
+    # Prefer ESPN's real matchup-period keys; avoids looping phantom periods when
+    # currentMatchupPeriod/scoringPeriodId are out-of-band values.
+    matchup_ids = getattr(league, "matchup_ids", {}) or {}
+    period_keys = []
+    try:
+        period_keys = sorted(
+            int(k) for k in matchup_ids.keys()
+            if int(k) < current_week
+        )
+    except Exception:
+        period_keys = []
+    if not period_keys:
+        num_completed_weeks = current_week - 1 if current_week > 1 else current_week
+        period_keys = list(range(1, num_completed_weeks + 1))
+
+    for week in period_keys:
         try:
             boxscores = league.box_scores(matchup_period=week)
             weekly_stats = {}
@@ -859,6 +957,12 @@ def calculate_league_stats(league, year):
                 away_stats = flatten_stat_dict(matchup.away_stats)
                 weekly_stats[matchup.away_team.team_id] = away_stats
             if not weekly_stats:
+                continue
+            # Skip periods that clearly have no played stats yet.
+            if not any(
+                any(abs(float(s.get(k, 0) or 0)) > 0 for k in ["FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "PTS"])
+                for s in weekly_stats.values()
+            ):
                 continue
             team_ids = list(weekly_stats.keys())
             for team1_id in team_ids:
@@ -908,9 +1012,9 @@ def calculate_league_stats(league, year):
         tid = team.team_id
         ap = all_play_records[tid]
         ap_total = ap["wins"] + ap["losses"] + ap["ties"]
-        ap_pct = ap["wins"] / ap_total if ap_total > 0 else 0
+        ap_pct = (ap["wins"] + 0.5 * ap["ties"]) / ap_total if ap_total > 0 else 0
         actual_total = team.wins + team.losses + getattr(team, 'ties', 0)
-        actual_pct = team.wins / actual_total if actual_total > 0 else 0
+        actual_pct = (team.wins + 0.5 * getattr(team, 'ties', 0)) / actual_total if actual_total > 0 else 0
         luck = (actual_pct - ap_pct) * 100
         league_data.append({
             "team_id": tid,
@@ -930,32 +1034,366 @@ def calculate_league_stats(league, year):
     return sorted(league_data, key=lambda x: x["standing"])
 
 
+def _regular_season_matchup_periods_from_league(league, fallback=19):
+    """ESPN `reg_season_count` / matchupPeriodCount — last regular-season matchup period id."""
+    s = getattr(league, "settings", None)
+    if s is not None:
+        n = getattr(s, "reg_season_count", None)
+        if n is not None and int(n) > 0:
+            return int(n)
+    return int(fallback)
+
+
+def _playoff_weeks_per_round_from_league(league, fallback=2):
+    """ESPN `playoffMatchupPeriodLength` (weeks per playoff round); default 2 for most H2H leagues."""
+    s = getattr(league, "settings", None)
+    if s is not None:
+        n = getattr(s, "playoff_matchup_period_length", None)
+        if n is not None and int(n) > 0:
+            return int(n)
+    return int(fallback)
+
+
+def playoff_matchup_round_one_based(current_matchup_period, reg_season_periods, weeks_per_playoff_round):
+    """
+    Playoff round number for display/logic: 1 = first playoff round (e.g. semis), 2 = finals (4-team bracket).
+    Uses the league's regular-season length and playoff matchup length from ESPN settings.
+    """
+    if current_matchup_period <= reg_season_periods:
+        return 0
+    off = current_matchup_period - reg_season_periods
+    w = max(1, int(weeks_per_playoff_round))
+    return (off - 1) // w + 1
+
+
+def _projected_stats_for_matchup_window(projected, team_id, week_a, week_b):
+    """Combine one or two matchup periods; if both are the same (1-week playoff round), do not double-count."""
+    pa = projected.get(team_id, {}).get(week_a, {})
+    if week_a == week_b:
+        return pa
+    pb = projected.get(team_id, {}).get(week_b, {})
+    return _combine_projected_stats(pa, pb)
+
+
+def _raw_schedule_matchups_for_period(league, matchup_period):
+    """Unparsed schedule rows for one ESPN matchup period (includes playoffMatchupType)."""
+    try:
+        req = getattr(league, "espn_request", None)
+        if req is None:
+            return []
+        resp = req.league_get(params={"view": "mSchedule"})
+        if isinstance(resp, list) and resp:
+            data = resp[0]
+        else:
+            data = resp
+        if not isinstance(data, dict):
+            return []
+        sched = data.get("schedule") or []
+    except Exception:
+        return []
+    return [m for m in sched if m.get("matchupPeriodId") == matchup_period]
+
+
+def _team_ids_from_raw_schedule_matchup(m):
+    h = m.get("home") or {}
+    a = m.get("away") or {}
+    hid = h.get("teamId")
+    aid = a.get("teamId")
+    if hid is None and isinstance(h.get("team"), dict):
+        hid = h["team"].get("teamId")
+    if aid is None and isinstance(a.get("team"), dict):
+        aid = a["team"].get("teamId")
+    return hid, aid
+
+
+def _playoff_matchup_type_label(m):
+    parts = []
+    for key in (
+        "playoffMatchupType",
+        "matchupType",
+        "type",
+        "bracketType",
+        "playoffTierType",
+    ):
+        v = m.get(key)
+        if v is not None:
+            parts.append(str(v).upper())
+    return " ".join(parts)
+
+
+def _is_explicit_losers_or_consolation_playoff_matchup(m):
+    """True if ESPN marks this as losers / consolation / 3rd-place path."""
+    label = _playoff_matchup_type_label(m)
+    if not label:
+        return False
+    return any(
+        x in label
+        for x in (
+            "LOSER",
+            "CONSOLATION",
+            "THIRD",
+            "3RD",
+            "PLACEMENT",
+            "TOILET",
+        )
+    )
+
+
+def _is_explicit_winners_bracket_playoff_matchup(m):
+    label = _playoff_matchup_type_label(m)
+    return "WINNER" in label and "LOSER" not in label
+
+
+def _winners_bracket_top4_pairs(league, matchup_period, playoff_team_set):
+    """
+    H2H among top-4 seeds that are not explicitly losers/consolation bracket.
+    Mirrors ESPN 'Winner's bracket' column.
+    """
+    pairs = []
+    for m in _raw_schedule_matchups_for_period(league, matchup_period):
+        if _is_explicit_losers_or_consolation_playoff_matchup(m):
+            continue
+        hid, aid = _team_ids_from_raw_schedule_matchup(m)
+        if not hid or not aid:
+            continue
+        if hid not in playoff_team_set or aid not in playoff_team_set:
+            continue
+        pairs.append((hid, aid))
+    return pairs
+
+
+def _winner_for_team_pair_scoreboard(league, matchup_period, home_id, away_id):
+    """Resolve winner using league.scoreboard Matchup (category totals)."""
+    try:
+        matchups = league.scoreboard(matchupPeriod=matchup_period)
+    except Exception:
+        return None
+    for m in matchups:
+        hid = m.home_team.team_id if hasattr(m.home_team, "team_id") else m.home_team
+        aid = m.away_team.team_id if hasattr(m.away_team, "team_id") else m.away_team
+        if {hid, aid} != {home_id, away_id}:
+            continue
+        return _matchup_winner_team_id_h2h(m, hid, aid)
+    return None
+
+
+def _championship_finalists_from_winners_bracket_schedule(
+    league, playoff_team_set, regular_season_weeks, playoff_weeks_per_round, current_matchup_period,
+):
+    """
+    Championship = the single top-4 H2H on the winners bracket for this scoring window.
+    Losers / consolation / 3rd-place games are excluded via schedule playoffMatchupType.
+    If ESPN does not tag types, we require exactly one undifferentiated top-4 pairing.
+    """
+    rs = regular_season_weeks
+    plen = max(1, int(playoff_weeks_per_round))
+    finals_first = rs + plen + 1
+    for period in range(finals_first, int(current_matchup_period) + 1):
+        raw_list = _raw_schedule_matchups_for_period(league, period)
+        candidates = []
+        for m in raw_list:
+            if _is_explicit_losers_or_consolation_playoff_matchup(m):
+                continue
+            hid, aid = _team_ids_from_raw_schedule_matchup(m)
+            if not hid or not aid:
+                continue
+            if hid not in playoff_team_set or aid not in playoff_team_set:
+                continue
+            candidates.append((m, hid, aid))
+        if not candidates:
+            continue
+        winners_tagged = [(m, h, a) for m, h, a in candidates if _is_explicit_winners_bracket_playoff_matchup(m)]
+        use_rows = winners_tagged if winners_tagged else candidates
+        pair_keys = {frozenset({h, a}) for _, h, a in use_rows}
+        if len(pair_keys) == 1:
+            return next(iter(pair_keys))
+        if len(pair_keys) == 2:
+            # No ESPN bracket tags: 3rd-place is the two semifinal losers; title = both winners
+            sw = _finalist_ids_from_semifinal_winners(
+                league, playoff_team_set, regular_season_weeks, playoff_weeks_per_round
+            )
+            if sw is not None and len(sw) == 2 and sw in pair_keys:
+                return sw
+    return None
+
+
+def _matchup_winner_team_id_h2h(m, home_id, away_id):
+    """Best-effort winner team_id from ESPN Matchup (category H2H)."""
+    w = getattr(m, "winner", None)
+    if isinstance(w, int) and w in (home_id, away_id):
+        return w
+    if isinstance(w, str):
+        if w.isdigit():
+            wid = int(w)
+            if wid in (home_id, away_id):
+                return wid
+        u = w.upper()
+        if u in ("HOME", "HOME_WIN"):
+            return home_id
+        if u in ("AWAY", "AWAY_WIN"):
+            return away_id
+    hw = getattr(m, "home_team_live_score", None)
+    aw = getattr(m, "away_team_live_score", None)
+    if hw is not None and aw is not None:
+        if hw > aw:
+            return home_id
+        if aw > hw:
+            return away_id
+
+    def _cat_wins(cats):
+        if not cats:
+            return None
+        n = 0
+        for v in cats.values():
+            if not isinstance(v, dict):
+                continue
+            r = str(v.get("result", "")).upper()
+            if r == "WIN" or r == "W":
+                n += 1
+        return n
+
+    hc = getattr(m, "home_team_cats", None) or {}
+    ac = getattr(m, "away_team_cats", None) or {}
+    nh, na = _cat_wins(hc), _cat_wins(ac)
+    if nh is not None and na is not None and nh != na:
+        return home_id if nh > na else away_id
+    return None
+
+
+def _finalist_ids_from_semifinal_winners(league, playoff_team_set, regular_season_weeks, playoff_weeks_per_round):
+    """
+    For a 4-team bracket, the two winners-bracket semifinal winners advance.
+    Prefer mSchedule (winner's bracket only); fall back to scoreboard.
+    """
+    if len(playoff_team_set) < 4:
+        return None
+    rs = regular_season_weeks
+    plen = max(1, int(playoff_weeks_per_round))
+    semis_last = rs + plen
+    for period in range(semis_last, rs, -1):
+        pairs = _winners_bracket_top4_pairs(league, period, playoff_team_set)
+        if len(pairs) == 2:
+            winners = []
+            for hid, aid in pairs:
+                w = _winner_for_team_pair_scoreboard(league, period, hid, aid)
+                if w is None:
+                    winners = None
+                    break
+                winners.append(w)
+            if winners and len(winners) == 2 and winners[0] != winners[1]:
+                return frozenset(winners)
+            continue
+        try:
+            matchups = league.scoreboard(matchupPeriod=period)
+        except Exception:
+            continue
+        semis_games = []
+        for m in matchups:
+            hid = m.home_team.team_id if hasattr(m.home_team, "team_id") else m.home_team
+            aid = m.away_team.team_id if hasattr(m.away_team, "team_id") else m.away_team
+            if hid in playoff_team_set and aid in playoff_team_set:
+                semis_games.append((m, hid, aid))
+        if len(semis_games) != 2:
+            continue
+        winners = []
+        for m, hid, aid in semis_games:
+            wid = _matchup_winner_team_id_h2h(m, hid, aid)
+            if wid is None:
+                winners = None
+                break
+            winners.append(wid)
+        if winners and len(winners) == 2 and winners[0] != winners[1]:
+            return frozenset(winners)
+    return None
+
+
+def _resolve_championship_finalist_ids(
+    league,
+    bracket_pairs,
+    league_stats,
+    playoff_team_set,
+    playoff_round_one_based,
+    regular_season_weeks,
+    playoff_weeks_per_round,
+    current_matchup_period,
+):
+    """
+    During finals (playoff round 2), return the two championship participants.
+    1) ESPN mSchedule winners-bracket row for the championship period (excludes 3rd-place).
+    2) Winners-bracket semifinal winners.
+    3) Box-score / seed fallbacks.
+    """
+    if playoff_round_one_based < 2 or not playoff_team_set:
+        return None
+    from_wb = _championship_finalists_from_winners_bracket_schedule(
+        league,
+        playoff_team_set,
+        regular_season_weeks,
+        playoff_weeks_per_round,
+        current_matchup_period,
+    )
+    if from_wb is not None and len(from_wb) == 2:
+        return from_wb
+    from_semis = _finalist_ids_from_semifinal_winners(
+        league, playoff_team_set, regular_season_weeks, playoff_weeks_per_round
+    )
+    if from_semis is not None and len(from_semis) == 2:
+        return from_semis
+
+    standing_map = {t["team_id"]: t["standing"] for t in league_stats}
+    if bracket_pairs:
+        if len(bracket_pairs) == 1:
+            return frozenset(bracket_pairs[0])
+        def _pair_seed_sum(pair):
+            return standing_map.get(pair[0], 999) + standing_map.get(pair[1], 999)
+        best = min(bracket_pairs, key=_pair_seed_sum)
+        return frozenset(best)
+    playoff_rows = [t for t in league_stats if t["team_id"] in playoff_team_set]
+    playoff_rows.sort(key=lambda x: x["standing"])
+    if len(playoff_rows) >= 2:
+        return frozenset({playoff_rows[0]["team_id"], playoff_rows[1]["team_id"]})
+    return None
+
+
 def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                                    playoff_teams=4, regular_season_weeks=19,
                                    record_override=None, blend_weight=0.7,
                                    injury_data=None,
                                    current_week_matchup_outcomes=None,
-                                   period_end_date=None):
+                                   period_end_date=None,
+                                   precomputed_projected=None,
+                                   return_projected=False):
     """
     Monte Carlo simulation for playoff and championship probabilities.
     Uses: current standings + current week matchup probabilities (if provided) + rest of season simulation.
 
     record_override: optional dict {team_id: (wins, losses, ties)} to override records
     blend_weight: weight for last30 vs season (default 0.7 = 70% last30)
+    regular_season_weeks: fallback if league.settings.reg_season_count is missing; otherwise ESPN wins.
     injury_data: from get_espn_injury_data(); fetched if None
     current_week_matchup_outcomes: optional (user_team_id, opp_team_id, outcome_counts) where
         outcome_counts is {(user_cat_wins, opp_cat_wins): count} from compare_matchups.
         When provided, samples from this distribution for the current week instead of simulating.
+    precomputed_projected: if set, skips rebuilding weekly projections (reuse from a prior run).
+    return_projected: if True, return (results, projected) for follow-up sims.
+    Iteration count is min(sims, PLAYOFF_MONTE_CARLO_CAP).
 
     Returns:
-        list of dicts with playoff_prob, seed_probs, championship_prob per team_id
+        list of dicts with playoff_prob, seed_probs, championship_prob per team_id,
+        or (that list, projected dict) when return_projected is True.
+        Each row includes championship_finalist_team_ids when applicable.
     """
     teams = league.teams
-    current_week = league.currentMatchupPeriod
+    current_week = current_matchup_period_effective(league)
     num_teams = len(teams)
+    # Keep playoff round mapping aligned with this app's fixed ESPN-period model:
+    # regular season = 1..19, round 1 = 20-21, round 2 (finals) = 22-23.
+    playoff_weeks_per_round = 2
 
     if injury_data is None:
         injury_data = get_espn_injury_data()
+
+    effective_sims = min(int(sims), int(PLAYOFF_MONTE_CARLO_CAP))
 
     team_id_to_name = {t["team_id"]: t["team_name"] for t in league_stats}
     team_id_to_record = {
@@ -1013,16 +1451,21 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             current_week_user_outcomes = outcome_list
             user_matchup_pair = frozenset({user_tid, opp_tid})
 
-    # Playoff matchups are two weeks each: semis = weeks 20-21, finals = weeks 22-23
-    semis_weeks = (regular_season_weeks + 1, regular_season_weeks + 2)
-    finals_weeks = (regular_season_weeks + 3, regular_season_weeks + 4)
+    # Playoff rounds from ESPN settings (length per round + where RS ends)
+    rs = regular_season_weeks
+    plen = playoff_weeks_per_round
+    semis_weeks = (rs + 1, rs + plen)
+    finals_weeks = (rs + plen + 1, rs + 2 * plen)
     playoff_week_pairs = [semis_weeks, finals_weeks]
     all_weeks_for_proj = remaining_weeks + list(semis_weeks) + list(finals_weeks)
 
     # Build projected weekly stats for all teams (regular season + playoff weeks)
-    projected = _build_projected_for_all_teams(
-        league, year, injury_data, blend_weight, all_weeks_for_proj
-    )
+    if precomputed_projected is not None:
+        projected = precomputed_projected
+    else:
+        projected = _build_projected_for_all_teams(
+            league, year, injury_data, blend_weight, all_weeks_for_proj
+        )
 
     # Tiebreaker: use all-play for standings tiebreak when records are equal
     strength_map = {t["team_id"]: max(0.01, t["all_play_pct"]) for t in league_stats}
@@ -1035,9 +1478,14 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
     current_playoff_round_idx = None
     current_playoff_pair_probs = None
     actual_playoff_bracket = None
+    playoff_bracket_pairs = []
+    championship_finalist_team_ids = None
     if current_week > regular_season_weeks:
-        # 0-based round index: weeks RS+1/RS+2 = round 0 (semis), RS+3/RS+4 = round 1 (finals)
-        current_playoff_round_idx = (current_week - regular_season_weeks - 1) // 2
+        playoff_round_1based = playoff_matchup_round_one_based(
+            current_week, regular_season_weeks, playoff_weeks_per_round
+        )
+        # 0-based for bracket sim: round 1 (semis) -> 0, round 2 (finals) -> 1
+        current_playoff_round_idx = max(0, playoff_round_1based - 1)
 
         # Determine which teams are actually in the playoffs based on final regular season standings
         playoff_team_set = set()
@@ -1093,7 +1541,7 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                     home_prob = _compute_playoff_matchup_win_prob(
                         home_obj, away_obj, current_home, current_away,
                         year, injury_data, blend_weight,
-                        period_end_date=period_end_date, sims=min(sims, 2000)
+                        period_end_date=period_end_date, sims=min(effective_sims, 2000)
                     )
                     current_playoff_pair_probs[home_id] = home_prob
                     current_playoff_pair_probs[away_id] = 1.0 - home_prob
@@ -1104,16 +1552,58 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                     actual_playoff_bracket.extend([h, a])
             if not current_playoff_pair_probs:
                 current_playoff_pair_probs = None
+            playoff_bracket_pairs = list(bracket_pairs)
         except Exception:
             pass
+
+        championship_finalist_team_ids = _resolve_championship_finalist_ids(
+            league,
+            playoff_bracket_pairs,
+            league_stats,
+            playoff_team_set,
+            playoff_round_1based,
+            regular_season_weeks,
+            playoff_weeks_per_round,
+            current_week,
+        )
+        # Finals (2nd playoff round): the title matchup is the user's live H2H. Schedule inference can
+        # mis-pick the finalists when ESPN runs championship + 3rd-place (or untagged consolation) in the same period.
+        if (
+            playoff_round_1based >= 2
+            and current_week_matchup_outcomes is not None
+        ):
+            ut, ot, _ = current_week_matchup_outcomes
+            ut_i, ot_i = int(ut), int(ot)
+            if ut_i in playoff_team_set and ot_i in playoff_team_set:
+                championship_finalist_team_ids = frozenset({ut_i, ot_i})
 
     team_ids = list(team_id_to_name.keys())
     playoff_count = {tid: 0 for tid in team_ids}
     seed_counts = {tid: {s: 0 for s in range(1, num_teams + 2)} for tid in team_ids}
-    championship_count = {tid: 0 for tid in team_ids}
+    championship_count = {tid: 0.0 for tid in team_ids}
     advance_count = {tid: 0 for tid in team_ids}
 
-    for _ in range(sims):
+    # Finals: winning this matchup is winning the title — use weekly win % (same as matchup tab), no bracket MC.
+    finals_skip_bracket_championship = False
+    p_user_championship = None
+    user_champ_tid = opp_champ_tid = None
+    if (
+        current_week > regular_season_weeks
+        and current_playoff_round_idx == 1
+        and championship_finalist_team_ids is not None
+        and len(championship_finalist_team_ids) == 2
+        and current_week_matchup_outcomes is not None
+        and not override_team_ids
+    ):
+        ut, ot, oc = current_week_matchup_outcomes
+        cf = frozenset(int(x) for x in championship_finalist_team_ids)
+        if cf == frozenset({int(ut), int(ot)}):
+            p_user_championship = _strict_weekly_matchup_win_prob(oc)
+            if p_user_championship is not None:
+                user_champ_tid, opp_champ_tid = int(ut), int(ot)
+                finals_skip_bracket_championship = True
+
+    for _ in range(effective_sims):
         wins = {tid: team_id_to_record[tid][0] for tid in team_ids}
         losses = {tid: team_id_to_record[tid][1] for tid in team_ids}
         ties = {tid: team_id_to_record[tid][2] for tid in team_ids}
@@ -1213,21 +1703,26 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
         else:
             playoff_bracket = sorted_ids[:playoff_teams]
             bracket_starting_round = 0
-        champ, round_advancers = _simulate_playoff_bracket_projected(
-            playoff_bracket, projected, playoff_week_pairs,
-            day_variance_multiplier=matchup_variance,
-            current_round_idx=current_playoff_round_idx,
-            current_pair_probs=current_playoff_pair_probs,
-            starting_round=bracket_starting_round
-        )
-        if champ is not None:
-            championship_count[champ] += 1
-        # Track who advanced past the first simulated round (current round when in playoffs)
-        if round_advancers:
-            for tid in round_advancers[0]:
-                advance_count[tid] += 1
+        if finals_skip_bracket_championship:
+            championship_count[user_champ_tid] += p_user_championship
+            championship_count[opp_champ_tid] += 1.0 - p_user_championship
+            advance_count[user_champ_tid] += 1
+            advance_count[opp_champ_tid] += 1
+        else:
+            champ, round_advancers = _simulate_playoff_bracket_projected(
+                playoff_bracket, projected, playoff_week_pairs,
+                day_variance_multiplier=matchup_variance,
+                current_round_idx=current_playoff_round_idx,
+                current_pair_probs=current_playoff_pair_probs,
+                starting_round=bracket_starting_round
+            )
+            if champ is not None:
+                championship_count[champ] += 1.0
+            if round_advancers:
+                for tid in round_advancers[0]:
+                    advance_count[tid] += 1
 
-    total_sims = sims
+    total_sims = effective_sims
     in_playoffs = current_week > regular_season_weeks
     result = []
     for tid in team_ids:
@@ -1252,7 +1747,10 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             "in_playoffs": in_playoffs,
             "seed_probs": seed_probs,
             "record": team_id_to_record[tid],
+            "championship_finalist_team_ids": championship_finalist_team_ids,
         })
+    if return_projected:
+        return result, projected
     return result
 
 
@@ -1297,12 +1795,8 @@ def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
                 prob_a = current_pair_probs[a]
                 advancing = a if np.random.random() < prob_a else b
             else:
-                proj_a_w1 = projected.get(a, {}).get(w1, {})
-                proj_a_w2 = projected.get(a, {}).get(w2, {})
-                proj_b_w1 = projected.get(b, {}).get(w1, {})
-                proj_b_w2 = projected.get(b, {}).get(w2, {})
-                proj_a = _combine_projected_stats(proj_a_w1, proj_a_w2)
-                proj_b = _combine_projected_stats(proj_b_w1, proj_b_w2)
+                proj_a = _projected_stats_for_matchup_window(projected, a, w1, w2)
+                proj_b = _projected_stats_for_matchup_window(projected, b, w1, w2)
                 winner_id, loser_id, is_tie = _simulate_matchup_winner(
                     a, b, proj_a, proj_b,
                     variance_multiplier=bracket_variance
@@ -1402,20 +1896,16 @@ def optimize_waiver_adds(
     fa_last30 = add_games_left(
         fa_last30, week_span, period_end_date, game_window_start, game_window_end,
     )
-    merged_fa = fa_season.merge(fa_last30, on=["Player", "NBA_Team"], suffixes=("_season", "_30"))
+    merged_fa = blend_season_last30(fa_season, fa_last30, blend_weight)
 
     waiver_rows = []
     for _, r in merged_fa.iterrows():
-        g = r.get("Games Left_30", 0)
+        g = r.get("Games Left", 0)
         if g <= 0:
             continue
         out = {"Player": r["Player"], "NBA_Team": r["NBA_Team"], "Games Left": g, "Team": "Waiver"}
         for col in NUMERIC_COLS:
-            c30, csea = f"{col}_30", f"{col}_season"
-            if c30 in r and csea in r:
-                out[col] = r[c30] * blend_weight + r[csea] * (1 - blend_weight)
-            else:
-                out[col] = r.get(c30, r.get(csea, 0))
+            out[col] = r.get(col, 0)
         waiver_rows.append(out)
 
     if not waiver_rows:
@@ -1620,3 +2110,399 @@ def optimize_waiver_adds(
         )
 
     return steps
+
+
+def _games_in_window_from(sched_set, from_day, end_d):
+    from_day = _to_calendar_date(from_day)
+    end_d = _to_calendar_date(end_d)
+    if from_day is None or end_d is None:
+        return 0
+    if not isinstance(sched_set, set):
+        sched_set = {_to_calendar_date(x) for x in sched_set if _to_calendar_date(x)}
+    return sum(1 for d in sched_set if d is not None and from_day <= d <= end_d)
+
+
+def _segment_end_exclusive(seg_until, end_d):
+    end_d = _to_calendar_date(end_d)
+    if end_d is None:
+        return None
+    u = _to_calendar_date(seg_until) if seg_until is not None else None
+    return u if u is not None else end_d + timedelta(days=1)
+
+
+def _segment_covers_day(seg, day, end_d):
+    day = _to_calendar_date(day)
+    end_d = _to_calendar_date(end_d)
+    if day is None or end_d is None:
+        return False
+    frm = _to_calendar_date(seg["from"])
+    if frm is None:
+        return False
+    end_excl = _segment_end_exclusive(seg["until"], end_d)
+    if end_excl is None:
+        return False
+    return frm <= day < end_excl
+
+
+def _sched_has_game(seg, day):
+    """True if segment's NBA team plays on this calendar day."""
+    day = _to_calendar_date(day)
+    if day is None:
+        return False
+    s = seg.get("sched")
+    if isinstance(s, dict):
+        for k in s:
+            if _to_calendar_date(k) == day:
+                return True
+        return False
+    if isinstance(s, set):
+        return day in s
+    for x in s or []:
+        if _to_calendar_date(x) == day:
+            return True
+    return False
+
+
+def _counted_starts_total(roster_entries, window_day_set, cap):
+    """
+    Fantasy starts that actually count: each day min(# of rostered NBA games, cap).
+    Aligns with the per-day start cap (MAX_PLAYERS_PER_DAY); lineup selection in
+    add_games_left_with_injury uses PTS to pick who counts when over the cap.
+    """
+    if not roster_entries or not window_day_set:
+        return 0
+    counts = defaultdict(int)
+    for p in roster_entries:
+        sched = p.get("sched") or ()
+        if isinstance(sched, dict):
+            for k in sched:
+                kd = _to_calendar_date(k)
+                if kd in window_day_set:
+                    counts[kd] += 1
+        else:
+            for x in sched:
+                kd = _to_calendar_date(x)
+                if kd in window_day_set:
+                    counts[kd] += 1
+    return sum(min(counts.get(d, 0), cap) for d in sorted(window_day_set))
+
+
+def _roster_entry_from_fa(fa):
+    return {
+        "name": fa["name"],
+        "team": fa["team"],
+        "sched": fa["sched"],
+        "labels": fa.get("labels") or {},
+    }
+
+
+def _build_streaming_grid_df(segments, window_days, daily_start_cap=MAX_PLAYERS_PER_DAY):
+    """Wide table: Player, Tm, one column per date, opponent labels; last row = games per day."""
+    days = [_to_calendar_date(d) for d in (window_days or [])]
+    days = [d for d in days if d is not None]
+    if not days:
+        return pd.DataFrame(), 0
+    end_d = days[-1]
+    date_headers = [d.strftime("%d-%b") for d in days]
+    segs_sorted = sorted(
+        segments,
+        key=lambda s: (_to_calendar_date(s["from"]) or date.min, s["player"]),
+    )
+    rows = []
+    for seg in segs_sorted:
+        row = {
+            "Player": seg.get("display_player") or seg["player"],
+            "Tm": seg["team"],
+        }
+        for d, col in zip(days, date_headers):
+            if _segment_covers_day(seg, d, end_d):
+                lbl = seg.get("labels") or {}
+                opp = None
+                if isinstance(lbl, dict):
+                    if d in lbl:
+                        opp = lbl.get(d)
+                    else:
+                        for k, v in lbl.items():
+                            if _to_calendar_date(k) == d:
+                                opp = v
+                                break
+                row[col] = (opp if opp else "●") if _sched_has_game(seg, d) else ""
+            else:
+                row[col] = ""
+        rows.append(row)
+    total_row = {"Player": "Games / day", "Tm": ""}
+    daily_totals = []
+    for d, col in zip(days, date_headers):
+        n = sum(
+            1
+            for seg in segs_sorted
+            if _segment_covers_day(seg, d, end_d) and _sched_has_game(seg, d)
+        )
+        total_row[col] = n
+        daily_totals.append(n)
+    rows.append(total_row)
+    cap_row = {"Player": f"Countable starts (≤{daily_start_cap}/day)", "Tm": ""}
+    waste_row = {"Player": "Over cap (bench)", "Tm": ""}
+    for col, n in zip(date_headers, daily_totals):
+        cap_row[col] = min(n, daily_start_cap)
+        waste_row[col] = max(0, n - daily_start_cap)
+    rows.append(cap_row)
+    rows.append(waste_row)
+    df = pd.DataFrame(rows)
+    total_raw = int(sum(daily_totals))
+    total_counted = int(sum(min(n, daily_start_cap) for n in daily_totals))
+    return df, total_raw, total_counted
+
+
+def plan_waiver_adds_by_date(
+    league,
+    roster,
+    year,
+    max_adds,
+    untouchables=None,
+    has_open_roster_spot=False,
+    game_window_start=None,
+    game_window_end=None,
+    blend_weight=0.7,
+    max_starts_per_day=None,
+    injury_data=None,
+    trust_return_dates=True,
+):
+    """
+    Greedy date-based streaming plan: each move maximizes **counted** roster starts in the
+    matchup window, where each day only the first max_starts_per_day NBA games count (league
+    cap). That spreads value across light days instead of stacking “wasted” games on heavy days.
+
+    Roster schedules respect injuries: IR-stashed players contribute no games until activated;
+    other non-active players only get games on/after expected return when trust_return_dates
+    is True (same idea as Games Left / injury feed).
+
+    Returns a dict:
+      moves: list of step dicts (add_date, add, drop, metrics, action_text)
+      grid: DataFrame (roster timeline × dates + daily totals / countable / over-cap rows)
+      total_games: raw sum of player-games (uncapped per day)
+      counted_starts: sum over days of min(games_that_day, max_starts_per_day)
+      window_days: list of dates
+    """
+    cap = max_starts_per_day if max_starts_per_day is not None else MAX_PLAYERS_PER_DAY
+    empty = {
+        "moves": [],
+        "grid": pd.DataFrame(),
+        "total_games": 0,
+        "counted_starts": 0,
+        "window_days": [],
+        "max_starts_per_day": cap,
+    }
+    if max_adds <= 0:
+        return empty
+    untouchables = untouchables or []
+    untouchables_lower = {p.lower().strip() for p in untouchables}
+
+    today = date.today()
+    start_d = _unwrap_window_bound(game_window_start, which_end=False)
+    if start_d is None:
+        start_d = today
+    end_d = _unwrap_window_bound(game_window_end, which_end=True)
+    if end_d is None:
+        end_d = start_d + timedelta(days=13)
+    if end_d < start_d:
+        return empty
+    window_days = [start_d + timedelta(days=i) for i in range((end_d - start_d).days + 1)]
+
+    free_agents = league.free_agents(size=400)
+    healthy_fas = [p for p in free_agents if not is_player_injured(p)]
+    if not healthy_fas:
+        return empty
+    fa_season = build_stat_df(healthy_fas, f"{year}_total", "Season", "Waiver", year)
+    fa_last30 = build_stat_df(healthy_fas, f"{year}_last_30", "Last30", "Waiver", year)
+    fa_blend = blend_season_last30(fa_season, fa_last30, blend_weight)
+    fa_score_map = {}
+    if not fa_blend.empty:
+        for _, r in fa_blend.iterrows():
+            fa_score_map[r["Player"]] = (
+                float(r.get("PTS", 0))
+                + 0.8 * float(r.get("REB", 0))
+                + 1.0 * float(r.get("AST", 0))
+                + 1.2 * float(r.get("STL", 0))
+                + 1.2 * float(r.get("BLK", 0))
+                + 0.8 * float(r.get("3PM", 0))
+            )
+
+    injury_data = injury_data or {}
+
+    def window_slice_for_team(team_abbrev):
+        raw = get_team_schedule_game_labels(team_abbrev)
+        return _coerce_schedule_bundle(raw, start_d, end_d)
+
+    segments = []
+    roster_state = []
+    for p in roster:
+        team = getattr(p, "proTeam", None)
+        if not team:
+            continue
+        sched, lbl = window_slice_for_team(team)
+        sched, lbl = filter_schedule_for_roster_player_injury(
+            p, sched, lbl, injury_data=injury_data, trust_return_dates=trust_return_dates
+        )
+        display_name = f"{p.name} (IR)" if player_stashed_on_ir(p) else p.name
+        roster_state.append({
+            "name": p.name,
+            "team": team,
+            "sched": sched,
+            "labels": lbl,
+        })
+        segments.append({
+            "player": p.name,
+            "display_player": display_name,
+            "team": team,
+            "sched": sched,
+            "labels": lbl,
+            "from": start_d,
+            "until": None,
+        })
+
+    fa_state = []
+    seen_names = set()
+    for p in healthy_fas:
+        if p.name in seen_names:
+            continue
+        seen_names.add(p.name)
+        team = getattr(p, "proTeam", None)
+        if not team:
+            continue
+        sched, lbl = window_slice_for_team(team)
+        if not sched:
+            continue
+        fa_state.append({
+            "name": p.name,
+            "team": team,
+            "sched": sched,
+            "labels": lbl,
+            "score": float(fa_score_map.get(p.name, 0)),
+        })
+
+    def player_gap_days(player, from_day):
+        from_day = _to_calendar_date(from_day)
+        if from_day is None:
+            return 99
+        future = sorted(
+            d for d in player["sched"] if _to_calendar_date(d) and _to_calendar_date(d) >= from_day
+        )
+        if not future:
+            return 99
+        return (future[0] - from_day).days
+
+    steps = []
+    open_spot = bool(has_open_roster_spot)
+    window_day_set = set(window_days)
+
+    for step_num in range(1, max_adds + 1):
+        if not fa_state:
+            break
+        roster_names = {p["name"] for p in roster_state}
+        best = None
+        best_key = None
+        base_counted = _counted_starts_total(roster_state, window_day_set, cap)
+
+        for day in window_days:
+            for fa in fa_state:
+                if fa["name"] in roster_names:
+                    continue
+                fa_games = _games_in_window_from(fa["sched"], day, end_d)
+                fa_entry = _roster_entry_from_fa(fa)
+                if open_spot:
+                    trial = roster_state + [fa_entry]
+                    new_counted = _counted_starts_total(trial, window_day_set, cap)
+                    delta_counted = new_counted - base_counted
+                    net = fa_games
+                    drop_name = "(Open Spot)"
+                    drop_gap = 0
+                    drop_plays = 0
+                    key = (delta_counted, net, fa["score"], 999, 0)
+                    if best_key is None or key > best_key:
+                        best_key = key
+                        best = (day, fa, drop_name, drop_gap, drop_plays, net, delta_counted)
+                    continue
+                droppable = [
+                    p for p in roster_state
+                    if p["name"].lower().strip() not in untouchables_lower
+                ]
+                for rp in droppable:
+                    drop_games = _games_in_window_from(rp["sched"], day, end_d)
+                    net = fa_games - drop_games
+                    trial = [p for p in roster_state if p["name"] != rp["name"]] + [fa_entry]
+                    new_counted = _counted_starts_total(trial, window_day_set, cap)
+                    delta_counted = new_counted - base_counted
+                    gap = player_gap_days(rp, day)
+                    drop_plays = 1 if day in rp["sched"] else 0
+                    key = (delta_counted, net, fa["score"], gap, -drop_plays)
+                    if best_key is None or key > best_key:
+                        best_key = key
+                        best = (day, fa, rp["name"], gap, drop_plays, net, delta_counted)
+
+        if best is None:
+            break
+
+        day, best_add, drop_name, drop_gap, drop_plays, net_games, delta_counted = best
+        if delta_counted <= 0:
+            break
+        next_day = day + timedelta(days=1)
+
+        if drop_name != "(Open Spot)":
+            roster_state = [p for p in roster_state if p["name"] != drop_name]
+            for seg in segments:
+                if seg["player"] == drop_name and seg["until"] is None:
+                    seg["until"] = day
+                    break
+        else:
+            open_spot = False
+
+        roster_state.append({
+            "name": best_add["name"],
+            "team": best_add["team"],
+            "sched": best_add["sched"],
+            "labels": best_add["labels"],
+        })
+        segments.append({
+            "player": best_add["name"],
+            "display_player": best_add["name"],
+            "team": best_add["team"],
+            "sched": best_add["sched"],
+            "labels": best_add["labels"],
+            "from": day,
+            "until": None,
+        })
+
+        games_rest = sum(1 for d in best_add["sched"] if d >= day)
+        date_s = day.strftime("%b %d")
+        if drop_name == "(Open Spot)":
+            action_text = f"Add {best_add['name']} on {date_s} (open roster spot)"
+        else:
+            action_text = f"Add {best_add['name']} on {date_s}, drop {drop_name}"
+
+        steps.append({
+            "step": step_num,
+            "add_date": day,
+            "add": best_add["name"],
+            "add_team": best_add["team"],
+            "plays_on_add_day": int(day in best_add["sched"]),
+            "back_to_back": bool(day in best_add["sched"] and next_day in best_add["sched"]),
+            "games_rest_window": games_rest,
+            "drop": drop_name,
+            "drop_gap_days": drop_gap if drop_name != "(Open Spot)" else 0,
+            "net_games_in_window": net_games,
+            "counted_starts_delta": int(delta_counted),
+            "action_text": action_text,
+        })
+
+    grid_df, total_games, counted_starts = _build_streaming_grid_df(
+        segments, window_days, daily_start_cap=cap
+    )
+    return {
+        "moves": steps,
+        "grid": grid_df,
+        "total_games": total_games,
+        "counted_starts": counted_starts,
+        "window_days": window_days,
+        "max_starts_per_day": cap,
+    }
