@@ -246,9 +246,13 @@ def create_outcome_distribution(outcome_counts, total_sims):
     return fig
 
 
-def create_championship_chart(playoff_results, your_team_name):
+def create_championship_chart(playoff_results, your_team_name, finalist_team_ids=None):
     """Create bar chart of championship probabilities. Excludes teams with 0%."""
-    champ_data = [(r["team_name"], r["championship_prob"]) for r in playoff_results if r["championship_prob"] > 0.1]
+    rows = playoff_results
+    if finalist_team_ids is not None:
+        fid = {int(x) for x in finalist_team_ids}
+        rows = [r for r in playoff_results if int(r["team_id"]) in fid]
+    champ_data = [(r["team_name"], r["championship_prob"]) for r in rows if r["championship_prob"] > 0.1]
     champ_data.sort(key=lambda x: x[1], reverse=True)
     labels = [x[0] for x in champ_data]
     values = [x[1] for x in champ_data]

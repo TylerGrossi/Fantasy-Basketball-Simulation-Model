@@ -12,6 +12,15 @@ MAX_IR = 3
 # Playoff matchups are two weeks each; increase variance so upsets can happen
 PLAYOFF_VARIANCE_MULTIPLIER = 1.4
 
+# Playoff / seed / championship Monte Carlo: marginal gain past ~8k sims, very slow in UI
+PLAYOFF_MONTE_CARLO_CAP = 8000
+
+# Streamer tab: "if this week W vs L" playoff deltas (reuses projected stats; lower sims is enough)
+STREAMER_RECORD_PLAYOFF_SIMS = 2500
+
+# Per-streamer pickup vs drop matchup Monte Carlo (each streamer × drop candidate)
+STREAMER_PICKUP_MONTE_CARLO_SIMS = 1200
+
 # Regular season: variance by day of week (more uncertainty early in week)
 REGULAR_SEASON_VARIANCE_EARLY_WEEK = 1.45   # Monday/Tuesday
 REGULAR_SEASON_VARIANCE_MID_WEEK = 1.25     # Wednesday–Friday

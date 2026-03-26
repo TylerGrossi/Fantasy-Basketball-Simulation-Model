@@ -7,22 +7,24 @@ A web-based Monte Carlo simulation tool for ESPN Fantasy Basketball
 import streamlit as st
 import pandas as pd
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 
-from config import CATEGORIES, NUMERIC_COLS
+from config import CATEGORIES, NUMERIC_COLS, STREAMER_RECORD_PLAYOFF_SIMS
 from data import (
     connect_to_espn,
     get_matchup_info,
     get_current_totals,
     build_stat_df,
+    blend_season_last30,
     add_games_left_with_injury,
     flatten_stat_dict,
     get_espn_injury_data,
     build_injury_table,
-    get_ir_players_returning_this_week,
     get_game_count_window,
+    prefetch_team_schedules_for_rosters,
 )
 from simulation import (
     simulate_team,
@@ -32,9 +34,9 @@ from simulation import (
     analyze_bench_strategy,
     calculate_league_stats,
     simulate_playoff_probabilities,
+    current_matchup_period_effective,
     _get_matchup_variance_multiplier,
-    optimize_waiver_adds,
-    resolve_projected_finals_opponent_from_other_semi,
+    plan_waiver_adds_by_date,
 )
 from visualizations import (
     create_scoreboard,
@@ -60,29 +62,6 @@ PLAYOFF_SCORING_DATES = (
     (date(2026, 3, 9), date(2026, 3, 22)),   # Playoff matchup 1 (two-week scoring)
     (date(2026, 3, 23), date(2026, 4, 5)),   # Playoff matchup 2
 )
-
-# Finals lookahead: opponent = favorite in the semifinal you are *not* in (1v4 / 2v3 or ESPN bracket).
-PM2_VS_PROJ_SEMI_LABEL = "Playoff matchup 2 (vs proj. other semi winner)"
-
-
-def _future_scoring_period_options(last_espn_period):
-    """
-    Sidebar options: current week + future regular weeks + playoff lookahead.
-    Playoff options are included on first load (before any run) so the menu isn’t empty.
-    """
-    opts = ["Current week (ESPN)"]
-    if last_espn_period is None:
-        opts.append("Playoff matchup 1")
-        opts.append(PM2_VS_PROJ_SEMI_LABEL)
-        return opts
-    for w in range(last_espn_period + 1, REGULAR_SEASON_WEEKS + 1):
-        opts.append(f"Week {w}")
-    if last_espn_period < REGULAR_SEASON_WEEKS + 1:
-        opts.append("Playoff matchup 1")
-    if last_espn_period < REGULAR_SEASON_WEEKS + 3:
-        opts.append(PM2_VS_PROJ_SEMI_LABEL)
-    return opts
-
 
 # =============================================================================
 # MAIN APP
@@ -129,29 +108,13 @@ def main():
         team_id = st.number_input("Your Team ID", value=6, min_value=1, max_value=20)
         
         st.markdown('<h4><i class="bi bi-sliders" style="color: #00D4FF;"></i> Simulation Settings</h4>', unsafe_allow_html=True)
-        sim_count = st.slider("Simulations", 1000, 50000, 10000, 1000, help="More = more accurate but slower")
+        sim_count = st.slider(
+            "Simulations", 1000, 50000, 10000, 1000,
+            help="Monte Carlo draws for the matchup gauge. The Playoff tab uses a capped count "
+                 "so very high values mainly affect the matchup view, not bracket runtime.",
+        )
         num_streamers = st.slider("Streamers to Analyze", 5, 100, 50, 5, help="Number of free agents to analyze")
 
-        st.markdown('<h4><i class="bi bi-calendar3" style="color: #FFD93D;"></i> Scoring period</h4>', unsafe_allow_html=True)
-        _last_period = st.session_state.get("league_matchup_period")
-        _scoring_options = _future_scoring_period_options(_last_period)
-        if _last_period is None:
-            st.caption(
-                "**Playoff** rows work on first run. After a run, **Week N** only shows weeks still ahead."
-            )
-        # If the saved pick is no longer valid (league advanced), snap to first option
-        _prev_pick = st.session_state.get("scoring_period_choice")
-        if _prev_pick is not None and _prev_pick not in _scoring_options:
-            st.session_state["scoring_period_choice"] = _scoring_options[0]
-        scoring_period_choice = st.selectbox(
-            "Matchup week to show",
-            options=_scoring_options,
-            key="scoring_period_choice",
-            help="Only periods **after** your league’s current ESPN matchup week (saved from your last run). "
-                 "Regular weeks use 7-day blocks from season start. Playoffs: full 2-week windows; "
-                 "box score uses ESPN period 20 or 22.",
-        )
-        
         st.markdown('<h4><i class="bi bi-shield-fill" style="color: #FFD93D;"></i> Roster Settings</h4>', unsafe_allow_html=True)
         trust_return_dates = st.checkbox(
             "Trust injury return dates",
@@ -163,7 +126,7 @@ def main():
         
         untouchables_input = st.text_area(
             "Untouchable Players",
-            value="Tyrese Maxey\nNikola Jokic\nJalen Williams\nVJ Edgecombe\nKawhi Leonard\nKel'el Ware\nMatas Buzelis",
+            value="Nikola Jokic\nJalen Williams\nVJ Edgecombe\nKawhi Leonard\nKel'el Ware\nMatas Buzelis\nAce Bailey\nDaniss Jenkins",
             help="Enter player names (one per line) that should never be recommended as drops",
             placeholder="LeBron James\nStephen Curry\nKevin Durant"
         )
@@ -172,7 +135,7 @@ def main():
         st.markdown('<h4><i class="bi bi-star-fill" style="color: #FFD93D;"></i> Watchlist</h4>', unsafe_allow_html=True)
         watchlist_input = st.text_area(
             "Manual Watchlist",
-            value="",
+            value="Ty Jerome\nMalik Monk\nKyle Filipowski\nNaji Marshall\nTre Jones\nJonathan Kuminga\nCollin Sexton\nPeyton Watson\nJeremiah Fears\nBub Carrington\nGG Jackson\nJaylen Wells\nSam Merrill\nWendell Carter Jr.\nGrayson Allen\nDylan Harper",
             help="Enter player names (one per line) to prioritize in streamer analysis. These will be marked with 'W' in results.",
             placeholder="Paste player names from your ESPN watchlist here\nOne name per line"
         )
@@ -198,77 +161,30 @@ def main():
     # Main content area
     if run_button:
         try:
-            # Connect to ESPN
+            # Connect to ESPN + injury list in parallel (two independent HTTP calls)
             with st.spinner("Connecting to ESPN..."):
-                league = connect_to_espn(league_id, year, espn_s2, swid)
+                with ThreadPoolExecutor(max_workers=2) as ex:
+                    fut_league = ex.submit(connect_to_espn, int(league_id), int(year), espn_s2, swid)
+                    fut_injury = ex.submit(get_espn_injury_data)
+                    league = fut_league.result()
+                    injury_data = fut_injury.result()
                 fetch_time = datetime.now(ZoneInfo("America/New_York")).strftime("%I:%M %p ET")
                 st.success(f"Connected to **{league.settings.name}** - Data fetched at {fetch_time}")
             
-            # ESPN's live scoring period vs. week we're analyzing (can differ for lookahead)
-            league_cw = league.currentMatchupPeriod
+            # Always analyze ESPN's current matchup period
+            league_cw = current_matchup_period_effective(league)
             st.session_state["league_matchup_period"] = league_cw
 
             blend_weight = 0.7  # used for bracket projection + stat merge below
             selected_playoff_dates = None
-            finals_vs_proj_other_semi = False
-            if scoring_period_choice == "Current week (ESPN)":
-                matchup_period_kw = {}
-            elif scoring_period_choice == "Playoff matchup 1":
-                matchup_period_kw = {"matchup_period": REGULAR_SEASON_WEEKS + 1}
-                selected_playoff_dates = PLAYOFF_SCORING_DATES[0]
-            elif scoring_period_choice == PM2_VS_PROJ_SEMI_LABEL:
-                matchup_period_kw = {"matchup_period": REGULAR_SEASON_WEEKS + 3}
-                selected_playoff_dates = PLAYOFF_SCORING_DATES[1]
-                finals_vs_proj_other_semi = True
-            else:
-                try:
-                    matchup_period_kw = {"matchup_period": int(scoring_period_choice.split()[-1])}
-                except (ValueError, IndexError):
-                    matchup_period_kw = {}
-
-            injury_data = get_espn_injury_data()
-
-            league_stats_cached = None
-            if finals_vs_proj_other_semi:
-                with st.spinner("Loading standings for playoff bracket…"):
-                    league_stats_cached = calculate_league_stats(league, year)
-
-            proj_finals_note = None
             # Get matchup info
             with st.spinner("Loading matchup data..."):
-                if not finals_vs_proj_other_semi:
-                    your_team_obj, opp_team_obj, matchup, current_week = get_matchup_info(
-                        league, team_id, **matchup_period_kw
-                    )
-                    your_team_name = your_team_obj.team_name
-                    opp_team_name = opp_team_obj.team_name
-                    current_you, current_opp = get_current_totals(matchup, team_id)
-                else:
-                    your_team_obj, opp_placeholder, matchup, current_week = get_matchup_info(
-                        league, team_id, **matchup_period_kw
-                    )
-                    your_team_name = your_team_obj.team_name
-                    current_you, current_opp_placeholder = get_current_totals(matchup, team_id)
-                    res = resolve_projected_finals_opponent_from_other_semi(
-                        league, team_id, year, league_stats_cached, injury_data, blend_weight,
-                        playoff_teams=4,
-                        regular_season_weeks=REGULAR_SEASON_WEEKS,
-                        semi_window_start=PLAYOFF_SCORING_DATES[0][0],
-                        semi_window_end=PLAYOFF_SCORING_DATES[0][1],
-                    )
-                    if res:
-                        opp_team_obj = res["opp_team_obj"]
-                        opp_team_name = res["opp_team_name"]
-                        current_opp = {k: 0 for k in current_opp_placeholder}
-                        proj_finals_note = res["note"]
-                    else:
-                        opp_team_obj = opp_placeholder
-                        opp_team_name = opp_team_obj.team_name
-                        current_opp = current_opp_placeholder
-                        proj_finals_note = (
-                            "Could not project the other semifinal (need you in the top 4 by standing "
-                            "or a 4-team ESPN bracket). Using ESPN’s period-22 opponent."
-                        )
+                your_team_obj, opp_team_obj, matchup, current_week = get_matchup_info(
+                    league, team_id, matchup_period=league_cw
+                )
+                your_team_name = your_team_obj.team_name
+                opp_team_name = opp_team_obj.team_name
+                current_you, current_opp = get_current_totals(matchup, team_id)
             
             # Display matchup header
             # Playoff periods are defined by actual ESPN schedule dates.
@@ -306,11 +222,7 @@ def main():
             with col1:
                 st.markdown(f'<h3><i class="bi bi-house-fill" style="color: #00FF88;"></i> {your_team_name}</h3>', unsafe_allow_html=True)
             with col2:
-                if scoring_period_choice == "Playoff matchup 1":
-                    period_label = "Playoff matchup 1"
-                elif scoring_period_choice == PM2_VS_PROJ_SEMI_LABEL:
-                    period_label = "Playoff 2 · proj. other semi"
-                elif current_week != league_cw:
+                if current_week != league_cw:
                     period_label = f"Week {current_week}"
                 elif playoff_round is not None:
                     period_label = f"Playoff Rd {playoff_round} (Wk {week_in_round}/2)"
@@ -319,20 +231,7 @@ def main():
                 st.markdown(f"<h3 style='text-align: center; color: #FF6B35;'>{period_label}</h3>", unsafe_allow_html=True)
             with col3:
                 st.markdown(f'<h3><i class="bi bi-person-fill" style="color: #FF4757;"></i> {opp_team_name}</h3>', unsafe_allow_html=True)
-            if selected_playoff_dates is not None:
-                if finals_vs_proj_other_semi and proj_finals_note:
-                    st.caption(
-                        f"{scoring_period_choice} · NBA games **{game_window_start:%b %d} – {game_window_end:%b %d}** "
-                        f"(full finals window). League week **{league_cw}**."
-                    )
-                    st.markdown(proj_finals_note)
-                else:
-                    st.caption(
-                        f"**{scoring_period_choice}** · NBA games **{game_window_start:%b %d} – {game_window_end:%b %d}** "
-                        f"(full round). Opponent from ESPN matchup **period {current_week}** "
-                        f"(league is in week **{league_cw}**)."
-                    )
-            elif current_week != league_cw:
+            if current_week != league_cw:
                 st.caption(
                     f"League is in **week {league_cw}** · Sim uses **week {current_week}** matchup "
                     f"and NBA games **{game_window_start:%b %d} – {game_window_end:%b %d}** · "
@@ -357,7 +256,7 @@ def main():
             opp_last30 = build_stat_df(opp_roster, f"{year}_last_30", "Last30", opp_team_name, year)
             
             progress.progress(25)
-            status_text.text("Fetching NBA schedules and injury data...")
+            status_text.text("NBA schedules & games left...")
             
             _ag_kw = dict(
                 trust_return_dates=trust_return_dates,
@@ -366,28 +265,18 @@ def main():
                 window_start=game_window_start,
                 window_end=game_window_end,
             )
-            your_season = add_games_left_with_injury(your_season, your_roster, injury_data, **_ag_kw)
-            your_last30 = add_games_left_with_injury(your_last30, your_roster, injury_data, **_ag_kw)
-            opp_season = add_games_left_with_injury(opp_season, opp_roster, injury_data, **_ag_kw)
-            opp_last30 = add_games_left_with_injury(opp_last30, opp_roster, injury_data, **_ag_kw)
+            # Warm cache in parallel, then one schedule pass per fantasy team (was four).
+            prefetch_team_schedules_for_rosters(your_roster, opp_roster)
+            your_merged = blend_season_last30(your_season, your_last30, blend_weight)
+            opp_merged = blend_season_last30(opp_season, opp_last30, blend_weight)
+            your_merged = add_games_left_with_injury(your_merged, your_roster, injury_data, **_ag_kw)
+            opp_merged = add_games_left_with_injury(opp_merged, opp_roster, injury_data, **_ag_kw)
             
             progress.progress(50)
-            status_text.text("Blending statistics...")
+            status_text.text("Preparing matchup simulation...")
             
-            # Blend stats (70% last 30 days, 30% season)
-            season_df = pd.concat([your_season, opp_season], ignore_index=True)
-            last30_df = pd.concat([your_last30, opp_last30], ignore_index=True)
-            
-            merged = pd.merge(last30_df, season_df, on="Player", suffixes=("_30", "_season"))
-            for col in NUMERIC_COLS:
-                merged[col] = merged[f"{col}_30"] * blend_weight + merged[f"{col}_season"] * (1 - blend_weight)
-            
-            merged["Games Left"] = merged["Games Left_30"]
-            merged["Team"] = merged["Team_30"]
-            merged["NBA_Team"] = merged["NBA_Team_30"]
-            
-            your_team_df = merged[merged["Team"] == your_team_name].copy()
-            opp_team_df = merged[merged["Team"] == opp_team_name].copy()
+            your_team_df = your_merged.copy()
+            opp_team_df = opp_merged.copy()
             
             your_team_df = your_team_df[your_team_df["Games Left"] > 0]
             opp_team_df = opp_team_df[opp_team_df["Games Left"] > 0]
@@ -423,11 +312,7 @@ def main():
             
             # Pre-compute league stats (used by League Stats and Playoff tabs)
             with st.spinner("Calculating league statistics..."):
-                league_stats = (
-                    league_stats_cached
-                    if league_stats_cached is not None
-                    else calculate_league_stats(league, year)
-                )
+                league_stats = calculate_league_stats(league, year)
             
             # Create tabs (Streamer is 2nd tab but loads last - block runs at end)
             tab_matchup, tab_streamers, tab_optimization, tab_strategy, tab_season, tab_league, tab_playoff = st.tabs([
@@ -1097,16 +982,15 @@ def main():
                 st.markdown('<p style="color: #888;">Projected roster (injury-aware) + category-by-category. Playoff matchups are two weeks each (semis + finals).</p>', unsafe_allow_html=True)
                 
                 with st.spinner("Simulating playoff probabilities (this may take a moment)..."):
-                    playoff_results = simulate_playoff_probabilities(
+                    playoff_results, playoff_projected = simulate_playoff_probabilities(
                         league, league_stats, year,
                         sims=sim_count,
+                        regular_season_weeks=REGULAR_SEASON_WEEKS,
                         blend_weight=blend_weight, injury_data=injury_data,
                         current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
-                        period_end_date=period_end_date
+                        period_end_date=period_end_date,
+                        return_projected=True,
                     )
-                
-                # Playoff standings table (like the reference image)
-                st.markdown('<h3><i class="bi bi-bar-chart-steps" style="color: #00D4FF;"></i> Playoff Standings</h3>', unsafe_allow_html=True)
                 
                 def fmt_pct(pct):
                     if pct >= 99.5:
@@ -1145,53 +1029,105 @@ def main():
                 show_playoff_odds = any(1 <= r['playoff_prob'] < 99 for r in playoff_results)
                 show_advance_odds = in_playoffs and any(1 <= r.get('advance_prob', 0) < 99 for r in playoff_results)
                 show_champ_odds = any(1 <= r['championship_prob'] < 99 for r in playoff_results)
+
+                cf_ids = (
+                    playoff_results[0].get("championship_finalist_team_ids")
+                    if playoff_results else None
+                )
+                cf_ids_int = (
+                    frozenset(int(x) for x in cf_ids) if cf_ids is not None else None
+                )
+                championship_table_rows = []
+                if cf_ids_int is not None and len(cf_ids_int) >= 2:
+                    championship_table_rows = [
+                        r for r in playoff_results if int(r["team_id"]) in cf_ids_int
+                    ]
+                    championship_table_rows.sort(
+                        key=lambda x: x["championship_prob"], reverse=True
+                    )
+                is_championship_table = len(championship_table_rows) >= 2
+                championship_display_rows = championship_table_rows
+                if is_championship_table:
+                    # In active finals, force championship odds to match the main matchup
+                    # Win Probability gauge exactly (team_id vs current opponent = 100 - win_pct).
+                    championship_display_rows = []
+                    for r in championship_table_rows:
+                        out = dict(r)
+                        if int(r.get("team_id", -1)) == int(team_id):
+                            out["championship_prob"] = float(win_pct)
+                        else:
+                            out["championship_prob"] = float(100.0 - win_pct)
+                        championship_display_rows.append(out)
+                playoff_table_title = (
+                    "Championship" if is_championship_table else "Playoff Standings"
+                )
+                st.markdown(
+                    f'<h3><i class="bi bi-trophy-fill" style="color: #00D4FF;"></i> {playoff_table_title}</h3>',
+                    unsafe_allow_html=True,
+                )
                 
                 # Build HTML table with color-coded percentages and American odds
-                # During playoffs: replace seeds/Playoff% with Advance% (win current round)
-                header_cells = "<th style='text-align:left;padding:8px;color:#888;'>Team</th><th style='text-align:center;padding:8px;color:#888;'>W</th><th style='text-align:center;padding:8px;color:#888;'>L</th>"
-                if not in_playoffs:
-                    seed_cols = [f"#{s}*" for s in range(1, 5)]
-                    for c in seed_cols:
-                        header_cells += f"<th style='text-align:center;padding:8px;color:#888;'>{c}</th>"
-                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>No Playoffs</th><th style='text-align:center;padding:8px;color:#888;'>Playoff %</th>"
-                    if show_playoff_odds:
-                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Playoff Odds</th>"
-                else:
-                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Advance %</th>"
-                    if show_advance_odds:
-                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Advance Odds</th>"
-                header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ %</th>"
-                if show_champ_odds:
-                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ Odds</th>"
-                
-                rows = []
-                display_results = playoff_results
-                if in_playoffs:
-                    display_results = [r for r in playoff_results
-                                       if r.get("advance_prob", 0) > 0 or r.get("championship_prob", 0) > 0]
-                for r in display_results:
-                    w, l, t = r["record"]
-                    cells = f"<td style='padding:8px;color:white;'>{r['team_name']}</td><td style='text-align:center;padding:8px;color:white;'>{w}</td><td style='text-align:center;padding:8px;color:white;'>{l}</td>"
-                    if not in_playoffs:
-                        for s in range(1, 5):
-                            pct = r["seed_probs"].get(s, 0)
-                            cells += f"<td style='text-align:center;padding:8px;color:{pct_color(pct)};'>{fmt_pct(pct)}</td>"
-                        no_play = r["seed_probs"].get("no_playoffs", 0)
-                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(no_play, invert=True)};'>{fmt_pct(no_play)}</td>"
-                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['playoff_prob'])};'>{fmt_pct(r['playoff_prob'])}</td>"
-                        if show_playoff_odds:
-                            playoff_odds = prob_to_american_odds(r['playoff_prob'])
-                            cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{playoff_odds if playoff_odds else '—'}</td>"
-                    else:
-                        advance_pct = r.get("advance_prob", 0)
-                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(advance_pct)};'>{fmt_pct(advance_pct)}</td>"
-                        if show_advance_odds:
-                            advance_odds = prob_to_american_odds(advance_pct)
-                            cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{advance_odds if advance_odds else '—'}</td>"
-                    cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['championship_prob'])};'>{fmt_pct(r['championship_prob'])}</td>"
+                if is_championship_table:
+                    show_champ_odds = any(1 <= r["championship_prob"] < 99 for r in championship_display_rows)
+                    header_cells = (
+                        "<th style='text-align:left;padding:8px;color:#888;'>Team</th>"
+                        "<th style='text-align:center;padding:8px;color:#888;'>Champ %</th>"
+                    )
                     if show_champ_odds:
-                        champ_odds = prob_to_american_odds(r['championship_prob'])
-                        cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{champ_odds if champ_odds else '—'}</td>"
+                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ Odds</th>"
+                    display_results = championship_display_rows
+                else:
+                    header_cells = "<th style='text-align:left;padding:8px;color:#888;'>Team</th><th style='text-align:center;padding:8px;color:#888;'>W</th><th style='text-align:center;padding:8px;color:#888;'>L</th>"
+                    if not in_playoffs:
+                        seed_cols = [f"#{s}*" for s in range(1, 5)]
+                        for c in seed_cols:
+                            header_cells += f"<th style='text-align:center;padding:8px;color:#888;'>{c}</th>"
+                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>No Playoffs</th><th style='text-align:center;padding:8px;color:#888;'>Playoff %</th>"
+                        if show_playoff_odds:
+                            header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Playoff Odds</th>"
+                    else:
+                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Advance %</th>"
+                        if show_advance_odds:
+                            header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Advance Odds</th>"
+                    header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ %</th>"
+                    if show_champ_odds:
+                        header_cells += "<th style='text-align:center;padding:8px;color:#888;'>Champ Odds</th>"
+                    display_results = playoff_results
+                    if in_playoffs:
+                        display_results = [r for r in playoff_results
+                                           if r.get("advance_prob", 0) > 0 or r.get("championship_prob", 0) > 0]
+
+                rows = []
+                for r in display_results:
+                    if is_championship_table:
+                        cells = f"<td style='padding:8px;color:white;'>{r['team_name']}</td>"
+                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['championship_prob'])};'>{fmt_pct(r['championship_prob'])}</td>"
+                        if show_champ_odds:
+                            champ_odds = prob_to_american_odds(r['championship_prob'])
+                            cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{champ_odds if champ_odds else '—'}</td>"
+                    else:
+                        w, l, t = r["record"]
+                        cells = f"<td style='padding:8px;color:white;'>{r['team_name']}</td><td style='text-align:center;padding:8px;color:white;'>{w}</td><td style='text-align:center;padding:8px;color:white;'>{l}</td>"
+                        if not in_playoffs:
+                            for s in range(1, 5):
+                                pct = r["seed_probs"].get(s, 0)
+                                cells += f"<td style='text-align:center;padding:8px;color:{pct_color(pct)};'>{fmt_pct(pct)}</td>"
+                            no_play = r["seed_probs"].get("no_playoffs", 0)
+                            cells += f"<td style='text-align:center;padding:8px;color:{pct_color(no_play, invert=True)};'>{fmt_pct(no_play)}</td>"
+                            cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['playoff_prob'])};'>{fmt_pct(r['playoff_prob'])}</td>"
+                            if show_playoff_odds:
+                                playoff_odds = prob_to_american_odds(r['playoff_prob'])
+                                cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{playoff_odds if playoff_odds else '—'}</td>"
+                        else:
+                            advance_pct = r.get("advance_prob", 0)
+                            cells += f"<td style='text-align:center;padding:8px;color:{pct_color(advance_pct)};'>{fmt_pct(advance_pct)}</td>"
+                            if show_advance_odds:
+                                advance_odds = prob_to_american_odds(advance_pct)
+                                cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{advance_odds if advance_odds else '—'}</td>"
+                        cells += f"<td style='text-align:center;padding:8px;color:{pct_color(r['championship_prob'])};'>{fmt_pct(r['championship_prob'])}</td>"
+                        if show_champ_odds:
+                            champ_odds = prob_to_american_odds(r['championship_prob'])
+                            cells += f"<td style='text-align:center;padding:8px;color:#FFD93D;'>{champ_odds if champ_odds else '—'}</td>"
                     rows.append(f"<tr>{cells}</tr>")
                 
                 table_html = f"""
@@ -1205,7 +1141,15 @@ def main():
                 
                 # Championship probability bar chart
                 st.markdown('<h3><i class="bi bi-trophy-fill" style="color: #FFD93D;"></i> Championship Probability</h3>', unsafe_allow_html=True)
-                st.plotly_chart(create_championship_chart(playoff_results, your_team_name), use_container_width=True)
+                chart_rows = championship_display_rows if is_championship_table else playoff_results
+                st.plotly_chart(
+                    create_championship_chart(
+                        chart_rows,
+                        your_team_name,
+                        finalist_team_ids=cf_ids_int if is_championship_table else None,
+                    ),
+                    use_container_width=True,
+                )
             
             # ==================== STREAMER ANALYSIS (loads last) ====================
             with tab_streamers:
@@ -1215,11 +1159,6 @@ def main():
                     st.markdown(f'<div style="padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border-left: 4px solid #00D4FF; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-lock-fill" style="color: #00D4FF;"></i> <strong>Untouchable players:</strong> {", ".join(untouchables)}</div>', unsafe_allow_html=True)
                 if has_open_spot:
                     st.markdown('<div style="padding: 0.75rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00FF88; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-check-circle-fill" style="color: #00FF88;"></i> You have an open roster spot - streamers can be added without dropping anyone</div>', unsafe_allow_html=True)
-                ir_returning = get_ir_players_returning_this_week(your_roster, injury_data)
-                if ir_returning:
-                    names = ", ".join(r["Player"] for r in ir_returning)
-                    st.markdown(f'<div style="padding: 0.75rem; background: rgba(255, 215, 61, 0.1); border-left: 4px solid #FFD93D; border-radius: 4px; margin-bottom: 1rem;"><i class="bi bi-exclamation-triangle-fill" style="color: #FFD93D;"></i> <strong>IR players returning this week:</strong> {names}. When they activate, you\'ll need to drop someone (max 13 roster). Consider dropping for a streamer now if you\'d drop them anyway.</div>', unsafe_allow_html=True)
-                
                 with st.spinner(f"Analyzing {num_streamers} potential streamers (considering drop candidates)..."):
                     baseline_results = (win_pct, category_results, baseline_avg_cats)
                     streamers = analyze_streamers(
@@ -1238,29 +1177,30 @@ def main():
                     your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
                     if your_team_stats and streamers:
                         w, l, t = your_team_stats["actual_wins"], your_team_stats["actual_losses"], your_team_stats["actual_ties"]
-                        playoff_baseline = simulate_playoff_probabilities(
-                            league, league_stats, year, sims=sim_count,
-                            blend_weight=blend_weight, injury_data=injury_data,
-                            current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
-                            period_end_date=period_end_date
-                        )
-                        playoff_if_win = simulate_playoff_probabilities(
-                            league, league_stats, year, sims=sim_count,
-                            record_override={team_id: (w + 1, l, t)},
-                            blend_weight=blend_weight, injury_data=injury_data,
-                            current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
-                            period_end_date=period_end_date
-                        )
-                        playoff_if_lose = simulate_playoff_probabilities(
-                            league, league_stats, year, sims=sim_count,
-                            record_override={team_id: (w, l + 1, t)},
-                            blend_weight=blend_weight, injury_data=injury_data,
-                            current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
-                            period_end_date=period_end_date
-                        )
-                        pb = next((r for r in playoff_baseline if r["team_id"] == team_id), {})
-                        pw = next((r for r in playoff_if_win if r["team_id"] == team_id), {})
-                        pl = next((r for r in playoff_if_lose if r["team_id"] == team_id), {})
+                        tid = int(team_id)
+                        # Baseline = Playoff tab (no duplicate full sim). W/L scenarios: fewer sims + shared projections.
+                        pb = next((r for r in playoff_results if r["team_id"] == tid), {})
+
+                        def _playoff_counterfactual(rec_override):
+                            return simulate_playoff_probabilities(
+                                league, league_stats, year,
+                                sims=STREAMER_RECORD_PLAYOFF_SIMS,
+                                record_override=rec_override,
+                                blend_weight=blend_weight,
+                                injury_data=injury_data,
+                                current_week_matchup_outcomes=(team_id, opp_team_obj.team_id, outcome_counts),
+                                period_end_date=period_end_date,
+                                precomputed_projected=playoff_projected,
+                            )
+
+                        with ThreadPoolExecutor(max_workers=2) as ex:
+                            fut_win = ex.submit(_playoff_counterfactual, {tid: (w + 1, l, t)})
+                            fut_lose = ex.submit(_playoff_counterfactual, {tid: (w, l + 1, t)})
+                            playoff_if_win = fut_win.result()
+                            playoff_if_lose = fut_lose.result()
+
+                        pw = next((r for r in playoff_if_win if r["team_id"] == tid), {})
+                        pl = next((r for r in playoff_if_lose if r["team_id"] == tid), {})
                         baseline_playoff, baseline_champ = pb.get("playoff_prob", 0), pb.get("championship_prob", 0)
                         playoff_win, champ_win = pw.get("playoff_prob", 0), pw.get("championship_prob", 0)
                         playoff_lose, champ_lose = pl.get("playoff_prob", 0), pl.get("championship_prob", 0)
@@ -1358,12 +1298,13 @@ def main():
                     unsafe_allow_html=True,
                 )
                 st.caption(
-                    "One move at a time: each row is the best add/drop given the roster after the previous row. "
-                    "Uses the same sim settings as Matchup Analysis."
+                    "Each add/drop maximizes **countable starts** (10 NBA games/day cap). Schedules use the same "
+                    "injury rules as the rest of the app: **Trust injury return dates** in the sidebar, plus the "
+                    "ESPN injury feed. **IR players** are treated as inactive until you move them to a lineup slot "
+                    "(their row is labeled **(IR)** and shows no games while stashed)."
                 )
 
                 max_adds = waiver_adds_left
-                num_opt_candidates = waiver_adds_left
                 period_label_opt = (
                     f"Playoffs · round {playoff_round}" if playoff_round is not None else "Regular season"
                 )
@@ -1384,146 +1325,158 @@ def main():
                         "Raise the number in the sidebar if you still have adds this period."
                     )
                 else:
-                    with st.spinner("Running waiver sequence…"):
-                        opt_steps = optimize_waiver_adds(
-                            league, your_team_df, opp_team_df,
-                            current_you, current_opp,
-                            (win_pct, category_results, baseline_avg_cats),
-                            blend_weight, year, max_adds,
+                    with st.spinner("Building streaming plan and schedule grid…"):
+                        opt_plan = plan_waiver_adds_by_date(
+                            league, your_roster, year, max_adds,
                             untouchables=untouchables,
                             has_open_roster_spot=has_open_spot,
-                            week_span=week_span,
-                            period_end_date=period_end_date,
                             game_window_start=game_window_start,
                             game_window_end=game_window_end,
-                            num_candidates=num_opt_candidates,
+                            blend_weight=blend_weight,
+                            injury_data=injury_data,
+                            trust_return_dates=trust_return_dates,
                         )
 
-                    if not opt_steps:
+                    opt_steps = opt_plan.get("moves", []) if isinstance(opt_plan, dict) else []
+                    opt_grid = opt_plan.get("grid") if isinstance(opt_plan, dict) else None
+                    total_games = opt_plan.get("total_games", 0) if isinstance(opt_plan, dict) else 0
+                    counted_starts = opt_plan.get("counted_starts", 0) if isinstance(opt_plan, dict) else 0
+
+                    grid_empty = opt_grid is None or opt_grid.empty
+                    if not opt_steps and grid_empty:
                         st.info(
-                            "No move improved the sim on the first step — roster is fine or the FA pool "
-                            "doesn't beat your end-of-bench with this budget."
+                            "Could not build a schedule from the current roster / FA pool."
                         )
+                    elif not opt_steps:
+                        st.warning(
+                            "No **countable**-start improvement from a waiver swap: every candidate was flat or worse "
+                            "once the **10 games/day** cap is applied. Your current schedule is below — check "
+                            "**Over cap (bench)** rows for heavy nights."
+                        )
+                        st.markdown("##### Roster schedule (matchup window)")
+                        if not grid_empty:
+                            st.dataframe(
+                                opt_grid,
+                                use_container_width=True,
+                                hide_index=True,
+                                height=min(520, 42 * (len(opt_grid) + 2)),
+                            )
+                        m1, m2 = st.columns(2)
+                        with m1:
+                            st.metric("Countable starts (10/day cap)", str(counted_starts))
+                        with m2:
+                            st.metric("Raw roster games (all nights)", str(total_games))
                     else:
-                        labels = ["Start"] + [str(s["step"]) for s in opt_steps]
-                        wp_vals = [win_pct] + [s["win_pct"] for s in opt_steps]
-                        marker_colors = ["#888"] + [
-                            "#00FF88" if s["delta_win_pct"] >= 1.0
-                            else "#FFD93D" if s["delta_win_pct"] >= 0
-                            else "#FF4757"
-                            for s in opt_steps
-                        ]
-
-                        fig_prog = go.Figure()
-                        for i in range(len(labels) - 1):
-                            fig_prog.add_trace(go.Scatter(
-                                x=[labels[i], labels[i + 1]],
-                                y=[wp_vals[i], wp_vals[i + 1]],
-                                mode="lines",
-                                line=dict(color=marker_colors[i + 1], width=2.5),
-                                showlegend=False,
-                                hoverinfo="skip",
-                            ))
-                        fig_prog.add_trace(go.Scatter(
-                            x=labels,
-                            y=wp_vals,
-                            mode="markers+text",
-                            marker=dict(size=10, color=marker_colors, line=dict(color="#1a1a2e", width=1)),
-                            text=[f"{v:.0f}%" for v in wp_vals],
-                            textposition="top center",
-                            textfont=dict(color="#ccc", size=11),
-                            showlegend=False,
-                            hovertemplate="%{x}<br>%{y:.1f}% win<extra></extra>",
-                        ))
-                        fig_prog.add_hline(
-                            y=win_pct, line_dash="dot", line_color="rgba(255,255,255,0.25)",
-                            annotation_text=f"Now {win_pct:.0f}%",
-                            annotation_font_color="#888",
-                            annotation_position="bottom right",
-                        )
-                        fig_prog.update_layout(
-                            title=dict(
-                                text="Win % after each suggested move",
-                                font=dict(color="#ddd", size=13),
-                            ),
-                            plot_bgcolor="rgba(0,0,0,0)",
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            font=dict(color="#bbb"),
-                            xaxis=dict(
-                                title="Move #",
-                                showgrid=False,
-                                zeroline=False,
-                                tickfont=dict(size=11),
-                            ),
-                            yaxis=dict(
-                                range=[max(0, min(wp_vals) - 6), min(100, max(wp_vals) + 6)],
-                                title="Win %",
-                                showgrid=True,
-                                gridcolor="rgba(255,255,255,0.06)",
-                                zeroline=False,
-                            ),
-                            margin=dict(l=48, r=16, t=48, b=40),
-                            height=280,
-                        )
-                        st.plotly_chart(fig_prog, use_container_width=True)
-
-                        last_good = 0
-                        for s in opt_steps:
-                            if s["delta_win_pct"] >= 0.5:
-                                last_good = s["step"]
-                        if last_good > 0:
-                            final_pct = next(x["win_pct"] for x in opt_steps if x["step"] == last_good)
-                            cum = final_pct - win_pct
-                            st.markdown(
-                                f"**Where it still pays:** stop after move **{last_good}** for "
-                                f"**{final_pct:.1f}%** win ({cum:+.1f}% vs now), "
-                                f"if you want at least ~0.5% bump per add."
+                        log_col, grid_col = st.columns([0.38, 0.62])
+                        with log_col:
+                            st.markdown("##### Action log")
+                            log_rows = []
+                            for step in opt_steps:
+                                drop_label = "— (open spot)" if step["drop"] == "(Open Spot)" else step["drop"]
+                                log_rows.append({
+                                    "#": step["step"],
+                                    "When": step["add_date"].strftime("%a %b %d"),
+                                    "Instruction": step.get(
+                                        "action_text",
+                                        f"Add {step['add']}, drop {drop_label}",
+                                    ),
+                                    "Δ counted*": int(step.get("counted_starts_delta", 0)),
+                                    "Δ raw": int(step.get("net_games_in_window", 0)),
+                                })
+                            plan_df = pd.DataFrame(log_rows)
+                            st.dataframe(
+                                plan_df,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "#": st.column_config.NumberColumn(width="small"),
+                                    "When": st.column_config.TextColumn(width="small"),
+                                    "Instruction": st.column_config.TextColumn(width="large"),
+                                    "Δ counted*": st.column_config.NumberColumn(
+                                        "Δ counted starts",
+                                        help="Change in total countable starts for the window (each day capped at 10).",
+                                        width="small",
+                                    ),
+                                    "Δ raw": st.column_config.NumberColumn(
+                                        "Δ raw games",
+                                        help="Add's remaining games in window minus drop's (uncapped).",
+                                        width="small",
+                                    ),
+                                },
+                            )
+                            st.caption(
+                                "*Countable starts = sum over days of min(games that day, 10). "
+                                "**Δ raw** can be positive even when Δ counted is 0 (stacked nights you would bench)."
                             )
 
+                        with grid_col:
+                            st.markdown("##### Roster schedule (matchup window)")
+                            if opt_grid is not None and not opt_grid.empty:
+                                st.dataframe(
+                                    opt_grid,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    height=min(520, 42 * (len(opt_grid) + 2)),
+                                )
+                            m1, m2 = st.columns(2)
+                            with m1:
+                                st.metric(
+                                    "Countable starts (10/day cap)",
+                                    str(counted_starts),
+                                    help="Sum over the window of min(games that day, 10). "
+                                    "The waiver path maximizes this.",
+                                )
+                            with m2:
+                                st.metric(
+                                    "Raw roster games (all nights)",
+                                    str(total_games),
+                                    help="Total player-games if everyone played; exceeds countable when "
+                                    "more than 10 rostered players have a game the same day.",
+                                )
+
+                        st.divider()
                         plan_rows = []
                         for step in opt_steps:
                             drop_label = "— (open spot)" if step["drop"] == "(Open Spot)" else step["drop"]
-                            cats = step.get("cat_impacts") or {}
-                            if cats:
-                                top2 = sorted(cats.items(), key=lambda x: abs(x[1]), reverse=True)[:2]
-                                swing = ", ".join(f"{k} {v:+.0f}%" for k, v in top2)
-                            else:
-                                swing = "—"
                             plan_rows.append({
                                 "#": step["step"],
+                                "Add Date": step["add_date"].strftime("%a %b %d"),
                                 "Add": step["add"],
                                 "Drop": drop_label,
                                 "Tm": step["add_team"],
-                                "G": step["add_games"],
-                                "Win %": round(step["win_pct"], 1),
-                                "Δ step": round(step["delta_win_pct"], 2),
-                                "xCats": round(step["exp_cats"], 2),
-                                "Cat swing": swing,
+                                "Δ counted": int(step.get("counted_starts_delta", 0)),
+                                "Δ raw": int(step.get("net_games_in_window", 0)),
+                                "Play Today": "Y" if step.get("plays_on_add_day", 0) else "N",
+                                "B2B": "Y" if step.get("back_to_back", False) else "",
+                                "Games Rest": int(step.get("games_rest_window", 0)),
+                                "Drop Gap (days)": int(step.get("drop_gap_days", 0)),
                             })
-                        plan_df = pd.DataFrame(plan_rows)
-                        st.markdown("##### Move list")
+                        detail_df = pd.DataFrame(plan_rows)
+                        st.markdown("##### Move details")
                         st.dataframe(
-                            plan_df,
+                            detail_df,
                             use_container_width=True,
                             hide_index=True,
                             column_config={
                                 "#": st.column_config.NumberColumn(width="small"),
+                                "Add Date": st.column_config.TextColumn(width="small"),
                                 "Add": st.column_config.TextColumn(width="medium"),
                                 "Drop": st.column_config.TextColumn(width="medium"),
                                 "Tm": st.column_config.TextColumn("NBA", width="small"),
-                                "G": st.column_config.NumberColumn(width="small"),
-                                "Win %": st.column_config.NumberColumn(format="%.1f"),
-                                "Δ step": st.column_config.NumberColumn(format="%.2f"),
-                                "xCats": st.column_config.NumberColumn(format="%.2f"),
-                                "Cat swing": st.column_config.TextColumn(width="large"),
+                                "Δ counted": st.column_config.NumberColumn(width="small"),
+                                "Δ raw": st.column_config.NumberColumn(width="small"),
+                                "Play Today": st.column_config.TextColumn(width="small"),
+                                "B2B": st.column_config.TextColumn(width="small"),
+                                "Games Rest": st.column_config.NumberColumn(width="small"),
+                                "Drop Gap (days)": st.column_config.NumberColumn(width="small"),
                             },
                         )
 
                         remaining = max_adds - len(opt_steps)
                         if remaining > 0:
                             st.caption(
-                                f"Stopped after {len(opt_steps)} move(s); {remaining} add(s) left in your budget "
-                                f"with no further gain in this sim."
+                                f"Planned {len(opt_steps)} move(s); {remaining} add(s) could not be scheduled "
+                                f"from current healthy FA options in this window."
                             )
 
             st.success("Simulation complete!")
