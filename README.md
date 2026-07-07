@@ -1,113 +1,100 @@
+# Fantasy Basketball Win Percentage Simulator
 
-# 🏀 Fantasy Basketball Win Percentage Simulator
+A web-based **Monte Carlo simulation** tool for one ESPN Fantasy Basketball league
+(head-to-head, category scoring). It pulls live data from ESPN, projects the rest of
+a matchup week, and reports win probability, category breakdowns, streamer pickups,
+bench decisions, standings, and playoff odds. Built with Streamlit + Plotly.
 
-A web-based Monte Carlo simulation tool for ESPN Fantasy Basketball matchups.
+> Working on this repo as an AI agent? Start with **[AGENTS.md](AGENTS.md)**.
 
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-
-## Features
-
-* **Monte Carlo Simulation** : Run thousands of simulations to estimate true win probability
-* **Category Analysis** : See which categories are locks vs. swing categories
-* **Streamer Impact Analysis** : Find the best free agent pickups to maximize expected categories won
-* **Live ESPN Data** : Automatically pulls your current matchup data from ESPN
-* **Beautiful Dashboard** : Modern, dark-themed UI with interactive Plotly charts
-
-## Quick Start
-
-### Option 1: Run Locally
+## Quick start
 
 ```bash
-# Clone or download the files
-# Install dependencies
 pip install -r requirements.txt
-
-# Run the app
-streamlit run fantasy_basketball_app.py
+streamlit run streamlit_app.py
 ```
 
-### Option 2: Deploy to Streamlit Cloud (Free)
-
-1. **Create a GitHub Repository**
-   * Create a new repo on GitHub
-   * Upload `fantasy_basketball_app.py` and `requirements.txt`
-2. **Deploy on Streamlit Cloud**
-   * Go to [share.streamlit.io](https://share.streamlit.io/)
-   * Sign in with GitHub
-   * Click "New app"
-   * Select your repository
-   * Set the main file path to `fantasy_basketball_app.py`
-   * Click "Deploy"
-3. **Access from Any Device**
-   * Your app will be available at `https://[your-app-name].streamlit.app`
-   * Access it from phone, tablet, or any computer!
-
-### Option 3: Deploy to Railway/Render
-
-Both platforms offer free tiers:
-
-**Railway:**
-
-1. Connect GitHub repo
-2. Add environment variable: `PORT=8501`
-3. Deploy with command: `streamlit run fantasy_basketball_app.py --server.port $PORT`
-
-**Render:**
-
-1. Create new Web Service
-2. Connect GitHub repo
-3. Build command: `pip install -r requirements.txt`
-4. Start command: `streamlit run fantasy_basketball_app.py --server.port 10000`
+The app opens in your browser. ESPN connection details are **already set in the code**
+(see Configuration) - the sidebar only asks which team and which week to view, then
+you click **RUN SIMULATION**.
 
 ## Configuration
 
-### Getting ESPN Credentials
+ESPN credentials and the default team live in [config.py](config.py) - not in the UI:
 
-1. **League ID** : Found in your ESPN Fantasy Basketball league URL
+| Setting | Where |
+|---------|-------|
+| `ESPN_LEAGUE_ID`, `ESPN_SEASON_YEAR` | `config.py` |
+| `ESPN_S2`, `ESPN_SWID` (browser cookies for a private league) | `config.py` |
+| `DEFAULT_TEAM_NAME` (the team analyzed by default) | `config.py` |
 
-* Example: `https://fantasy.espn.com/basketball/league?leagueId=267469544`
-* League ID = `267469544`
+To point the app at a different league, edit those constants. Get `espn_s2` / `SWID`
+from your browser cookies on `espn.com` while logged into ESPN Fantasy (F12 →
+Application → Cookies).
 
-1. **Team ID** : Your team's ID (1-12 typically)
+## How it works
 
-* Go to your team page and check the URL
+1. **Connect** to ESPN and pull rosters, the box score for the selected period, and
+   the league injury feed.
+2. **Count games left** per player from the NBA schedule - injury-aware, IR-aware,
+   and capped at 10 counted players per day (the league setting).
+3. **Blend stats** - season averages combined with last-30-day form.
+4. **Simulate** each remaining game with per-category variance to build thousands of
+   projected weekly totals.
+5. **Compare** across all 15 categories for win probability, category odds, and the
+   most likely score.
 
-1. **ESPN S2 & SWID Cookies** (for private leagues):
-   * Open ESPN Fantasy in Chrome
-   * Press F12 → Application → Cookies → espn.com
-   * Find `espn_s2` and `SWID` values
-   * Copy the full values including any special characters
+Completed weeks have no games left, so they display as **final results** rather than
+projections.
 
-## How It Works
+## The app
 
-1. **Data Collection** : Pulls player stats from ESPN API (season + last 30 days)
-2. **Games Remaining** : Fetches NBA schedule to count remaining games this week
-3. **Stat Blending** : Combines recent and season stats (configurable weight)
-4. **Monte Carlo** : Simulates each game with variance factors for realistic projections
-5. **Category Comparison** : Compares simulated totals across all categories
-6. **Streamer Analysis** : Tests adding free agents to find best pickups
+Sidebar picks the **team** and a **View** (Season Summary, any regular-season week, or
+a playoff round). Tabs:
 
-## Simulation Details
+- **Matchup Analysis** - scoreboard, win probability, category breakdown, score distribution
+- **Streamer Analysis** - best free-agent pickups to gain categories
+- **Bench Strategy** - start/sit and roster decisions
+- **My Season Stats** - season totals for your roster
+- **League Stats** - standings and league-wide numbers
+- **Playoff & Championship** - bracket seeding and title odds
 
-The simulation uses realistic variance factors for each stat category:
+When the season is over, the app opens on a **Season Summary** page (final standings
+and champion); use the View dropdown to revisit any week.
 
-| Category      | Variance | Notes                      |
-| ------------- | -------- | -------------------------- |
-| PTS, FGM, 3PM | 0.7      | High game-to-game variance |
-| STL, BLK      | 0.8      | Very high variance         |
-| REB, AST      | 0.4      | Moderate variance          |
-| FTM, FTA      | 0.2      | Low variance               |
-| TO            | 0.5      | Moderate variance          |
+## Category variance
 
-## Troubleshooting
+Per-category game-to-game variance used by the simulation (higher = noisier), from
+[config.py](config.py):
 
- **"Connection Error"** : Check your ESPN credentials, especially for private leagues
+| Category | Variance |
+|----------|----------|
+| PTS, FGM, FGA, 3PM, 3PA | 0.7 |
+| STL, BLK | 0.8 |
+| REB, AST | 0.4 |
+| TO | 0.5 |
+| FTM, FTA | 0.2 |
 
- **"No players found"** : Make sure you're using the correct team ID and season year
+## Design
 
- **Slow loading** : NBA schedule fetching can take 10-20 seconds. Results are cached.
+The UI follows a light, print-inspired "Analyst Sheet" theme (graphite ink on warm
+paper, a single cobalt accent, monospace figures). The palette is defined in
+[styles.py](styles.py), [.streamlit/config.toml](.streamlit/config.toml), and
+[visualizations.py](visualizations.py). See [AGENTS.md](AGENTS.md#design-system--analyst-sheet-do-not-drift-from-this)
+for the tokens.
+
+## Project layout
+
+```
+streamlit_app.py    UI, tabs, season summary, week viewer
+data.py             ESPN + NBA schedule + games-left counting
+simulation.py       simulation engine, streamers, bench, playoffs
+visualizations.py   Plotly charts + scoreboard HTML
+config.py           constants + ESPN credentials
+styles.py           Analyst Sheet CSS
+.streamlit/         theme (config.toml) + secrets template
+```
 
 ## License
 
-MIT License - feel free to modify and share!
+MIT - feel free to modify and share.

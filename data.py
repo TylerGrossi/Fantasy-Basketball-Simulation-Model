@@ -20,7 +20,7 @@ from config import (
     NBA_TEAM_MAP,
 )
 
-# DTD (day-to-day) players are expected to play — count them the same as active
+# DTD (day-to-day) players are expected to play - count them the same as active
 ACTIVE_STATUSES = {"ACTIVE", "", "DTD", "DAY_TO_DAY"}
 
 
@@ -440,6 +440,31 @@ def connect_to_espn(league_id, year, espn_s2, swid):
     return league
 
 
+def resolve_team_id(league, team_name, fallback_id=None):
+    """
+    Map a (possibly partial, case-insensitive) team name to its ESPN team_id.
+    Falls back to ``fallback_id`` when the name is blank or has no match.
+    Returns (team_id, matched_name).
+    """
+    name = (team_name or "").strip().lower()
+    if name:
+        for t in league.teams:
+            if t.team_name.strip().lower() == name:
+                return t.team_id, t.team_name
+        for t in league.teams:
+            if name in t.team_name.strip().lower():
+                return t.team_id, t.team_name
+    if fallback_id is not None:
+        match = next((t for t in league.teams if t.team_id == fallback_id), None)
+        if match is not None:
+            return match.team_id, match.team_name
+    raise ValueError(
+        "No team matched '{}'. Available teams: {}".format(
+            team_name, ", ".join(t.team_name for t in league.teams)
+        )
+    )
+
+
 def get_matchup_info(league, team_id, matchup_period=None):
     """
     Matchup and opponent for a fantasy scoring period.
@@ -850,9 +875,9 @@ def build_injury_table(roster_list, injury_data):
             if isinstance(inj_info, str):
                 inj_info = {"description": inj_info, "return_date": ""}
             expected = _parse_expected_return_date(p)
-            expected_str = expected.strftime("%m/%d/%Y") if expected else inj_info.get("return_date", "") or "—"
-            desc = inj_info.get("description", "") or "—"
-            status_display = STATUS_DISPLAY.get(status_upper, status) if status else "—"
+            expected_str = expected.strftime("%m/%d/%Y") if expected else inj_info.get("return_date", "") or "-"
+            desc = inj_info.get("description", "") or "-"
+            status_display = STATUS_DISPLAY.get(status_upper, status) if status else "-"
             rows.append({
                 "Player": p.name,
                 "Team": team_name,

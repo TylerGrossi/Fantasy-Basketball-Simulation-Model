@@ -1,0 +1,8 @@
+# Analyst Sheet theme — light, cobalt accent, graphite ink.
+[theme]
+base = "light"
+primaryColor = "#2F6FED"
+backgroundColor = "#F4F3EF"
+secondaryBackgroundColor = "#FCFBF8"
+textColor = "#1B1D22"
+font = "sans serif"

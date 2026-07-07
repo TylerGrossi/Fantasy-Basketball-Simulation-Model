@@ -337,6 +337,9 @@ def analyze_streamers(league, your_team_df, opp_team_df, current_totals_you, cur
             out[col] = r.get(col, 0)
         rows.append(out)
     waiver_df = pd.DataFrame(rows)
+    if waiver_df.empty:
+        # No available free agent has games left in this window (e.g. a completed week).
+        return []
     waiver_df["_watchlist_sort"] = waiver_df["On Watchlist"].map({True: 0, False: 1})
     waiver_df = waiver_df.sort_values(["_watchlist_sort", "Games Left", "PTS"], ascending=[True, False, False])
     waiver_df = waiver_df.drop(columns=["_watchlist_sort"])
@@ -927,10 +930,14 @@ def resolve_projected_finals_opponent_from_other_semi(
 
 
 def calculate_league_stats(league, year):
-    """Calculate league-wide statistics including all-play records."""
+    """Calculate league-wide statistics including all-play records and category totals."""
     teams = league.teams
     current_week = current_matchup_period_effective(league)
     all_play_records = {team.team_id: {"wins": 0, "losses": 0, "ties": 0} for team in teams}
+    # Season category totals per team (summed from the same box-score pass).
+    _TOTAL_KEYS = ["FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST",
+                   "STL", "BLK", "TO", "DD", "PTS", "TW"]
+    cat_accum = {team.team_id: {k: 0.0 for k in _TOTAL_KEYS} for team in teams}
 
     # Prefer ESPN's real matchup-period keys; avoids looping phantom periods when
     # currentMatchupPeriod/scoringPeriodId are out-of-band values.
@@ -965,6 +972,11 @@ def calculate_league_stats(league, year):
             ):
                 continue
             team_ids = list(weekly_stats.keys())
+            for tid in team_ids:
+                if tid in cat_accum:
+                    s = weekly_stats.get(tid, {})
+                    for k in _TOTAL_KEYS:
+                        cat_accum[tid][k] += float(s.get(k, 0) or 0)
             for team1_id in team_ids:
                 for team2_id in team_ids:
                     if team1_id == team2_id:
@@ -1016,6 +1028,11 @@ def calculate_league_stats(league, year):
         actual_total = team.wins + team.losses + getattr(team, 'ties', 0)
         actual_pct = (team.wins + 0.5 * getattr(team, 'ties', 0)) / actual_total if actual_total > 0 else 0
         luck = (actual_pct - ap_pct) * 100
+        totals = cat_accum[tid]
+        cat_totals = dict(totals)
+        cat_totals["FG%"] = totals["FGM"] / totals["FGA"] if totals["FGA"] > 0 else 0
+        cat_totals["FT%"] = totals["FTM"] / totals["FTA"] if totals["FTA"] > 0 else 0
+        cat_totals["3P%"] = totals["3PM"] / totals["3PA"] if totals["3PA"] > 0 else 0
         league_data.append({
             "team_id": tid,
             "team_name": team.team_name,
@@ -1030,12 +1047,13 @@ def calculate_league_stats(league, year):
             "all_play_pct": ap_pct,
             "luck": luck,
             "points_for": getattr(team, 'points_for', 0),
+            "cat_totals": cat_totals,
         })
     return sorted(league_data, key=lambda x: x["standing"])
 
 
 def _regular_season_matchup_periods_from_league(league, fallback=19):
-    """ESPN `reg_season_count` / matchupPeriodCount — last regular-season matchup period id."""
+    """ESPN `reg_season_count` / matchupPeriodCount - last regular-season matchup period id."""
     s = getattr(league, "settings", None)
     if s is not None:
         n = getattr(s, "reg_season_count", None)
@@ -1075,23 +1093,35 @@ def _projected_stats_for_matchup_window(projected, team_id, week_a, week_b):
     return _combine_projected_stats(pa, pb)
 
 
-def _raw_schedule_matchups_for_period(league, matchup_period):
-    """Unparsed schedule rows for one ESPN matchup period (includes playoffMatchupType)."""
+def _get_full_raw_schedule(league):
+    """
+    Full mSchedule rows, fetched once per League object and memoized on it.
+    The playoff resolver asks for many periods; without this it re-downloaded the
+    entire schedule on every call (the dominant cost of the playoff page).
+    """
+    cached = getattr(league, "_cached_mschedule", None)
+    if cached is not None:
+        return cached
+    sched = []
     try:
         req = getattr(league, "espn_request", None)
-        if req is None:
-            return []
-        resp = req.league_get(params={"view": "mSchedule"})
-        if isinstance(resp, list) and resp:
-            data = resp[0]
-        else:
-            data = resp
-        if not isinstance(data, dict):
-            return []
-        sched = data.get("schedule") or []
+        if req is not None:
+            resp = req.league_get(params={"view": "mSchedule"})
+            data = resp[0] if isinstance(resp, list) and resp else resp
+            if isinstance(data, dict):
+                sched = data.get("schedule") or []
     except Exception:
-        return []
-    return [m for m in sched if m.get("matchupPeriodId") == matchup_period]
+        sched = []
+    try:
+        league._cached_mschedule = sched
+    except Exception:
+        pass
+    return sched
+
+
+def _raw_schedule_matchups_for_period(league, matchup_period):
+    """Unparsed schedule rows for one ESPN matchup period (includes playoffMatchupType)."""
+    return [m for m in _get_full_raw_schedule(league) if m.get("matchupPeriodId") == matchup_period]
 
 
 def _team_ids_from_raw_schedule_matchup(m):
@@ -1583,7 +1613,7 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
     championship_count = {tid: 0.0 for tid in team_ids}
     advance_count = {tid: 0 for tid in team_ids}
 
-    # Finals: winning this matchup is winning the title — use weekly win % (same as matchup tab), no bracket MC.
+    # Finals: winning this matchup is winning the title - use weekly win % (same as matchup tab), no bracket MC.
     finals_skip_bracket_championship = False
     p_user_championship = None
     user_champ_tid = opp_champ_tid = None
@@ -1788,7 +1818,7 @@ def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
                 continue
             a, b = current[i], current[i + 1]
             # For the live matchup in the current round, use the provided win probability
-            # instead of projecting from stats — this feeds the current week sim into bracket odds.
+            # instead of projecting from stats - this feeds the current week sim into bracket odds.
             if (current_round_idx is not None and round_idx == current_round_idx
                     and current_pair_probs is not None
                     and a in current_pair_probs and b in current_pair_probs):
@@ -1866,7 +1896,7 @@ def optimize_waiver_adds(
     Greedy step-by-step waiver optimization to maximize win percentage.
 
     At each step the single best add/drop combo is found and applied.
-    Returns a list of step dicts — one per add used — with win% at each stage.
+    Returns a list of step dicts - one per add used - with win% at each stage.
     The team simulation is pre-decomposed into per-player contribution arrays so
     each (waiver, drop) evaluation is just vector addition/subtraction: O(sims×stats).
     """
@@ -1975,7 +2005,7 @@ def optimize_waiver_adds(
     has_open = has_open_roster_spot
     added_players: set = set()
 
-    # Current-week accumulated stats offset (shape: (stats,) — broadcasts over sims axis)
+    # Current-week accumulated stats offset (shape: (stats,) - broadcasts over sims axis)
     cur_you_offsets = np.array([current_you.get(s, 0) for s in stats_to_sim])
 
     steps = []

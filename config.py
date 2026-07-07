@@ -2,6 +2,23 @@
 Fantasy Basketball Simulator - Configuration and constants.
 """
 
+# =============================================================================
+# ESPN connection - kept in code, not exposed in the app UI.
+# Edit these once here; the sidebar only asks which team to analyze.
+# =============================================================================
+ESPN_LEAGUE_ID = 267469544
+ESPN_SEASON_YEAR = 2026
+ESPN_S2 = ("***REMOVED***"
+           "***REMOVED***"
+           "***REMOVED***"
+           "***REMOVED***"
+           "***REMOVED***")
+ESPN_SWID = "***REMOVED***"
+
+# Team analyzed by default (pre-selected in the sidebar dropdown).
+DEFAULT_TEAM_NAME = "VJ Maxx"
+DEFAULT_TEAM_ID = 6
+
 # Maximum players whose stats can count on any single day (league setting)
 MAX_PLAYERS_PER_DAY = 10
 

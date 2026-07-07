@@ -1,14 +1,53 @@
 """
 Fantasy Basketball Simulator - Charts and scoreboard HTML.
+
+Palette ("Analyst Sheet"): cobalt = your team, clay = opponent (identity);
+green / red = good / bad (won / lost a category); graphite ink on warm paper.
 """
 
 import plotly.graph_objects as go
+import streamlit as st
 
 from config import CATEGORIES
 
+# --- palette (light defaults; Plotly can't read CSS vars, so charts pick a set) --
+INK      = "#1B1D22"
+INK_2    = "#6A6E79"
+INK_3    = "#9A9DA6"
+LINE     = "rgba(27,29,34,0.12)"
+COBALT   = "#2F6FED"   # your team
+CLAY     = "#E06A3B"   # opponent
+GOOD     = "#2E7D46"   # won a category
+BAD      = "#C0392B"   # lost a category
+NEUTRAL  = "#9A9DA6"   # tie
+MONO     = "ui-monospace, 'SF Mono', Consolas, monospace"
+
+_DARK = {
+    "ink": "#EAECEF", "ink2": "#A0A6B0", "ink3": "#757C88",
+    "line": "rgba(234,236,239,0.14)", "cobalt": "#5C93FF", "clay": "#F0955E",
+    "good": "#46C56E", "bad": "#F0616E", "neutral": "#8891A0",
+}
+_LIGHT = {
+    "ink": INK, "ink2": INK_2, "ink3": INK_3, "line": LINE, "cobalt": COBALT,
+    "clay": CLAY, "good": GOOD, "bad": BAD, "neutral": NEUTRAL,
+}
+
+
+def _pal():
+    """Chart palette for the active theme (Plotly needs literal colors)."""
+    try:
+        return _DARK if st.session_state.get("theme") == "Dark" else _LIGHT
+    except Exception:
+        return _LIGHT
+SANS     = "system-ui, 'Segoe UI', Helvetica, Arial, sans-serif"
+
 
 def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
-    """Create a scoreboard showing current week stats."""
+    """Create a scoreboard showing current week stats (HTML, so it uses CSS vars)."""
+    # Theme-aware via CSS custom properties (shadow the module color constants).
+    INK, INK_2, INK_3 = "var(--ink)", "var(--ink-2)", "var(--ink-3)"
+    COBALT, CLAY, GOOD, BAD = "var(--cobalt)", "var(--clay)", "var(--good)", "var(--bad)"
+    LINE = "var(--line)"
     categories_order = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%", "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"]
     your_fgp = current_you["FGM"] / current_you["FGA"] if current_you["FGA"] > 0 else 0
     opp_fgp = current_opp["FGM"] / current_opp["FGA"] if current_opp["FGA"] > 0 else 0
@@ -50,55 +89,56 @@ def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
                 opp_wins += 1
             else:
                 ties += 1
-    header_cells = '<th style="padding: 8px 4px; text-align: left; color: #888; font-size: 0.75rem;">TEAM</th>'
+    th = f'padding: 8px 4px; text-align: center; color: {INK_2}; font-size: 0.7rem; letter-spacing: 0.04em; text-transform: uppercase;'
+    header_cells = f'<th style="{th} text-align: left;">TEAM</th>'
     for cat in categories_order:
-        header_cells += f'<th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">{cat}</th>'
-    header_cells += '<th style="padding: 8px 4px; text-align: center; color: #888; font-size: 0.75rem;">SCORE</th>'
-    your_cells = f'<td style="padding: 10px 4px; color: white; font-weight: 600;">{your_team_name[:15]}</td>'
+        header_cells += f'<th style="{th}">{cat}</th>'
+    header_cells += f'<th style="{th}">SCORE</th>'
+    your_cells = f'<td style="padding: 10px 4px; color: {INK}; font-weight: 600; font-family: {SANS};">{your_team_name[:15]}</td>'
     for cat in categories_order:
         y_val = your_stats[cat]
         o_val = opp_stats[cat]
         if cat == "TO":
-            color = "#00FF88" if y_val < o_val else "#FF4757" if y_val > o_val else "white"
+            color = GOOD if y_val < o_val else BAD if y_val > o_val else INK_3
         else:
-            color = "#00FF88" if y_val > o_val else "#FF4757" if y_val < o_val else "white"
+            color = GOOD if y_val > o_val else BAD if y_val < o_val else INK_3
         val_str = f"{y_val:.4f}" if "%" in cat else str(int(y_val))
-        your_cells += f'<td style="padding: 10px 4px; text-align: center; color: {color}; font-weight: 600;">{val_str}</td>'
-    your_cells += f'<td style="padding: 10px 4px; text-align: center; color: #00FF88; font-weight: 700; font-family: Oswald;">{your_wins}-{opp_wins}-{ties}</td>'
-    opp_cells = f'<td style="padding: 10px 4px; color: white; font-weight: 600;">{opp_team_name[:15]}</td>'
+        your_cells += f'<td style="padding: 10px 4px; text-align: center; color: {color}; font-weight: 600; font-family: {MONO};">{val_str}</td>'
+    your_cells += f'<td style="padding: 10px 4px; text-align: center; color: {COBALT}; font-weight: 700; font-family: {MONO};">{your_wins}-{opp_wins}-{ties}</td>'
+    opp_cells = f'<td style="padding: 10px 4px; color: {INK}; font-weight: 600; font-family: {SANS};">{opp_team_name[:15]}</td>'
     for cat in categories_order:
         y_val = your_stats[cat]
         o_val = opp_stats[cat]
         if cat == "TO":
-            color = "#00FF88" if o_val < y_val else "#FF4757" if o_val > y_val else "white"
+            color = GOOD if o_val < y_val else BAD if o_val > y_val else INK_3
         else:
-            color = "#00FF88" if o_val > y_val else "#FF4757" if o_val < y_val else "white"
+            color = GOOD if o_val > y_val else BAD if o_val < y_val else INK_3
         val_str = f"{o_val:.4f}" if "%" in cat else str(int(o_val))
-        opp_cells += f'<td style="padding: 10px 4px; text-align: center; color: {color}; font-weight: 600;">{val_str}</td>'
-    opp_cells += f'<td style="padding: 10px 4px; text-align: center; color: #FF4757; font-weight: 700; font-family: Oswald;">{opp_wins}-{your_wins}-{ties}</td>'
+        opp_cells += f'<td style="padding: 10px 4px; text-align: center; color: {color}; font-weight: 600; font-family: {MONO};">{val_str}</td>'
+    opp_cells += f'<td style="padding: 10px 4px; text-align: center; color: {CLAY}; font-weight: 700; font-family: {MONO};">{opp_wins}-{your_wins}-{ties}</td>'
     html = f"""
     <div style="margin-bottom: 1.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
             <div style="text-align: left; flex: 1;">
-                <span style="font-family: Oswald; font-size: 1.5rem; color: white;">{your_team_name}</span>
+                <span style="font-family: {SANS}; font-weight: 700; font-size: 1.4rem; color: {INK};">{your_team_name}</span>
             </div>
             <div style="text-align: center; flex: 1;">
-                <span style="font-family: Oswald; font-size: 2.5rem; color: #00FF88;">{your_wins}-{opp_wins}-{ties}</span>
-                <span style="font-family: Oswald; font-size: 1.2rem; color: #666; margin-left: 2rem;">{opp_wins}-{your_wins}-{ties}</span>
+                <span style="font-family: {MONO}; font-size: 2.3rem; font-weight: 700; color: {COBALT};">{your_wins}-{opp_wins}-{ties}</span>
+                <span style="font-family: {MONO}; font-size: 1.1rem; color: {INK_3}; margin-left: 1.6rem;">{opp_wins}-{your_wins}-{ties}</span>
             </div>
             <div style="text-align: right; flex: 1;">
-                <span style="font-family: Oswald; font-size: 1.5rem; color: white;">{opp_team_name}</span>
+                <span style="font-family: {SANS}; font-weight: 700; font-size: 1.4rem; color: {INK};">{opp_team_name}</span>
             </div>
         </div>
         <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; font-family: Roboto Condensed;">
+            <table style="width: 100%; border-collapse: collapse; font-family: {MONO};">
                 <thead>
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                    <tr style="border-bottom: 1px solid {LINE};">
                         {header_cells}
                     </tr>
                 </thead>
                 <tbody>
-                    <tr>
+                    <tr style="border-bottom: 1px solid {LINE};">
                         {your_cells}
                     </tr>
                     <tr>
@@ -114,24 +154,27 @@ def create_scoreboard(current_you, current_opp, your_team_name, opp_team_name):
 
 def create_win_probability_gauge(win_pct):
     """Create a gauge chart for win probability."""
+    c = _pal()
+    INK, INK_2, INK_3, LINE = c["ink"], c["ink2"], c["ink3"], c["line"]
+    COBALT, CLAY, GOOD, BAD, NEUTRAL = c["cobalt"], c["clay"], c["good"], c["bad"], c["neutral"]
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=win_pct,
         domain={'x': [0, 1], 'y': [0, 1]},
-        number={'suffix': '%', 'font': {'size': 60, 'family': 'Oswald', 'color': 'white'}},
+        number={'suffix': '%', 'font': {'size': 58, 'family': MONO, 'color': INK}},
         gauge={
-            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "white"},
-            'bar': {'color': "#00FF88" if win_pct >= 50 else "#FF4757"},
+            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': INK_3},
+            'bar': {'color': GOOD if win_pct >= 50 else BAD},
             'bgcolor': "rgba(0,0,0,0)",
-            'borderwidth': 2,
-            'bordercolor': "rgba(255,255,255,0.3)",
+            'borderwidth': 1,
+            'bordercolor': LINE,
             'steps': [
-                {'range': [0, 40], 'color': 'rgba(255, 71, 87, 0.3)'},
-                {'range': [40, 60], 'color': 'rgba(255, 217, 61, 0.3)'},
-                {'range': [60, 100], 'color': 'rgba(0, 255, 136, 0.3)'}
+                {'range': [0, 40], 'color': 'rgba(192, 57, 43, 0.12)'},
+                {'range': [40, 60], 'color': 'rgba(224, 106, 59, 0.12)'},
+                {'range': [60, 100], 'color': 'rgba(46, 125, 70, 0.12)'}
             ],
             'threshold': {
-                'line': {'color': "white", 'width': 4},
+                'line': {'color': INK, 'width': 3},
                 'thickness': 0.75,
                 'value': win_pct
             }
@@ -140,7 +183,7 @@ def create_win_probability_gauge(win_pct):
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font={'color': 'white', 'family': 'Oswald'},
+        font={'color': INK, 'family': SANS},
         height=300,
         margin=dict(l=30, r=30, t=30, b=30)
     )
@@ -149,6 +192,9 @@ def create_win_probability_gauge(win_pct):
 
 def create_category_chart(category_results, your_sim, opp_sim):
     """Create horizontal bar chart for category win rates."""
+    c = _pal()
+    INK, INK_2, INK_3, LINE = c["ink"], c["ink2"], c["ink3"], c["line"]
+    COBALT, CLAY, GOOD, BAD, NEUTRAL = c["cobalt"], c["clay"], c["good"], c["bad"], c["neutral"]
     cats = []
     you_pcts = []
     opp_pcts = []
@@ -164,35 +210,35 @@ def create_category_chart(category_results, your_sim, opp_sim):
         y=cats,
         x=you_pcts,
         orientation='h',
-        marker_color='#00FF88',
+        marker_color=COBALT,
         text=[f'{p:.0f}%' for p in you_pcts],
         textposition='inside',
-        textfont=dict(family='Oswald', size=12, color='black')
+        textfont=dict(family=MONO, size=12, color='white')
     ))
     fig.add_trace(go.Bar(
         name='Opponent',
         y=cats,
         x=[-p for p in opp_pcts],
         orientation='h',
-        marker_color='#FF4757',
+        marker_color=CLAY,
         text=[f'{p:.0f}%' for p in opp_pcts],
         textposition='inside',
-        textfont=dict(family='Oswald', size=12, color='white')
+        textfont=dict(family=MONO, size=12, color='white')
     ))
     fig.update_layout(
         barmode='overlay',
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font={'color': 'white', 'family': 'Roboto Condensed'},
+        font={'color': INK, 'family': SANS},
         height=500,
         margin=dict(l=60, r=60, t=20, b=20),
         xaxis=dict(
             range=[-100, 100],
             showgrid=True,
-            gridcolor='rgba(255,255,255,0.1)',
+            gridcolor=LINE,
             zeroline=True,
-            zerolinecolor='white',
-            zerolinewidth=2,
+            zerolinecolor=INK_3,
+            zerolinewidth=1,
             tickvals=[-100, -75, -50, -25, 0, 25, 50, 75, 100],
             ticktext=['100%', '75%', '50%', '25%', '0', '25%', '50%', '75%', '100%']
         ),
@@ -205,10 +251,13 @@ def create_category_chart(category_results, your_sim, opp_sim):
 
 def create_outcome_distribution(outcome_counts, total_sims):
     """Create chart showing distribution of score outcomes."""
+    c = _pal()
+    INK, INK_2, INK_3, LINE = c["ink"], c["ink2"], c["ink3"], c["line"]
+    COBALT, CLAY, GOOD, BAD, NEUTRAL = c["cobalt"], c["clay"], c["good"], c["bad"], c["neutral"]
     sorted_outcomes = sorted(outcome_counts.items(), key=lambda x: x[1], reverse=True)[:10]
     labels = [f"{your_w}-{opp_w}" for (your_w, opp_w), _ in sorted_outcomes]
     values = [count / total_sims * 100 for _, count in sorted_outcomes]
-    colors = ['#00FF88' if your_w > opp_w else '#FF4757' if opp_w > your_w else '#FFD93D'
+    colors = [GOOD if your_w > opp_w else BAD if opp_w > your_w else NEUTRAL
               for (your_w, opp_w), _ in sorted_outcomes]
     fig = go.Figure(data=[
         go.Bar(
@@ -217,7 +266,7 @@ def create_outcome_distribution(outcome_counts, total_sims):
             marker_color=colors,
             text=[f'{v:.1f}%' for v in values],
             textposition='outside',
-            textfont=dict(family='Oswald', size=12, color='white'),
+            textfont=dict(family=MONO, size=12, color=INK),
             cliponaxis=False
         )
     ])
@@ -226,19 +275,19 @@ def create_outcome_distribution(outcome_counts, total_sims):
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font={'color': 'white', 'family': 'Roboto Condensed'},
+        font={'color': INK, 'family': SANS},
         height=300,
         margin=dict(l=40, r=40, t=50, b=60),
         xaxis=dict(
             title='Score Outcome (You - Opponent)',
             showgrid=False,
-            tickfont=dict(family='Oswald', size=12),
+            tickfont=dict(family=MONO, size=12),
             type='category'
         ),
         yaxis=dict(
             title='Probability',
             showgrid=True,
-            gridcolor='rgba(255,255,255,0.1)',
+            gridcolor=LINE,
             ticksuffix='%',
             range=[0, y_max]
         )
@@ -248,6 +297,9 @@ def create_outcome_distribution(outcome_counts, total_sims):
 
 def create_championship_chart(playoff_results, your_team_name, finalist_team_ids=None):
     """Create bar chart of championship probabilities. Excludes teams with 0%."""
+    c = _pal()
+    INK, INK_2, INK_3, LINE = c["ink"], c["ink2"], c["ink3"], c["line"]
+    COBALT, CLAY, GOOD, BAD, NEUTRAL = c["cobalt"], c["clay"], c["good"], c["bad"], c["neutral"]
     rows = playoff_results
     if finalist_team_ids is not None:
         fid = {int(x) for x in finalist_team_ids}
@@ -256,7 +308,7 @@ def create_championship_chart(playoff_results, your_team_name, finalist_team_ids
     champ_data.sort(key=lambda x: x[1], reverse=True)
     labels = [x[0] for x in champ_data]
     values = [x[1] for x in champ_data]
-    colors = ["#FF6B35" if t == your_team_name else "#00D4FF" for t in labels]
+    colors = [COBALT if t == your_team_name else CLAY for t in labels]
     y_max = max(values) * 1.2 + 5 if values else 30  # Headroom so bars and labels don't get cut off
     fig = go.Figure(data=[
         go.Bar(
@@ -265,17 +317,65 @@ def create_championship_chart(playoff_results, your_team_name, finalist_team_ids
             marker_color=colors,
             text=[f"{v:.1f}%" for v in values],
             textposition="outside",
-            textfont=dict(family="Oswald", size=12, color="white"),
+            textfont=dict(family=MONO, size=12, color=INK),
         )
     ])
     fig.update_layout(
         xaxis_tickangle=-45,
         yaxis_title="Championship %",
-        yaxis=dict(range=[0, y_max], gridcolor="rgba(255,255,255,0.1)"),
+        yaxis=dict(range=[0, y_max], gridcolor=LINE),
         margin=dict(b=120, t=60),
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(26,26,46,0.5)",
-        font=dict(color="#ccc", family="Roboto Condensed"),
-        xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color=INK_2, family=SANS),
+        xaxis=dict(gridcolor=LINE),
+    )
+    return fig
+
+
+def create_rank_trend_chart(teams, weeks, your_team_name):
+    """
+    Weekly power-ranking movement: one line per team, rank on the y-axis (1 at the
+    top). Your team is drawn in cobalt and thick; the rest are muted so the shape of
+    your season stands out. ``teams`` is the list from get_power_rankings; each has a
+    ``rank_history`` aligned to ``weeks``.
+    """
+    c = _pal()
+    INK, INK_2, LINE = c["ink"], c["ink2"], c["line"]
+    COBALT, NEUTRAL = c["cobalt"], c["neutral"]
+    x = [f"Wk {w}" for w in (weeks or [])]
+    n_teams = max((len([t for t in teams])), 1)
+    fig = go.Figure()
+    # Muted lines first, your team last so it sits on top.
+    for t in teams:
+        if t["team_name"] == your_team_name:
+            continue
+        hist = t.get("rank_history", [])
+        fig.add_trace(go.Scatter(
+            x=x, y=hist, mode="lines", name=t["team_name"],
+            line=dict(color=NEUTRAL, width=1.2), opacity=0.45,
+            hovertemplate="%{fullData.name}: #%{y}<extra></extra>",
+        ))
+    you = next((t for t in teams if t["team_name"] == your_team_name), None)
+    if you is not None:
+        fig.add_trace(go.Scatter(
+            x=x, y=you.get("rank_history", []), mode="lines+markers",
+            name=you["team_name"],
+            line=dict(color=COBALT, width=3.2),
+            marker=dict(color=COBALT, size=6),
+            hovertemplate="%{fullData.name}: #%{y}<extra></extra>",
+        ))
+    fig.update_layout(
+        yaxis=dict(
+            title="Power Rank", autorange="reversed", gridcolor=LINE,
+            dtick=1, range=[n_teams + 0.5, 0.5],
+        ),
+        xaxis=dict(gridcolor=LINE),
+        margin=dict(t=30, b=40, l=10, r=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color=INK_2, family=SANS),
+        showlegend=False,
+        height=420,
     )
     return fig
