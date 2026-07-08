@@ -29,6 +29,8 @@ CUSTOM_CSS = """
         --header-bg:    #FFFFFF;
         --sans: system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
         --mono: ui-monospace, 'SF Mono', 'Consolas', 'Liberation Mono', monospace;
+        --nav-h: 3.9rem;           /* height of the fixed top bar */
+        --content-max: 1180px;     /* centered content column width */
     }
 
     /* Hide anchor link icons and Streamlit header chrome */
@@ -38,22 +40,34 @@ CUSTOM_CSS = """
     .stMarkdown h1 a, .stMarkdown h2 a, .stMarkdown h3 a { display: none !important; }
     a.anchor-link { display: none !important; }
 
+    /* Never let anything push a page-level horizontal scrollbar (e.g. when the
+       window is resized narrow). Wide content scrolls inside its own container. */
+    html, body { overflow-x: hidden; max-width: 100%; }
     .stApp { background: var(--paper); color: var(--ink); overflow-x: clip; }
-    /* Full-width content column; --page-pad is the shared side gutter the nav
-       bleeds past. Children inherit --page-pad for the full-bleed math. */
+    [data-testid="stAppViewContainer"], [data-testid="stMain"], section.main {
+        overflow-x: clip;
+    }
+    /* Push the whole app (main + sidebar) below the fixed top bar. The bar itself
+       is position:fixed, so it overlays this reserved band at the top. */
+    [data-testid="stAppViewContainer"] { padding-top: var(--nav-h) !important; }
+    /* Centered content column with a comfortable max width, so every page's
+       content sits in the same centered lane. --page-pad is the side gutter. */
     .block-container {
         --page-pad: clamp(1rem, 4vw, 2.5rem);
-        max-width: 100% !important;
-        padding-top: 0 !important;
+        max-width: var(--content-max) !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        padding-top: 0.35rem !important;
         padding-bottom: 3rem !important;
         padding-left: var(--page-pad) !important;
         padding-right: var(--page-pad) !important;
     }
 
-    /* Hide Streamlit's own chrome so the nav bar is the site header */
+    /* Hide Streamlit's own chrome so the nav bar is the site header. The sidebar
+       collapse control stays visible — it toggles the "This Week" left nav (the
+       only way to reopen it once collapsed, e.g. on mobile). */
     [data-testid="stHeader"] { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
-    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
 
     html, body, [class*="css"], .stMarkdown, p, span, label, div {
         font-family: var(--sans);
@@ -195,7 +209,7 @@ CUSTOM_CSS = """
     }
     .stButton > button:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
 
-    /* Season Summary metric row: match the champion card / standings width */
+    /* Season Summary metric row: match the champion card / standings width. */
     .st-key-ss_metrics { max-width: 960px; margin-left: auto; margin-right: auto; }
 
     /* Home landing: quick-link cards */
@@ -209,61 +223,46 @@ CUSTOM_CSS = """
     .home-card-title { font-weight: 700; color: var(--ink); margin-top: 0.45rem; }
     .home-card-desc { color: var(--ink-2); font-size: 0.84rem; margin-top: 0.3rem; }
 
-    /* ================= Top navigation: light two-tier site header ================= */
-    /* Full-bleed: span the entire viewport width symmetrically, regardless of the
-       centered content container or scrollbar (stApp clips the x-overflow). Width is
-       forced with !important because Streamlit otherwise pins these blocks to the
-       content-box width, which leaves the header short of the right viewport edge. */
-    .st-key-nav_top, .st-key-nav_sub {
-        width: 100vw !important;
-        max-width: 100vw !important;
-        margin-left: calc(50% - 50vw) !important;
-        margin-right: calc(50% - 50vw) !important;
-        padding-left: var(--page-pad);
-        padding-right: var(--page-pad);
-        border-radius: 0;
-        box-sizing: border-box;
-    }
-    .st-key-nav_top [data-testid="stMarkdownContainer"] p,
-    .st-key-nav_sub [data-testid="stMarkdownContainer"] p { margin: 0; }
+    /* ================= Top navigation: sticky light site header ================= */
+    /* Primary bar sticks to the very top of the viewport and spans the content
+       column. It breaks out of the block-container's side gutter with matched
+       negative margins + padding (NOT 100vw, which overflows past the scrollbar
+       and causes a horizontal scrollbar when the page is windowed). */
+    /* Fixed full-screen-width top bar. Because it's position:fixed it always spans
+       the whole viewport (independent of the centered content column below) and
+       stays pinned while scrolling. The app is padded down by --nav-h to clear it. */
     .st-key-nav_top {
-        background: var(--header-bg);     /* reads clearly on the page ground */
-        padding-top: 0.6rem;
-        padding-bottom: 0.4rem;
-        margin-bottom: 1.5rem;
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 1000;
+        height: var(--nav-h);
+        background: var(--header-bg);
+        padding: 0 var(--page-pad);
         border-bottom: 1px solid var(--line);
         box-shadow: 0 8px 20px rgba(20,16,10,0.05);   /* soft lift off content */
+        box-sizing: border-box;
+        /* Streamlit makes this a column flex; justify-content (main axis = vertical)
+           is what vertically centers the nav row within the fixed-height bar. */
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
-    .st-key-nav_sub {
-        background: var(--surface-2);
-        border-bottom: 1px solid var(--line);
-        padding-top: 0.3rem;
-        padding-bottom: 0.45rem;
-        margin-top: -1.5rem;               /* pull flush against the primary bar */
-        margin-bottom: 1.5rem;
-        box-shadow: 0 8px 20px rgba(20,16,10,0.05);
-    }
+    /* The nav row spans the full bar width (10 links + brand need the room; capping
+       it at the narrow content column squishes the links together). */
+    .st-key-nav_top [data-testid="stLayoutWrapper"],
+    .st-key-nav_top > div:first-child { width: 100%; }
+    .st-key-nav_top [data-testid="stHorizontalBlock"] { width: 100%; }
+    .st-key-nav_top [data-testid="stMarkdownContainer"] p { margin: 0; }
+    /* The brand's column shrinks to the text line, so the taller logo+wordmark
+       overflows downward and its optical centre lands ~8px below the nav links.
+       Nudge it up so the wordmark lines up with the links. */
+    .nav-brand { transform: translateY(-8px); }
 
     /* Brand lockup: basketball mark + wordmark */
-    /* Streamlit bottom-anchors markdown columns; lift brand + pill to the link center */
-    .nav-brand, .nav-team-wrap { transform: translateY(-8px); }
     .nav-brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
-    .nav-brand svg { flex: none; display: block; }
+    .nav-brand svg { flex: none; display: block; width: 27px; height: 27px; }
     .nav-brand span {
-        font-weight: 800; font-size: 1rem; letter-spacing: -0.01em; color: var(--ink);
-    }
-
-    /* Team chip on the right */
-    .nav-team-wrap { text-align: right; }
-    .nav-team-pill {
-        display: inline-flex; align-items: center; gap: 6px;
-        font-family: var(--mono); font-size: 0.78rem; font-weight: 600; color: var(--ink);
-        background: var(--card); border: 1px solid var(--line-strong);
-        border-radius: 999px; padding: 0.28rem 0.85rem; white-space: nowrap;
-    }
-    .nav-team-pill::before {
-        content: ""; width: 7px; height: 7px; border-radius: 50%;
-        background: var(--cobalt); flex: none;
+        font-weight: 800; font-size: 1.18rem; letter-spacing: -0.01em; color: var(--ink);
     }
 
     .nav-scope-label {
@@ -271,9 +270,8 @@ CUSTOM_CSS = """
         color: var(--ink-3); font-weight: 700; white-space: nowrap;
     }
 
-    /* Nav links: muted text that darkens on hover; active = ink + cobalt underline */
-    .st-key-nav_top .stButton > button,
-    .st-key-nav_sub .stButton > button {
+    /* Primary nav links: muted text that darkens on hover; active = ink + cobalt underline */
+    .st-key-nav_top .stButton > button {
         background: transparent !important;
         color: var(--ink-2) !important;
         border: none !important;
@@ -282,68 +280,166 @@ CUSTOM_CSS = """
         padding: 0.45rem 0.1rem 0.5rem !important;
         font-weight: 600 !important;
     }
-    .st-key-nav_top .stButton > button:hover,
-    .st-key-nav_sub .stButton > button:hover {
+    .st-key-nav_top .stButton > button:hover {
         color: var(--ink) !important;
         background: transparent !important;
         transform: none !important;
         box-shadow: none !important;
     }
     .st-key-nav_top .stButton > button[kind="primary"],
-    .st-key-nav_sub .stButton > button[kind="primary"],
-    .st-key-nav_top .stButton [data-testid="stBaseButton-primary"],
-    .st-key-nav_sub .stButton [data-testid="stBaseButton-primary"] {
+    .st-key-nav_top .stButton [data-testid="stBaseButton-primary"] {
         color: var(--ink) !important;
         box-shadow: inset 0 -2px 0 var(--cobalt) !important;
     }
-    .st-key-nav_top .stButton > button:focus-visible,
-    .st-key-nav_sub .stButton > button:focus-visible {
+    .st-key-nav_top .stButton > button:focus-visible {
         outline: 2px solid var(--cobalt) !important; outline-offset: 2px;
     }
-    .st-key-nav_top .stButton > button p,
-    .st-key-nav_sub .stButton > button p {
-        white-space: nowrap; font-size: 0.9rem;
+    .st-key-nav_top .stButton > button p {
+        white-space: nowrap; font-size: 1.02rem;
     }
 
-    /* Compact mono week picker in the sub-bar */
-    .st-key-nav_sub [data-baseweb="select"] > div {
+    /* -------- Responsive nav: one row that scrolls sideways, never wraps ------- */
+    /* The nav must stay horizontal at every width (Streamlit otherwise stacks the
+       columns on phones and squishes/overlaps them on tablets). */
+    .st-key-nav_top [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+
+    /* Below the desktop width, pack items to their natural size and let the row
+       scroll horizontally (a swipeable tab bar on mobile). The scroll is contained
+       inside the bar, so it never spills into a page-level horizontal scrollbar. */
+    @media (max-width: 1180px) {
+        .st-key-nav_top [data-testid="stHorizontalBlock"] {
+            overflow-x: auto;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+        .st-key-nav_top [data-testid="stHorizontalBlock"]::-webkit-scrollbar { display: none; }
+        .st-key-nav_top [data-testid="stColumn"] {
+            flex: 0 0 auto !important;
+            width: auto !important;
+            min-width: max-content !important;
+        }
+        .st-key-nav_top .stButton > button {
+            padding-left: 0.55rem !important;
+            padding-right: 0.55rem !important;
+        }
+    }
+
+    /* ============ Secondary "This Week" nav: vertical bar on the left ============ */
+    /* Rendered into Streamlit's native sidebar (a sticky, full-height left rail)
+       only while a week page is active. */
+    [data-testid="stSidebar"] {
+        background: var(--surface-2);
+        border-right: 1px solid var(--line);
+    }
+    /* The collapse/close arrow is never useful here — the desktop rail is permanent
+       and the mobile rail is inline — so hide it at all widths. */
+    [data-testid="stSidebarCollapseButton"] { display: none !important; }
+    /* Tablet/desktop: permanent left bar. Force it visible whenever it holds nav
+       buttons (Streamlit can fail to create a reopen control after a collapse). */
+    @media (min-width: 768px) {
+        [data-testid="stSidebar"]:has(.stButton) {
+            transform: none !important;
+            visibility: visible !important;
+            min-width: 240px !important;
+            width: 240px !important;
+        }
+    }
+    /* Phones: the rail becomes a compact horizontal sub-nav (Streamlit's mobile
+       drawer toggle is unreliable, so a real drawer would trap the user). Because
+       Streamlit makes the main section `position:absolute; inset:0` on mobile (it's
+       the scroller), we can't stack in flow — so pin the rail as a FIXED sub-bar
+       just under the header and reserve room for it in the content. */
+    @media (max-width: 767px) {
+        /* On mobile Streamlit makes stMain position:absolute, so the app container's
+           --nav-h offset is ignored. Clear the fixed header via the block-container
+           instead (week pages override this with extra room for the sub-bar below). */
+        [data-testid="stMainBlockContainer"] { padding-top: calc(var(--nav-h) + 0.6rem) !important; }
+        [data-testid="stSidebar"]:has(.stButton) {
+            position: fixed !important;
+            top: var(--nav-h) !important; left: 0 !important; right: 0 !important;
+            width: 100% !important; min-width: 0 !important; max-width: none !important;
+            height: auto !important;
+            transform: none !important; visibility: visible !important;
+            z-index: 900 !important;
+            background: var(--surface-2) !important;
+            border-right: none !important; border-bottom: 1px solid var(--line) !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stSidebarContent"] { width: 100% !important; height: auto !important; }
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+            padding: 0.4rem var(--page-pad) !important;
+        }
+        /* lay the week picker + page buttons in one horizontal, swipeable row */
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"] {
+            flex-direction: row !important;
+            align-items: center !important;
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            gap: 0.4rem !important;
+            scrollbar-width: none;
+        }
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"]::-webkit-scrollbar { display: none; }
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"],
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"] { flex: 0 0 auto !important; width: auto !important; }
+        [data-testid="stSidebar"] .nav-scope-label { display: none !important; }
+        [data-testid="stSidebar"] [data-baseweb="select"] { min-width: 160px; }
+        [data-testid="stSidebar"] .stButton > button { white-space: nowrap; min-height: 44px; }
+        /* drop the empty sidebar header row so the sub-bar hugs the top */
+        [data-testid="stSidebar"] [data-testid="stSidebarHeader"] { display: none !important; padding: 0 !important; height: 0 !important; }
+        /* reserve room for the fixed sub-bar (week pages only, via :has) */
+        [data-testid="stAppViewContainer"]:has([data-testid="stSidebar"] .stButton) [data-testid="stMainBlockContainer"] {
+            padding-top: calc(var(--nav-h) + 3.1rem) !important;
+        }
+
+        /* Compact the brand on small phones: icon only, so the nav links get room. */
+        .nav-brand span { display: none; }
+        /* Comfortable tap targets (>=44px) with a bit more breathing room. */
+        .st-key-nav_top .stButton > button {
+            min-height: 44px; padding-top: 0.55rem !important; padding-bottom: 0.55rem !important;
+        }
+        /* Season Summary metric tiles: two per row instead of four cramped columns. */
+        .st-key-ss_metrics [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+        .st-key-ss_metrics [data-testid="stColumn"] {
+            flex: 1 1 46% !important; min-width: 46% !important; width: 46% !important;
+        }
+    }
+    [data-testid="stSidebar"] .nav-scope-label { display: block; margin: 0.2rem 0 0.6rem; }
+    /* Week picker in the left rail */
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
         background: var(--card) !important;
         border-radius: 8px !important;
         min-height: 2.1rem !important;
         font-family: var(--mono) !important;
         font-size: 0.8rem !important;
     }
-
-    /* -------- Responsive nav: one row that scrolls sideways, never wraps ------- */
-    /* The nav must stay horizontal at every width (Streamlit otherwise stacks the
-       columns on phones and squishes/overlaps them on tablets). */
-    .st-key-nav_top [data-testid="stHorizontalBlock"],
-    .st-key-nav_sub [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
-
-    /* Below the desktop width, pack items to their natural size and let the row
-       scroll horizontally (a swipeable tab bar on mobile). */
-    @media (max-width: 1180px) {
-        .st-key-nav_top [data-testid="stHorizontalBlock"],
-        .st-key-nav_sub [data-testid="stHorizontalBlock"] {
-            overflow-x: auto;
-            scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
-        }
-        .st-key-nav_top [data-testid="stHorizontalBlock"]::-webkit-scrollbar,
-        .st-key-nav_sub [data-testid="stHorizontalBlock"]::-webkit-scrollbar { display: none; }
-        .st-key-nav_top [data-testid="stColumn"],
-        .st-key-nav_sub [data-testid="stColumn"] {
-            flex: 0 0 auto !important;
-            width: auto !important;
-            min-width: max-content !important;
-        }
-        .st-key-nav_top .stButton > button,
-        .st-key-nav_sub .stButton > button {
-            padding-left: 0.55rem !important;
-            padding-right: 0.55rem !important;
-        }
-        /* Give the picker a sensible fixed width so it doesn't collapse. */
-        .st-key-nav_sub [data-baseweb="select"] { min-width: 190px; }
+    /* Vertical link buttons: left-aligned text, active = cobalt inset bar */
+    [data-testid="stSidebar"] .stButton > button {
+        background: transparent !important;
+        color: var(--ink-2) !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 0.7rem !important;
+        font-weight: 600 !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+    }
+    [data-testid="stSidebar"] .stButton > button p {
+        white-space: nowrap; font-size: 0.9rem; width: 100%; text-align: left;
+    }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        color: var(--ink) !important;
+        background: var(--cobalt-soft) !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"],
+    [data-testid="stSidebar"] .stButton [data-testid="stBaseButton-primary"] {
+        color: var(--ink) !important;
+        background: var(--cobalt-soft) !important;
+        box-shadow: inset 3px 0 0 var(--cobalt) !important;
+    }
+    [data-testid="stSidebar"] .stButton > button:focus-visible {
+        outline: 2px solid var(--cobalt) !important; outline-offset: 2px;
     }
 
     /* -------- Tabs: underline the active one, cobalt -------- */
@@ -420,11 +516,16 @@ CUSTOM_CSS = """
         font-variant-numeric: tabular-nums;
     }
     [data-testid="stDataFrame"] { border-radius: 8px; }
-    /* Tables are sized to fit their content, so hide the grid's scrollbars. A stray
-       vertical scrollbar reserves ~12px, which in turn forces a spurious horizontal
-       one; hiding them removes the reserved gutter so neither bar appears. */
-    [data-testid="stDataFrame"] *::-webkit-scrollbar { width: 0 !important; height: 0 !important; background: transparent !important; }
-    [data-testid="stDataFrame"] * { scrollbar-width: none !important; }
+    /* Hide the spurious vertical scrollbar (it reserves ~12px and would force a
+       phantom horizontal bar on tables that otherwise fit), but KEEP a slim
+       horizontal one so genuinely wide tables (e.g. the 15-category stat sheets)
+       can be scrolled to their last column instead of being cut off at the edge. */
+    [data-testid="stDataFrame"] *::-webkit-scrollbar:vertical { width: 0 !important; }
+    [data-testid="stDataFrame"] *::-webkit-scrollbar:horizontal { height: 10px !important; }
+    [data-testid="stDataFrame"] *::-webkit-scrollbar-thumb {
+        background: var(--line-strong) !important; border-radius: 5px !important;
+    }
+    [data-testid="stDataFrame"] *::-webkit-scrollbar-track { background: transparent !important; }
 
     /* -------- Alerts: light, hairline, rounded -------- */
     .stAlert, [data-testid="stAlert"] {
@@ -470,33 +571,5 @@ CUSTOM_CSS = """
         .dataframe { font-size: 0.66rem !important; }
         .stButton > button { padding: 0.5rem 1rem !important; font-size: 0.9rem !important; }
     }
-</style>
-"""
-
-
-# Dark theme: redefine the palette tokens. Because components (and the inline HTML)
-# are styled through var(--token), this single override flips the whole app.
-DARK_CSS = """
-<style>
-    :root {
-        --paper:        #14161B;
-        --card:         #1C1F26;
-        --surface-2:    #232732;
-        --ink:          #EAECEF;
-        --ink-2:        #A0A6B0;
-        --ink-3:        #757C88;
-        --line:         #2E333D;
-        --line-strong:  #3A404B;
-        --cobalt:       #5C93FF;
-        --cobalt-soft:  rgba(92, 147, 255, 0.16);
-        --clay:         #F0955E;
-        --good:         #46C56E;
-        --bad:          #F0616E;
-        --line-2:       #262B34;
-        --row-highlight:rgba(92, 147, 255, 0.14);
-        --header-bg:    #1C1F26;
-    }
-    /* Native dataframe grid follows the OS scheme; nudge it dark for consistency */
-    [data-testid="stDataFrame"] { color-scheme: dark; }
 </style>
 """

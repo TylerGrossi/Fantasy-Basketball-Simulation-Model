@@ -6,7 +6,6 @@ green / red = good / bad (won / lost a category); graphite ink on warm paper.
 """
 
 import plotly.graph_objects as go
-import streamlit as st
 
 from config import CATEGORIES
 
@@ -22,11 +21,6 @@ BAD      = "#C0392B"   # lost a category
 NEUTRAL  = "#9A9DA6"   # tie
 MONO     = "ui-monospace, 'SF Mono', Consolas, monospace"
 
-_DARK = {
-    "ink": "#EAECEF", "ink2": "#A0A6B0", "ink3": "#757C88",
-    "line": "rgba(234,236,239,0.14)", "cobalt": "#5C93FF", "clay": "#F0955E",
-    "good": "#46C56E", "bad": "#F0616E", "neutral": "#8891A0",
-}
 _LIGHT = {
     "ink": INK, "ink2": INK_2, "ink3": INK_3, "line": LINE, "cobalt": COBALT,
     "clay": CLAY, "good": GOOD, "bad": BAD, "neutral": NEUTRAL,
@@ -34,11 +28,8 @@ _LIGHT = {
 
 
 def _pal():
-    """Chart palette for the active theme (Plotly needs literal colors)."""
-    try:
-        return _DARK if st.session_state.get("theme") == "Dark" else _LIGHT
-    except Exception:
-        return _LIGHT
+    """Chart palette (Plotly needs literal colors; the app is light-only)."""
+    return _LIGHT
 SANS     = "system-ui, 'Segoe UI', Helvetica, Arial, sans-serif"
 
 

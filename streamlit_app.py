@@ -52,7 +52,7 @@ from visualizations import (
     create_championship_chart,
     create_rank_trend_chart,
 )
-from styles import CUSTOM_CSS, DARK_CSS
+from styles import CUSTOM_CSS
 
 # The background cache-warming threads (and pooled schedule prefetch) call
 # Streamlit-cached functions off the main thread, which logs a harmless
@@ -69,7 +69,8 @@ st.set_page_config(
     page_title="Fantasy Basketball Simulator",
     page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23E06A3B' stroke='%23000' stroke-width='2'/><path d='M50 5 Q50 50 50 95' stroke='%23000' stroke-width='2' fill='none'/><path d='M5 50 Q50 50 95 50' stroke='%23000' stroke-width='2' fill='none'/><path d='M15 20 Q50 35 85 20' stroke='%23000' stroke-width='2' fill='none'/><path d='M15 80 Q50 65 85 80' stroke='%23000' stroke-width='2' fill='none'/></svg>",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    # "auto": expanded on desktop, collapsed on mobile (content-first, per mobile UX).
+    initial_sidebar_state="auto"
 )
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
@@ -324,12 +325,10 @@ def render_season_summary(meta, your_team_name):
 
     st.markdown(
         f"""
-        <div style="text-align:center; padding:2.4rem 1rem 1.4rem;">
-            <div style="font-family: system-ui, Segoe UI, sans-serif; font-size:0.72rem;
-                        letter-spacing:0.16em; text-transform:uppercase; color:var(--ink-2);">
-                {league_name} &middot; {ESPN_SEASON_YEAR - 1}&ndash;{str(ESPN_SEASON_YEAR)[2:]} Season
+        <div style="text-align:center; padding:0.1rem 1rem 0.35rem;">
+            <div class="main-header" style="font-size:1.7rem;">
+                {ESPN_SEASON_YEAR - 1}&ndash;{str(ESPN_SEASON_YEAR)[2:]} Season Complete
             </div>
-            <div class="main-header" style="font-size:2.4rem; margin-top:0.3rem;">SEASON COMPLETE</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -339,9 +338,9 @@ def render_season_summary(meta, your_team_name):
         champ_label = "Champion" if meta.get("has_final_standings") else "Regular-Season Leader"
         st.markdown(
             f"""
-            <div style="max-width:960px; margin:0 auto 1.4rem; background:var(--card);
+            <div style="max-width:960px; margin:0 auto 0.9rem; background:var(--card);
                         border:1px solid var(--line); border-left:4px solid var(--cobalt); border-radius:12px;
-                        padding:1.3rem 1.5rem; text-align:center;">
+                        padding:1.2rem 1.5rem; text-align:center;">
                 <div style="font-family: system-ui, Segoe UI, sans-serif; font-size:0.7rem;
                             letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-2);">{champ_label}</div>
                 <div style="font-family: ui-monospace, Consolas, monospace; font-weight:700;
@@ -359,7 +358,7 @@ def render_season_summary(meta, your_team_name):
         rec = f"{you['wins']}-{you['losses']}" + (f"-{you['ties']}" if you['ties'] else "")
         sd = stats_by_id.get(you["team_id"], {})
         st.markdown(
-            f"<p style='text-align:center; color:var(--ink-2);'>"
+            f"<p style='text-align:center; color:var(--ink-2); margin:0.3rem 0 0.6rem;'>"
             f"<strong style='color:var(--ink);'>{you['name']}</strong> finished "
             f"<strong style='color:var(--cobalt);'>{_ordinal(you['rank'])}</strong>.</p>",
             unsafe_allow_html=True,
@@ -378,7 +377,6 @@ def render_season_summary(meta, your_team_name):
                               help="How you'd score if you played every team every week - schedule luck removed.")
                 with c4:
                     st.metric("Luck", f"{luck:+.1f}",
-                              delta=f"{luck:+.1f} pts",
                               help="Win % minus all-play win %. Positive = better record than performance.")
 
     # League table
@@ -386,7 +384,7 @@ def render_season_summary(meta, your_team_name):
 
     def _cell(v, align="right", color=ink, mono=True):
         fam = "ui-monospace,Consolas,monospace" if mono else "system-ui,Segoe UI,sans-serif"
-        return f"<td style='padding:9px 12px; text-align:{align}; font-family:{fam}; color:{color};'>{v}</td>"
+        return f"<td style='padding:6px 12px; text-align:{align}; font-family:{fam}; color:{color};'>{v}</td>"
 
     head_cells = [("Rank", "left"), ("Team", "left"), ("Record", "right"), ("Win %", "right")]
     if has_all_play:
@@ -406,8 +404,8 @@ def render_season_summary(meta, your_team_name):
         name_wt = "700" if is_you else "500"
         bar = "border-left:3px solid var(--cobalt);" if is_you else "border-left:3px solid transparent;"
         cells = (
-            f"<td style='{bar} padding:9px 12px; text-align:left; font-family:ui-monospace,Consolas,monospace; color:{ink2};'>{r['rank']}</td>"
-            f"<td style='padding:9px 12px; text-align:left; font-weight:{name_wt}; color:{ink};'>{r['name']}</td>"
+            f"<td style='{bar} padding:6px 12px; text-align:left; font-family:ui-monospace,Consolas,monospace; color:{ink2};'>{r['rank']}</td>"
+            f"<td style='padding:6px 12px; text-align:left; font-weight:{name_wt}; color:{ink};'>{r['name']}</td>"
             + _cell(rec)
             + _cell(f"{sd.get('actual_pct', 0) * 100:.1f}%" if sd else "&ndash;")
         )
@@ -420,7 +418,7 @@ def render_season_summary(meta, your_team_name):
 
     st.markdown(
         f"""
-        <div style="max-width:960px; margin:1.4rem auto 0; border:1px solid var(--line);
+        <div style="max-width:960px; margin:0.7rem auto 0; border:1px solid var(--line);
                     border-radius:12px; overflow-x:auto; background:var(--card);">
             <table style="width:100%; border-collapse:collapse; font-family:system-ui, Segoe UI, sans-serif; min-width:520px;">
                 <thead><tr style="background:var(--surface-2); border-bottom:1px solid var(--line);">{thead}</tr></thead>
@@ -430,14 +428,6 @@ def render_season_summary(meta, your_team_name):
         """,
         unsafe_allow_html=True,
     )
-    if has_all_play:
-        st.caption(
-            "**All-Play %** scores each team against every other team every week - it strips out schedule "
-            "luck. **Luck** is your actual win % minus your all-play %: positive means you won more than your "
-            "play deserved. Use the **View** dropdown to revisit any week or playoff round."
-        )
-    else:
-        st.caption("Use the **View** dropdown in the sidebar to revisit any week or playoff round.")
 
 
 @st.cache_resource(ttl=3600, show_spinner=False)
@@ -1199,7 +1189,6 @@ SEASON_PAGES = ("Season Summary", "Season Stats", "League Stats", "Playoff Odds"
 # App settings (formerly the sidebar). Kept in session_state under cfg_* keys so
 # they persist when the Settings page's widgets aren't rendered.
 SETTINGS_DEFAULTS = {
-    "theme": "Light",
     "cfg_team": DEFAULT_TEAM_NAME,
     "cfg_sims": 10000,
     "cfg_streamers": 50,
@@ -1220,10 +1209,6 @@ def render_settings(meta):
     """Settings page - everything that used to live in the sidebar."""
     st.markdown('<h2><i class="bi bi-gear-fill"></i> Settings</h2>', unsafe_allow_html=True)
     st.caption("Applies to every page. Choices persist while the app is open.")
-
-    st.markdown('<h4><i class="bi bi-circle-half"></i> Appearance</h4>', unsafe_allow_html=True)
-    st.radio("Theme", ["Light", "Dark"], key="theme", horizontal=True,
-             help="Switch between light and dark mode.")
 
     c1, c2 = st.columns(2, gap="large")
     with c1:
@@ -1378,17 +1363,16 @@ def render_top_nav(meta, team_name):
                              on_click=_go, args=(target,),
                              type="primary" if is_active else "secondary")
 
-    # Sub-bar: only in the matchup context
+    # Secondary "This Week" nav: a vertical bar on the left (Streamlit's native
+    # sidebar), shown only in the matchup context.
     if active in WEEK_PAGES:
-        with st.container(key="nav_sub"):
-            sc = st.columns([0.75, 1.55, 0.9, 1.0, 0.8, 0.85, 2.15], gap="small", vertical_alignment="center")
-            sc[0].markdown("<div class='nav-scope-label'>This Week</div>", unsafe_allow_html=True)
-            with sc[1]:
-                st.selectbox("Week", week_labels, key="week_sel", label_visibility="collapsed")
+        with st.sidebar:
+            st.markdown("<div class='nav-scope-label'>This Week</div>", unsafe_allow_html=True)
+            st.selectbox("Week", week_labels, key="week_sel", label_visibility="collapsed")
             for i, lab in enumerate(WEEK_PAGES):
-                sc[i + 2].button(lab, key=f"navw_{i}", width='stretch',
-                                 on_click=_go, args=(lab,),
-                                 type="primary" if active == lab else "secondary")
+                st.button(lab, key=f"navw_{i}", width='stretch',
+                          on_click=_go, args=(lab,),
+                          type="primary" if active == lab else "secondary")
 
     return st.session_state.active_page, st.session_state.week_sel, view_map[st.session_state.week_sel]
 
@@ -1396,10 +1380,6 @@ def render_top_nav(meta, team_name):
 def main():
     # Settings live on their own nav page; values persist in session_state.
     init_settings()
-
-    # Dark mode: override the palette tokens (everything is styled through them).
-    if st.session_state.get("theme") == "Dark":
-        st.markdown(DARK_CSS, unsafe_allow_html=True)
 
     try:
         league_meta = get_league_meta(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
@@ -1782,8 +1762,7 @@ def main():
             # ==================== TAB 3: MY SEASON STATS ====================
             if active_page == "Season Stats":
                 st.markdown('<h2><i class="bi bi-people-fill" style="color: var(--cobalt);"></i> My Season Stats</h2>', unsafe_allow_html=True)
-                st.markdown('<p style="color: var(--ink-2);">All players who have contributed to your team this season, with their total stats and percentage of team production.</p>', unsafe_allow_html=True)
-                
+
                 with st.spinner("Loading player season statistics..."):
                     season_totals, player_season_stats, weekly_data = get_team_season_stats(
                         ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID, team_id)

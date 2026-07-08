@@ -15,8 +15,9 @@ streamlit run streamlit_app.py
 ```
 
 The app opens in your browser. ESPN connection details are **already set in the code**
-(see Configuration) - the sidebar only asks which team and which week to view, then
-you click **RUN SIMULATION**.
+(see Configuration). Navigation drives everything — there is no "run" button. Pick a
+page from the top bar; the **Settings** page chooses which team to analyze, and the
+**This Week** left rail (shown on the matchup pages) chooses the week/round.
 
 ## Configuration
 
@@ -49,18 +50,23 @@ projections.
 
 ## The app
 
-Sidebar picks the **team** and a **View** (Season Summary, any regular-season week, or
-a playoff round). Tabs:
+A **fixed top nav bar** switches pages; content sits in a centered column beneath it.
+Season-wide pages stand alone, while the matchup pages share a **This Week** left rail
+(a Week/Round picker + page links) that appears only in that context.
 
-- **Matchup Analysis** - scoreboard, win probability, category breakdown, score distribution
-- **Streamer Analysis** - best free-agent pickups to gain categories
-- **Bench Strategy** - start/sit and roster decisions
-- **My Season Stats** - season totals for your roster
+- **Home** - overview and quick links
+- **Season Summary** - final standings, champion, and all-play (season is over)
+- **Current Matchup** - scoreboard, win probability, category breakdown, score distribution
+- **Streamers** - best free-agent pickups to gain categories
+- **Bench** - start/sit and roster decisions
+- **Roster** - your and your opponent's rosters, with injuries
+- **Season Stats** - season totals for your roster
 - **League Stats** - standings and league-wide numbers
-- **Playoff & Championship** - bracket seeding and title odds
+- **Playoff Odds** - bracket seeding and title odds
+- **Settings** - team choice, simulation counts, roster flags, watchlist/untouchables
 
-When the season is over, the app opens on a **Season Summary** page (final standings
-and champion); use the View dropdown to revisit any week.
+The app opens on **Home**. When the season is over, Season Summary shows final
+standings and the champion; use the **This Week** rail to revisit any week or round.
 
 ## Category variance
 
@@ -78,15 +84,16 @@ Per-category game-to-game variance used by the simulation (higher = noisier), fr
 ## Design
 
 The UI follows a light, print-inspired "Analyst Sheet" theme (graphite ink on warm
-paper, a single cobalt accent, monospace figures). The palette is defined in
-[styles.py](styles.py), [.streamlit/config.toml](.streamlit/config.toml), and
+paper, a single cobalt accent, monospace figures) — **light-only, no dark mode**. It
+uses a fixed full-width top nav and a centered content column. The palette is defined
+in [styles.py](styles.py), [.streamlit/config.toml](.streamlit/config.toml), and
 [visualizations.py](visualizations.py). See [AGENTS.md](AGENTS.md#design-system--analyst-sheet-do-not-drift-from-this)
 for the tokens.
 
 ## Project layout
 
 ```
-streamlit_app.py    UI, tabs, season summary, week viewer
+streamlit_app.py    UI, top nav, page bodies, season summary, week rail
 data.py             ESPN + NBA schedule + games-left counting
 simulation.py       simulation engine, streamers, bench, playoffs
 visualizations.py   Plotly charts + scoreboard HTML
