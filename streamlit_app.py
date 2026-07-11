@@ -53,6 +53,7 @@ from visualizations import (
     create_rank_trend_chart,
 )
 from styles import CUSTOM_CSS
+from assets.icon_font import ICON_FONT_CSS
 
 # The background cache-warming threads (and pooled schedule prefetch) call
 # Streamlit-cached functions off the main thread, which logs a harmless
@@ -69,10 +70,14 @@ st.set_page_config(
     page_title="Fantasy Basketball Simulator",
     page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23E06A3B' stroke='%23000' stroke-width='2'/><path d='M50 5 Q50 50 50 95' stroke='%23000' stroke-width='2' fill='none'/><path d='M5 50 Q50 50 95 50' stroke='%23000' stroke-width='2' fill='none'/><path d='M15 20 Q50 35 85 20' stroke='%23000' stroke-width='2' fill='none'/><path d='M15 80 Q50 65 85 80' stroke='%23000' stroke-width='2' fill='none'/></svg>",
     layout="wide",
-    # "auto": expanded on desktop, collapsed on mobile (content-first, per mobile UX).
+    # Sidebar is the "This Week" side rail (shown only on those pages). "auto" = expanded
+    # on desktop, collapsed on mobile; CSS force-shows it as a rail / sub-bar when it holds nav.
     initial_sidebar_state="auto"
 )
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+# Bootstrap Icons font is self-hosted (embedded base64), injected separately so a slow
+# asset can never render-block the layout stylesheet the way a CDN @import did.
+st.markdown(f"<style>{ICON_FONT_CSS}</style>", unsafe_allow_html=True)
 
 # ESPN-style periods: regular weeks 1–19, then playoff matchup 1 = periods 20–21, matchup 2 = 22–23.
 REGULAR_SEASON_WEEKS = 19
@@ -1185,6 +1190,36 @@ def warm_caches(sim_count, blend_weight, team_name):
 
 WEEK_PAGES = ("Matchup", "Streamers", "Bench", "Roster")
 SEASON_PAGES = ("Season Summary", "Season Stats", "League Stats", "Playoff Odds")
+TOOLS_PAGES = ("Schedule", "Power Rankings", "Trade Analyzer")
+
+# Section-based navigation. Each section groups related pages. The top bar (desktop)
+# and the fixed bottom icon bar (mobile) show one control per section; a labeled
+# sub-row exposes the pages inside a multi-page section. Section icons are attached by
+# key in styles.py (CSS ::before with Bootstrap Icons) so the buttons keep their click
+# handling. Home is the brand lockup; Settings is the gear.  key -> (label, pages)
+NAV_SECTIONS = (
+    ("home",     "Home",      ("Home",)),
+    ("week",     "This Week", WEEK_PAGES),
+    ("season",   "Season",    SEASON_PAGES),
+    ("tools",    "Tools",     TOOLS_PAGES),
+    ("settings", "Settings",  ("Settings",)),
+)
+
+
+def _section_for_page(page):
+    """Which nav section owns a page (defaults to Home)."""
+    for key, _label, pages in NAV_SECTIONS:
+        if page in pages:
+            return key
+    return "home"
+
+
+def _section_landing(key, pages, season_over):
+    """The page a section opens to. Season skips the (offseason-only) Summary until it exists."""
+    if key == "season" and not season_over:
+        return "Season Stats"
+    return pages[0]
+
 
 # App settings (formerly the sidebar). Kept in session_state under cfg_* keys so
 # they persist when the Settings page's widgets aren't rendered.
@@ -1239,7 +1274,7 @@ def render_settings(meta):
         st.text_area("Untouchable Players", key="cfg_untouchables", height=170,
                      label_visibility="collapsed",
                      help="One name per line. Never recommended as drops.",
-                     placeholder="LeBron James\nStephen Curry\nKevin Durant")
+                     placeholder="Shai Gilgeous-Alexander\nJalen Williams\nAlex Caruso")
 
         st.markdown('<h4><i class="bi bi-star-fill"></i> Watchlist</h4>', unsafe_allow_html=True)
         st.text_area("Manual Watchlist", key="cfg_watchlist", height=170,
@@ -1298,45 +1333,40 @@ def render_home(meta, team_name):
                           width='stretch')
 
 
-NAV_ITEMS = [
-    ("Home", "Home"),
-    ("Season Summary", "Season Summary"),   # only shown once the season is over
-    ("Current Matchup", "Matchup"),
-    ("Schedule", "Schedule"),
-    ("Season Stats", "Season Stats"),
-    ("League Stats", "League Stats"),
-    ("Power Rankings", "Power Rankings"),
-    ("Trade Analyzer", "Trade Analyzer"),
-    ("Playoff Odds", "Playoff Odds"),
-    ("Settings", "Settings"),
-]
-
-BRAND_HTML = """
-<div class="nav-brand">
-    <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true">
-        <circle cx="50" cy="50" r="45" fill="#E06A3B" stroke="#1B1D22" stroke-width="4"/>
-        <path d="M50 5 Q50 50 50 95" stroke="#1B1D22" stroke-width="3" fill="none"/>
-        <path d="M5 50 Q50 50 95 50" stroke="#1B1D22" stroke-width="3" fill="none"/>
-        <path d="M13 26 Q50 40 87 26" stroke="#1B1D22" stroke-width="2.5" fill="none"/>
-        <path d="M13 74 Q50 60 87 74" stroke="#1B1D22" stroke-width="2.5" fill="none"/>
-    </svg>
-    <span>Fantasy Basketball</span>
-</div>
-"""
+# Desktop header items. Each is either a plain page link or a dropdown menu:
+#   ("link", label, page)
+#   ("menu", label, ((sub-label, page), ...))   -> a st.popover dropdown
+# The This Week pages (Matchup/Streamers/Bench/Roster) are NOT here — they live in the
+# left "This Week" side rail, entered via "Current Matchup". Season Summary only over.
+FLAT_NAV = (
+    ("link", "Season Summary", "Season Summary"),
+    ("link", "Current Matchup", "Matchup"),
+    ("link", "Schedule", "Schedule"),
+    ("menu", "Stats", (("Season", "Season Stats"), ("League", "League Stats"))),
+    ("menu", "Tools", (("Power Rankings", "Power Rankings"),
+                       ("Playoff Odds", "Playoff Odds"),
+                       ("Trade Analyzer", "Trade Analyzer"))),
+)
 
 
 def render_top_nav(meta, team_name):
     """
-    Site-header navigation. Primary bar: Home, Current Matchup, the season pages,
-    and Settings. The 'This Week' sub-bar (week picker + Matchup / Streamers /
-    Bench) only appears once you're in the matchup context (a WEEK_PAGES page).
+    Navigation. Desktop and mobile intentionally differ.
+
+    - Desktop: ONE fixed flat header row — brand (= Home), a text link per page (no
+      icons), Settings gear on the right; scrolls sideways if it can't all fit. Plus a
+      **left "This Week" side rail** (Streamlit's sidebar) that appears only on the This
+      Week pages (Matchup/Streamers/Bench/Roster) with the Week picker + those four links.
+    - Mobile: the header keeps only the brand; sections are reached from a fixed bottom
+      ICON bar, Season/Tools sub-pages from a sub-row, and This Week from the same side
+      rail turned into a fixed sub-bar under the header. All hidden/adapted via CSS.
     """
     view_map = build_week_views()
     week_labels = [l for l in view_map if l != SEASON_SUMMARY_VIEW]
 
     if "active_page" not in st.session_state:
         st.session_state.active_page = "Home"
-    # Keep the week choice alive even when the sub-bar (its widget) isn't rendered.
+    # Keep the week choice alive even when the picker (a rail widget) isn't rendered.
     if "week_sel" not in st.session_state:
         dl = period_to_view_label(meta["current_period"], view_map) if meta else None
         st.session_state.week_sel = dl if dl in week_labels else week_labels[-1]
@@ -1344,35 +1374,88 @@ def render_top_nav(meta, team_name):
         st.session_state.week_sel = st.session_state.week_sel
 
     active = st.session_state.active_page
+    season_over = datetime.now(ZoneInfo("America/New_York")).date() > SEASON_END_DATE
+    active_section = _section_for_page(active)
 
     def _go(page):
         st.session_state.active_page = page
 
-    # Season Summary tab only appears once the season is over.
-    season_over = datetime.now(ZoneInfo("America/New_York")).date() > SEASON_END_DATE
-    items = [it for it in NAV_ITEMS if it[1] != "Season Summary" or season_over]
+    items = [it for it in FLAT_NAV if it[1] != "Season Summary" or season_over]
 
-    # Primary bar: brand | nav links (columns sized roughly to each label's width)
+    # -------- Desktop header: brand(Home) | page links + dropdowns | Settings gear ----
+    # Centered cluster (no growing spacer) so the nav doesn't stretch across the whole bar.
     with st.container(key="nav_top"):
-        ratios = [2.4] + [round(0.55 + 0.07 * len(lab), 2) for lab, _ in items]
-        pc = st.columns(ratios, gap="small", vertical_alignment="center")
-        pc[0].markdown(BRAND_HTML, unsafe_allow_html=True)
-        for i, (lab, target) in enumerate(items):
-            is_active = (active in WEEK_PAGES) if target == "Matchup" else (active == target)
-            pc[i + 1].button(lab, key=f"navp_{i}", width='stretch',
-                             on_click=_go, args=(target,),
-                             type="primary" if is_active else "secondary")
+        # a menu label needs a touch more room for its dropdown caret
+        ratios = ([2.2]
+                  + [round(0.55 + 0.072 * (len(it[1]) + (2 if it[0] == "menu" else 0)), 2)
+                     for it in items]
+                  + [0.55])
+        cols = st.columns(ratios, gap="small", vertical_alignment="center")
+        cols[0].button("Fantasy Basketball", key="nav_brand", width='stretch',
+                       on_click=_go, args=("Home",),
+                       type="primary" if active == "Home" else "secondary")
+        for i, item in enumerate(items):
+            col = cols[i + 1]
+            if item[0] == "link":
+                lab, pg = item[1], item[2]
+                # "Current Matchup" stays highlighted for any This Week page.
+                is_active = (active in WEEK_PAGES) if pg == "Matchup" else (active == pg)
+                col.button(lab, key=f"navf_{i}", width='stretch',
+                           on_click=_go, args=(pg,),
+                           type="primary" if is_active else "secondary")
+            else:  # dropdown menu (st.popover)
+                lab, subs = item[1], item[2]
+                sub_pages = [p for _, p in subs]
+                on = active in sub_pages
+                # unique per-menu key; the `_active` suffix drives the underline via CSS
+                slug = lab.lower().replace(" ", "")
+                with col:
+                    with st.container(key=f"navmenu_{slug}" + ("_active" if on else "")):
+                        with st.popover(lab, use_container_width=True):
+                            for sl, sp in subs:
+                                st.button(sl, key=f"navm_{sp.replace(' ', '_')}", width='stretch',
+                                          on_click=_go, args=(sp,),
+                                          type="primary" if active == sp else "secondary")
+        cols[-1].button("Settings", key="navp_settings", width='stretch',
+                        on_click=_go, args=("Settings",),
+                        type="primary" if active == "Settings" else "secondary")
 
-    # Secondary "This Week" nav: a vertical bar on the left (Streamlit's native
-    # sidebar), shown only in the matchup context.
+    # -------- "This Week" side rail: only on This Week pages (left rail / mobile sub-bar) --
     if active in WEEK_PAGES:
         with st.sidebar:
             st.markdown("<div class='nav-scope-label'>This Week</div>", unsafe_allow_html=True)
-            st.selectbox("Week", week_labels, key="week_sel", label_visibility="collapsed")
-            for i, lab in enumerate(WEEK_PAGES):
-                st.button(lab, key=f"navw_{i}", width='stretch',
-                          on_click=_go, args=(lab,),
-                          type="primary" if active == lab else "secondary")
+            st.selectbox("Week / Round", week_labels, key="week_sel",
+                         label_visibility="collapsed")
+            for i, pg in enumerate(WEEK_PAGES):
+                st.button(pg, key=f"navw_{i}", width='stretch',
+                          on_click=_go, args=(pg,),
+                          type="primary" if active == pg else "secondary")
+
+    # -------- Mobile bottom bar: one icon per section (CSS hides it on desktop) --------
+    with st.container(key="nav_bottom"):
+        bcols = st.columns(len(NAV_SECTIONS), gap="small")
+        for i, (key, label, pages) in enumerate(NAV_SECTIONS):
+            bcols[i].button(label, key=f"navb_{key}", width='stretch',
+                            on_click=_go, args=(_section_landing(key, pages, season_over),),
+                            type="primary" if active_section == key else "secondary")
+
+    # -------- Mobile sub-row: Season/Tools sub-pages (This Week uses the rail above) -----
+    sub_label, sub_pages = None, None
+    for key, label, pages in NAV_SECTIONS:
+        if key == active_section and key in ("season", "tools") and len(pages) > 1:
+            sub_label, sub_pages = label, list(pages)
+    if sub_pages and active_section == "season" and not season_over:
+        sub_pages = [p for p in sub_pages if p != "Season Summary"]
+    if sub_pages:
+        with st.container(key="nav_sub"):
+            cols = st.columns([1.1] + [1.0] * len(sub_pages), gap="small",
+                              vertical_alignment="center")
+            cols[0].markdown(f"<div class='nav-scope-label'>{sub_label}</div>",
+                             unsafe_allow_html=True)
+            for i, pg in enumerate(sub_pages):
+                cols[i + 1].button(pg, key=f"navsub_{i}", width='stretch',
+                                   on_click=_go, args=(pg,),
+                                   type="primary" if active == pg else "secondary")
 
     return st.session_state.active_page, st.session_state.week_sel, view_map[st.session_state.week_sel]
 
@@ -1473,7 +1556,8 @@ def main():
                 game_window_start, game_window_end, week_span, period_end_date = resolve_view_window(view_period, year)
 
             if active_page in WEEK_PAGES:
-                col1, col2, col3 = st.columns([2, 1, 2])
+                # (Week/Round picker lives in the left "This Week" side rail, not here.)
+                col1, col2, col3 = st.columns([2, 1, 2], vertical_alignment="center")
                 with col1:
                     st.markdown(f'<h3><i class="bi bi-house-fill" style="color: var(--cobalt);"></i> {your_team_name}</h3>', unsafe_allow_html=True)
                 with col2:

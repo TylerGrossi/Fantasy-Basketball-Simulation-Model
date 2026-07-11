@@ -8,7 +8,9 @@ hairline rules, and monospace figures so numbers line up like a stat sheet.
 
 CUSTOM_CSS = """
 <style>
-    @import url('https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css');
+    /* Bootstrap Icons are self-hosted (see assets/icon_font.py, injected separately). No CDN
+       @import here — a leading @import is render-blocking, so a slow/blocked CDN would
+       stop this whole stylesheet (nav, layout, chrome-hiding) from ever applying. */
 
     :root {
         --paper:        #F4F3EF;
@@ -223,21 +225,31 @@ CUSTOM_CSS = """
     .home-card-title { font-weight: 700; color: var(--ink); margin-top: 0.45rem; }
     .home-card-desc { color: var(--ink-2); font-size: 0.84rem; margin-top: 0.3rem; }
 
-    /* ================= Top navigation: sticky light site header ================= */
-    /* Primary bar sticks to the very top of the viewport and spans the content
-       column. It breaks out of the block-container's side gutter with matched
-       negative margins + padding (NOT 100vw, which overflows past the scrollbar
-       and causes a horizontal scrollbar when the page is windowed). */
-    /* Fixed full-screen-width top bar. Because it's position:fixed it always spans
-       the whole viewport (independent of the centered content column below) and
-       stays pinned while scrolling. The app is padded down by --nav-h to clear it. */
+    /* ================= Section navigation: light site header ================= */
+    /* One control per section (This Week / Season / Tools + brand=Home + gear=Settings).
+       Desktop: a fixed full-width top bar. Mobile: the top bar keeps only the brand and
+       the sections move to a fixed bottom icon bar. A labeled sub-row exposes the pages
+       inside the active multi-page section. The sidebar is retired. */
+    :root { --bottomnav-h: 4.1rem; }
+
+    /* The native sidebar is the "This Week" side rail — but only when it holds nav (i.e.
+       on This Week pages). On every other page nothing renders into it, so hide the empty
+       sidebar entirely. The collapse control is unreliable in Streamlit; hide it too. */
+    [data-testid="stSidebar"]:not(:has(.stButton)) { display: none !important; }
+    /* Hide the whole sidebar header row (it only holds the unreliable collapse arrow) at
+       all widths — the rail is permanent, so there's nothing to collapse. */
+    [data-testid="stSidebarHeader"],
+    [data-testid="stSidebarCollapseButton"], [data-testid="collapsedControl"] { display: none !important; }
+
+    /* Fixed full-viewport-width top bar (position:fixed spans the whole viewport
+       regardless of the centered content column). The app is padded down by --nav-h. */
     .st-key-nav_top {
         position: fixed;
         top: 0; left: 0; right: 0;
         z-index: 1000;
         height: var(--nav-h);
         background: var(--header-bg);
-        padding: 0 var(--page-pad);
+        padding: 0;                      /* the inner row carries the page gutters */
         border-bottom: 1px solid var(--line);
         box-shadow: 0 8px 20px rgba(20,16,10,0.05);   /* soft lift off content */
         box-sizing: border-box;
@@ -247,22 +259,24 @@ CUSTOM_CSS = """
         flex-direction: column;
         justify-content: center;
     }
-    /* The nav row spans the full bar width (10 links + brand need the room; capping
-       it at the narrow content column squishes the links together). */
     .st-key-nav_top [data-testid="stLayoutWrapper"],
     .st-key-nav_top > div:first-child { width: 100%; }
     .st-key-nav_top [data-testid="stHorizontalBlock"] { width: 100%; }
     .st-key-nav_top [data-testid="stMarkdownContainer"] p { margin: 0; }
-    /* The brand's column shrinks to the text line, so the taller logo+wordmark
-       overflows downward and its optical centre lands ~8px below the nav links.
-       Nudge it up so the wordmark lines up with the links. */
-    .nav-brand { transform: translateY(-8px); }
 
-    /* Brand lockup: basketball mark + wordmark */
-    .nav-brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
-    .nav-brand svg { flex: none; display: block; width: 27px; height: 27px; }
-    .nav-brand span {
-        font-weight: 800; font-size: 1.18rem; letter-spacing: -0.01em; color: var(--ink);
+    /* The nav containers are position:fixed (or hidden), yet Streamlit still renders each as
+       a flex item at the top of the main column — and the column's 16px `gap` then stacks up
+       as empty space before the page content (one gap per nav container). Pull those wrappers
+       out of the flex flow so they add zero gap. nav_top + nav_bottom are always fixed/hidden;
+       nav_sub is in-flow only on mobile, so collapse it only on desktop. */
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_top),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_bottom) {
+        position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
+    }
+    @media (min-width: 768px) {
+        [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_sub) {
+            position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
+        }
     }
 
     .nav-scope-label {
@@ -270,176 +284,304 @@ CUSTOM_CSS = """
         color: var(--ink-3); font-weight: 700; white-space: nowrap;
     }
 
-    /* Primary nav links: muted text that darkens on hover; active = ink + cobalt underline */
+    /* -------- Section icons: inline SVG via CSS mask (no font, no CDN) --------
+       Research-backed choice: a missing/slow icon font makes nav look broken (blank
+       glyphs). These are inline SVG shapes painted with `background-color`, so they
+       render instantly and can never fail to load. Each button gets its shape from a
+       `--nav-ic` var; the mask paints it. The brand basketball is a full-colour
+       background-image on its own `::before` (below) and is deliberately not listed
+       here. */
+    .st-key-navb_week button::before,     .st-key-navb_season button::before,
+    .st-key-navb_tools button::before,    .st-key-navb_settings button::before,
+    .st-key-navb_home button::before,     .st-key-navp_settings button::before {
+        content: ""; display: inline-block; flex: none;
+        width: 1.05rem; height: 1.05rem;
+        background-color: var(--cobalt);
+        -webkit-mask: var(--nav-ic) center / contain no-repeat;
+                mask: var(--nav-ic) center / contain no-repeat;
+    }
+    .st-key-navb_week button     { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktY2FsZW5kYXItd2Vlay1maWxsIiB2aWV3Qm94PSIwIDAgMTYgMTYiPgogIDxwYXRoIGQ9Ik00IC41YS41LjUgMCAwIDAtMSAwVjFIMmEyIDIgMCAwIDAtMiAydjFoMTZWM2EyIDIgMCAwIDAtMi0yaC0xVi41YS41LjUgMCAwIDAtMSAwVjFINFYuNXpNMTYgMTRWNUgwdjlhMiAyIDAgMCAwIDIgMmgxMmEyIDIgMCAwIDAgMi0yek05LjUgN2gxYS41LjUgMCAwIDEgLjUuNXYxYS41LjUgMCAwIDEtLjUuNWgtMWEuNS41IDAgMCAxLS41LS41di0xYS41LjUgMCAwIDEgLjUtLjV6bTMgMGgxYS41LjUgMCAwIDEgLjUuNXYxYS41LjUgMCAwIDEtLjUuNWgtMWEuNS41IDAgMCAxLS41LS41di0xYS41LjUgMCAwIDEgLjUtLjV6TTIgMTAuNWEuNS41IDAgMCAxIC41LS41aDFhLjUuNSAwIDAgMSAuNS41djFhLjUuNSAwIDAgMS0uNS41aC0xYS41LjUgMCAwIDEtLjUtLjV2LTF6bTMuNS0uNWgxYS41LjUgMCAwIDEgLjUuNXYxYS41LjUgMCAwIDEtLjUuNWgtMWEuNS41IDAgMCAxLS41LS41di0xYS41LjUgMCAwIDEgLjUtLjV6Ii8+Cjwvc3ZnPg=="); }
+    .st-key-navb_season button   { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktdHJvcGh5LWZpbGwiIHZpZXdCb3g9IjAgMCAxNiAxNiI+CiAgPHBhdGggZD0iTTIuNS41QS41LjUgMCAwIDEgMyAwaDEwYS41LjUgMCAwIDEgLjUuNWMwIC41MzgtLjAxMiAxLjA1LS4wMzQgMS41MzZhMyAzIDAgMSAxLTEuMTMzIDUuODljLS43OSAxLjg2NS0xLjg3OCAyLjc3Ny0yLjgzMyAzLjAxMXYyLjE3M2wxLjQyNS4zNTZjLjE5NC4wNDguMzc3LjEzNS41MzcuMjU1TDEzLjMgMTUuMWEuNS41IDAgMCAxLS4zLjlIM2EuNS41IDAgMCAxLS4zLS45bDEuODM4LTEuMzc5Yy4xNi0uMTIuMzQzLS4yMDcuNTM3LS4yNTVMNi41IDEzLjExdi0yLjE3M2MtLjk1NS0uMjM0LTIuMDQzLTEuMTQ2LTIuODMzLTMuMDEyYTMgMyAwIDEgMS0xLjEzMi01Ljg5QTMzLjA3NiAzMy4wNzYgMCAwIDEgMi41LjV6bS4wOTkgMi41NGEyIDIgMCAwIDAgLjcyIDMuOTM1Yy0uMzMzLTEuMDUtLjU4OC0yLjM0Ni0uNzItMy45MzV6bTEwLjA4MyAzLjkzNWEyIDIgMCAwIDAgLjcyLTMuOTM1Yy0uMTMzIDEuNTktLjM4OCAyLjg4NS0uNzIgMy45MzV6Ii8+Cjwvc3ZnPg=="); }
+    .st-key-navb_tools button    { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktdG9vbHMiIHZpZXdCb3g9IjAgMCAxNiAxNiI+CiAgPHBhdGggZD0iTTEgMCAwIDFsMi4yIDMuMDgxYTEgMSAwIDAgMCAuODE1LjQxOWguMDdhMSAxIDAgMCAxIC43MDguMjkzbDIuNjc1IDIuNjc1LTIuNjE3IDIuNjU0QTMuMDAzIDMuMDAzIDAgMCAwIDAgMTNhMyAzIDAgMSAwIDUuODc4LS44NTFsMi42NTQtMi42MTcuOTY4Ljk2OC0uMzA1LjkxNGExIDEgMCAwIDAgLjI0MiAxLjAyM2wzLjI3IDMuMjdhLjk5Ny45OTcgMCAwIDAgMS40MTQgMGwxLjU4Ni0xLjU4NmEuOTk3Ljk5NyAwIDAgMCAwLTEuNDE0bC0zLjI3LTMuMjdhMSAxIDAgMCAwLTEuMDIzLS4yNDJMMTAuNSA5LjVsLS45Ni0uOTYgMi42OC0yLjY0M0EzLjAwNSAzLjAwNSAwIDAgMCAxNiAzYzAtLjI2OS0uMDM1LS41My0uMTAyLS43NzdsLTIuMTQgMi4xNDFMMTIgNGwtLjM2NC0xLjc1N0wxMy43NzcuMTAyYTMgMyAwIDAgMC0zLjY3NSAzLjY4TDcuNDYyIDYuNDYgNC43OTMgMy43OTNhMSAxIDAgMCAxLS4yOTMtLjcwN3YtLjA3MWExIDEgMCAwIDAtLjQxOS0uODE0TDEgMFptOS42NDYgMTAuNjQ2YS41LjUgMCAwIDEgLjcwOCAwbDIuOTE0IDIuOTE1YS41LjUgMCAwIDEtLjcwNy43MDdsLTIuOTE1LTIuOTE0YS41LjUgMCAwIDEgMC0uNzA4Wk0zIDExbC40NzEuMjQyLjUyOS4wMjYuMjg3LjQ0NS40NDUuMjg3LjAyNi41MjlMNSAxM2wtLjI0Mi40NzEtLjAyNi41MjktLjQ0NS4yODctLjI4Ny40NDUtLjUyOS4wMjZMMyAxNWwtLjQ3MS0uMjQyTDIgMTQuNzMybC0uMjg3LS40NDVMMS4yNjggMTRsLS4wMjYtLjUyOUwxIDEzbC4yNDItLjQ3MS4wMjYtLjUyOS40NDUtLjI4Ny4yODctLjQ0NS41MjktLjAyNkwzIDExWiIvPgo8L3N2Zz4="); }
+    .st-key-navb_settings button, .st-key-navp_settings button { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktZ2Vhci1maWxsIiB2aWV3Qm94PSIwIDAgMTYgMTYiPgogIDxwYXRoIGQ9Ik05LjQwNSAxLjA1Yy0uNDEzLTEuNC0yLjM5Ny0xLjQtMi44MSAwbC0uMS4zNGExLjQ2NCAxLjQ2NCAwIDAgMS0yLjEwNS44NzJsLS4zMS0uMTdjLTEuMjgzLS42OTgtMi42ODYuNzA1LTEuOTg3IDEuOTg3bC4xNjkuMzExYy40NDYuODIuMDIzIDEuODQxLS44NzIgMi4xMDVsLS4zNC4xYy0xLjQuNDEzLTEuNCAyLjM5NyAwIDIuODFsLjM0LjFhMS40NjQgMS40NjQgMCAwIDEgLjg3MiAyLjEwNWwtLjE3LjMxYy0uNjk4IDEuMjgzLjcwNSAyLjY4NiAxLjk4NyAxLjk4N2wuMzExLS4xNjlhMS40NjQgMS40NjQgMCAwIDEgMi4xMDUuODcybC4xLjM0Yy40MTMgMS40IDIuMzk3IDEuNCAyLjgxIDBsLjEtLjM0YTEuNDY0IDEuNDY0IDAgMCAxIDIuMTA1LS44NzJsLjMxLjE3YzEuMjgzLjY5OCAyLjY4Ni0uNzA1IDEuOTg3LTEuOTg3bC0uMTY5LS4zMTFhMS40NjQgMS40NjQgMCAwIDEgLjg3Mi0yLjEwNWwuMzQtLjFjMS40LS40MTMgMS40LTIuMzk3IDAtMi44MWwtLjM0LS4xYTEuNDY0IDEuNDY0IDAgMCAxLS44NzItMi4xMDVsLjE3LS4zMWMuNjk4LTEuMjgzLS43MDUtMi42ODYtMS45ODctMS45ODdsLS4zMTEuMTY5YTEuNDY0IDEuNDY0IDAgMCAxLTIuMTA1LS44NzJsLS4xLS4zNHpNOCAxMC45M2EyLjkyOSAyLjkyOSAwIDEgMSAwLTUuODYgMi45MjkgMi45MjkgMCAwIDEgMCA1Ljg1OHoiLz4KPC9zdmc+"); }
+    .st-key-navb_home button      { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktaG91c2UtZG9vci1maWxsIiB2aWV3Qm94PSIwIDAgMTYgMTYiPgogIDxwYXRoIGQ9Ik02LjUgMTQuNXYtMy41MDVjMC0uMjQ1LjI1LS40OTUuNS0uNDk1aDJjLjI1IDAgLjUuMjUuNS41djMuNWEuNS41IDAgMCAwIC41LjVoNGEuNS41IDAgMCAwIC41LS41di03YS41LjUgMCAwIDAtLjE0Ni0uMzU0TDEzIDUuNzkzVjIuNWEuNS41IDAgMCAwLS41LS41aC0xYS41LjUgMCAwIDAtLjUuNXYxLjI5M0w4LjM1NCAxLjE0NmEuNS41IDAgMCAwLS43MDggMGwtNiA2QS41LjUgMCAwIDAgMS41IDcuNXY3YS41LjUgMCAwIDAgLjUuNWg0YS41LjUgMCAwIDAgLjUtLjVaIi8+Cjwvc3ZnPg=="); }
+
+    /* -------- Brand lockup (button = Home): basketball mark + wordmark -------- */
+    .st-key-nav_brand button {
+        display: inline-flex !important; align-items: center; gap: 10px;
+        justify-content: flex-start !important;
+        background: transparent !important; border: none !important;
+        box-shadow: none !important; padding: 0.3rem 0 !important;
+    }
+    .st-key-nav_brand button:hover { transform: none !important; box-shadow: none !important; background: transparent !important; }
+    .st-key-nav_brand button::before {
+        content: ""; flex: none; width: 27px; height: 27px;
+        background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0NSIgZmlsbD0iI0UwNkEzQiIgc3Ryb2tlPSIjMUIxRDIyIiBzdHJva2Utd2lkdGg9IjQiLz48cGF0aCBkPSJNNTAgNSBRNTAgNTAgNTAgOTUiIHN0cm9rZT0iIzFCMUQyMiIgc3Ryb2tlLXdpZHRoPSIzIiBmaWxsPSJub25lIi8+PHBhdGggZD0iTTUgNTAgUTUwIDUwIDk1IDUwIiBzdHJva2U9IiMxQjFEMjIiIHN0cm9rZS13aWR0aD0iMyIgZmlsbD0ibm9uZSIvPjxwYXRoIGQ9Ik0xMyAyNiBRNTAgNDAgODcgMjYiIHN0cm9rZT0iIzFCMUQyMiIgc3Ryb2tlLXdpZHRoPSIyLjUiIGZpbGw9Im5vbmUiLz48cGF0aCBkPSJNMTMgNzQgUTUwIDYwIDg3IDc0IiBzdHJva2U9IiMxQjFEMjIiIHN0cm9rZS13aWR0aD0iMi41IiBmaWxsPSJub25lIi8+PC9zdmc+");
+        background-size: contain; background-repeat: no-repeat; background-position: center;
+    }
+    .st-key-nav_brand button p {
+        font-weight: 800 !important; font-size: 1.18rem !important;
+        letter-spacing: -0.01em; color: var(--ink) !important; white-space: nowrap;
+    }
+
+    /* -------- Primary section links: muted text, icon + label, active = ink + underline -------- */
     .st-key-nav_top .stButton > button {
+        display: inline-flex !important; align-items: center; justify-content: center;
+        gap: 7px;
         background: transparent !important;
         color: var(--ink-2) !important;
         border: none !important;
         border-radius: 0 !important;
         box-shadow: none !important;
-        padding: 0.45rem 0.1rem 0.5rem !important;
+        padding: 0.45rem 0.3rem 0.5rem !important;
         font-weight: 600 !important;
     }
     .st-key-nav_top .stButton > button:hover {
-        color: var(--ink) !important;
-        background: transparent !important;
-        transform: none !important;
-        box-shadow: none !important;
+        color: var(--ink) !important; background: transparent !important;
+        transform: none !important; box-shadow: none !important;
     }
     .st-key-nav_top .stButton > button[kind="primary"],
     .st-key-nav_top .stButton [data-testid="stBaseButton-primary"] {
         color: var(--ink) !important;
         box-shadow: inset 0 -2px 0 var(--cobalt) !important;
     }
+    /* the brand's "active" state shouldn't draw an underline (a logo isn't a tab).
+       Kept more specific than the generic nav-primary underline rule above. */
+    .st-key-nav_top .st-key-nav_brand button[kind="primary"] { box-shadow: none !important; }
     .st-key-nav_top .stButton > button:focus-visible {
         outline: 2px solid var(--cobalt) !important; outline-offset: 2px;
     }
-    .st-key-nav_top .stButton > button p {
-        white-space: nowrap; font-size: 1.02rem;
+    .st-key-nav_top .stButton > button p { white-space: nowrap; font-size: 1.0rem; }
+    /* Settings = gear only: keep the label for screen readers but hide it visually. */
+    .st-key-navp_settings button p {
+        position: absolute !important; width: 1px; height: 1px;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    }
+    .st-key-navp_settings button::before { font-size: 1.2rem; }
+
+    /* -------- Header dropdowns: "Stats" and "Tools" (st.popover) --------
+       Each menu is wrapped in a container keyed `navmenu_<slug>` (+ `_active` when one of
+       its pages is open). The trigger looks exactly like a nav link; the `_active` variant
+       adds the cobalt underline. The panel (portaled to <body>) is a small sub-page menu. */
+    [class*="st-key-navmenu_"] [data-testid="stPopover"] button {
+        background: transparent !important; color: var(--ink-2) !important;
+        border: none !important; border-radius: 0 !important; box-shadow: none !important;
+        padding: 0.45rem 0.3rem 0.5rem !important; font-weight: 600 !important;
+        white-space: nowrap;
+    }
+    [class*="st-key-navmenu_"] [data-testid="stPopover"] button p { font-size: 1.0rem; }
+    [class*="st-key-navmenu_"] [data-testid="stPopover"] button:hover {
+        color: var(--ink) !important; background: transparent !important;
+        transform: none !important; box-shadow: none !important;
+    }
+    [class*="st-key-navmenu_"][class*="_active"] [data-testid="stPopover"] button {
+        color: var(--ink) !important; box-shadow: inset 0 -2px 0 var(--cobalt) !important;
+    }
+    /* dropdown panel = a clean menu of the sub-pages. BaseWeb anchors it at the trigger's
+       top (inside the fixed header); nudge it down so it drops *below* the bar. */
+    [data-testid="stPopoverBody"] {
+        background: var(--card) !important; border: 1px solid var(--line) !important;
+        border-radius: 10px !important; padding: 0.35rem !important; min-width: 150px !important;
+        margin-top: 3.1rem !important;
+    }
+    [data-testid="stPopoverBody"] .stButton > button {
+        background: transparent !important; color: var(--ink-2) !important;
+        border: none !important; box-shadow: none !important; border-radius: 6px !important;
+        text-align: left !important; justify-content: flex-start !important;
+        font-weight: 600 !important; padding: 0.45rem 0.7rem !important;
+    }
+    [data-testid="stPopoverBody"] .stButton > button p { text-align: left; width: 100%; }
+    [data-testid="stPopoverBody"] .stButton > button:hover {
+        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        transform: none !important; box-shadow: none !important;
+    }
+    [data-testid="stPopoverBody"] .stButton > button[kind="primary"],
+    [data-testid="stPopoverBody"] .stButton [data-testid="stBaseButton-primary"] {
+        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        box-shadow: inset 3px 0 0 var(--cobalt) !important;
     }
 
-    /* -------- Responsive nav: one row that scrolls sideways, never wraps ------- */
-    /* The nav must stay horizontal at every width (Streamlit otherwise stacks the
-       columns on phones and squishes/overlaps them on tablets). */
-    .st-key-nav_top [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
-
-    /* Below the desktop width, pack items to their natural size and let the row
-       scroll horizontally (a swipeable tab bar on mobile). The scroll is contained
-       inside the bar, so it never spills into a page-level horizontal scrollbar. */
-    @media (max-width: 1180px) {
-        .st-key-nav_top [data-testid="stHorizontalBlock"] {
-            overflow-x: auto;
-            scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
-        }
-        .st-key-nav_top [data-testid="stHorizontalBlock"]::-webkit-scrollbar { display: none; }
-        .st-key-nav_top [data-testid="stColumn"] {
-            flex: 0 0 auto !important;
-            width: auto !important;
-            min-width: max-content !important;
-        }
-        .st-key-nav_top .stButton > button {
-            padding-left: 0.55rem !important;
-            padding-right: 0.55rem !important;
-        }
+    /* -------- One horizontal row, capped to the page's content width, items spread ------
+       max-width + margin:auto + page gutters make the row line up exactly with the
+       centered page content below; space-between spreads brand · links · gear across it. */
+    .st-key-nav_top [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        max-width: var(--content-max);
+        margin-left: auto !important; margin-right: auto !important;
+        padding: 0 var(--page-pad);
+        box-sizing: border-box;
+        justify-content: space-between;
+        overflow-x: auto;
+        scrollbar-width: thin;              /* visible affordance in windowed desktop */
+        -webkit-overflow-scrolling: touch;
+    }
+    /* Each link sizes to its own text at every width (never squished) and the whole nav
+       stays LEFT-CLUSTERED (no growing spacer) — it doesn't stretch across the bar. The
+       row scrolls sideways only if the cluster is wider than the viewport. */
+    .st-key-nav_top [data-testid="stColumn"] {
+        flex: 0 0 auto !important; width: auto !important; min-width: max-content !important;
     }
 
-    /* ============ Secondary "This Week" nav: vertical bar on the left ============ */
-    /* Rendered into Streamlit's native sidebar (a sticky, full-height left rail)
-       only while a week page is active. */
+    /* ============ "This Week" side rail (Streamlit's native sidebar) ============
+       Rendered only on This Week pages: a permanent 230px LEFT RAIL on desktop, and a
+       fixed horizontal SUB-BAR under the header on phones. Holds the Week/Round picker +
+       Matchup / Streamers / Bench / Roster. (Empty sidebar on other pages is hidden above.) */
     [data-testid="stSidebar"] {
-        background: var(--surface-2);
-        border-right: 1px solid var(--line);
+        background: var(--surface-2); border-right: 1px solid var(--line);
     }
-    /* The collapse/close arrow is never useful here — the desktop rail is permanent
-       and the mobile rail is inline — so hide it at all widths. */
-    [data-testid="stSidebarCollapseButton"] { display: none !important; }
-    /* Tablet/desktop: permanent left bar. Force it visible whenever it holds nav
-       buttons (Streamlit can fail to create a reopen control after a collapse). */
     @media (min-width: 768px) {
+        /* permanent rail — force visible even if a session got stuck collapsed */
         [data-testid="stSidebar"]:has(.stButton) {
-            transform: none !important;
-            visibility: visible !important;
-            min-width: 240px !important;
-            width: 240px !important;
+            transform: none !important; visibility: visible !important;
+            min-width: 230px !important; width: 230px !important;
         }
     }
-    /* Phones: the rail becomes a compact horizontal sub-nav (Streamlit's mobile
-       drawer toggle is unreliable, so a real drawer would trap the user). Because
-       Streamlit makes the main section `position:absolute; inset:0` on mobile (it's
-       the scroller), we can't stack in flow — so pin the rail as a FIXED sub-bar
-       just under the header and reserve room for it in the content. */
     @media (max-width: 767px) {
-        /* On mobile Streamlit makes stMain position:absolute, so the app container's
-           --nav-h offset is ignored. Clear the fixed header via the block-container
-           instead (week pages override this with extra room for the sub-bar below). */
-        [data-testid="stMainBlockContainer"] { padding-top: calc(var(--nav-h) + 0.6rem) !important; }
+        /* becomes a fixed sub-bar pinned under the header (Streamlit's mobile drawer
+           toggle is unreliable), items laid out in one swipeable row */
         [data-testid="stSidebar"]:has(.stButton) {
-            position: fixed !important;
-            top: var(--nav-h) !important; left: 0 !important; right: 0 !important;
+            position: fixed !important; top: var(--nav-h) !important;
+            left: 0 !important; right: 0 !important;
             width: 100% !important; min-width: 0 !important; max-width: none !important;
-            height: auto !important;
-            transform: none !important; visibility: visible !important;
-            z-index: 900 !important;
-            background: var(--surface-2) !important;
+            height: auto !important; transform: none !important; visibility: visible !important;
+            z-index: 900 !important; background: var(--surface-2) !important;
             border-right: none !important; border-bottom: 1px solid var(--line) !important;
         }
         [data-testid="stSidebar"] [data-testid="stSidebarContent"] { width: 100% !important; height: auto !important; }
-        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
-            padding: 0.4rem var(--page-pad) !important;
-        }
-        /* lay the week picker + page buttons in one horizontal, swipeable row */
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] { padding: 0.4rem var(--page-pad) !important; }
         [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"] {
-            flex-direction: row !important;
-            align-items: center !important;
-            flex-wrap: nowrap !important;
-            overflow-x: auto !important;
-            gap: 0.4rem !important;
-            scrollbar-width: none;
+            flex-direction: row !important; align-items: center !important; flex-wrap: nowrap !important;
+            overflow-x: auto !important; gap: 0.4rem !important; scrollbar-width: none;
         }
         [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"]::-webkit-scrollbar { display: none; }
-        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"],
-        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"] { flex: 0 0 auto !important; width: auto !important; }
+        [data-testid="stSidebar"] [data-testid="stElementContainer"],
+        [data-testid="stSidebar"] [data-testid="stLayoutWrapper"] { flex: 0 0 auto !important; width: auto !important; }
         [data-testid="stSidebar"] .nav-scope-label { display: none !important; }
-        [data-testid="stSidebar"] [data-baseweb="select"] { min-width: 160px; }
+        [data-testid="stSidebar"] [data-baseweb="select"] { min-width: 150px; }
         [data-testid="stSidebar"] .stButton > button { white-space: nowrap; min-height: 44px; }
-        /* drop the empty sidebar header row so the sub-bar hugs the top */
         [data-testid="stSidebar"] [data-testid="stSidebarHeader"] { display: none !important; padding: 0 !important; height: 0 !important; }
-        /* reserve room for the fixed sub-bar (week pages only, via :has) */
+        /* reserve room under BOTH the fixed header and this fixed sub-bar (This Week only) */
         [data-testid="stAppViewContainer"]:has([data-testid="stSidebar"] .stButton) [data-testid="stMainBlockContainer"] {
-            padding-top: calc(var(--nav-h) + 3.1rem) !important;
+            padding-top: calc(var(--nav-h) + 3.3rem) !important;
         }
+    }
+    [data-testid="stSidebar"] .nav-scope-label { display: block; margin: 0.2rem 0 0.6rem; }
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        background: var(--card) !important; border-radius: 8px !important;
+        min-height: 2.1rem !important; font-family: var(--mono) !important; font-size: 0.8rem !important;
+    }
+    /* rail links: left-aligned, muted; active = cobalt inset bar */
+    [data-testid="stSidebar"] .stButton > button {
+        background: transparent !important; color: var(--ink-2) !important;
+        border: none !important; box-shadow: none !important; border-radius: 6px !important;
+        padding: 0.5rem 0.7rem !important; font-weight: 600 !important;
+        text-align: left !important; justify-content: flex-start !important;
+    }
+    [data-testid="stSidebar"] .stButton > button p { white-space: nowrap; font-size: 0.9rem; width: 100%; text-align: left; }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        transform: none !important; box-shadow: none !important;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"],
+    [data-testid="stSidebar"] .stButton [data-testid="stBaseButton-primary"] {
+        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        box-shadow: inset 3px 0 0 var(--cobalt) !important;
+    }
+    [data-testid="stSidebar"] .stButton > button:focus-visible {
+        outline: 2px solid var(--cobalt) !important; outline-offset: 2px;
+    }
 
-        /* Compact the brand on small phones: icon only, so the nav links get room. */
-        .nav-brand span { display: none; }
-        /* Comfortable tap targets (>=44px) with a bit more breathing room. */
-        .st-key-nav_top .stButton > button {
-            min-height: 44px; padding-top: 0.55rem !important; padding-bottom: 0.55rem !important;
+    /* ============ Mobile-only section sub-row: the active section's pages ============ */
+    /* Secondary nav for phones (the header is a single flat row and has no room). Hidden
+       on desktop — desktop reaches every page from the one header row. */
+    @media (min-width: 768px) { .st-key-nav_sub { display: none !important; } }
+    .st-key-nav_sub {
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 0.9rem; padding-bottom: 0.3rem;
+    }
+    .st-key-nav_sub [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important; align-items: center;
+        overflow-x: auto; scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+    }
+    .st-key-nav_sub [data-testid="stColumn"] {
+        flex: 0 0 auto !important; width: auto !important; min-width: max-content !important;
+    }
+    .st-key-nav_sub .nav-scope-label { padding-right: 0.4rem; }
+    .st-key-nav_sub .stButton > button {
+        background: transparent !important; color: var(--ink-2) !important;
+        border: none !important; box-shadow: none !important; border-radius: 6px !important;
+        padding: 0.35rem 0.7rem !important; font-weight: 600 !important;
+    }
+    .st-key-nav_sub .stButton > button p { white-space: nowrap; font-size: 0.92rem; }
+    .st-key-nav_sub .stButton > button:hover {
+        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        transform: none !important; box-shadow: none !important;
+    }
+    .st-key-nav_sub .stButton > button[kind="primary"],
+    .st-key-nav_sub .stButton [data-testid="stBaseButton-primary"] {
+        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        box-shadow: inset 0 -2px 0 var(--cobalt) !important;
+    }
+    .st-key-nav_sub [data-baseweb="select"] > div {
+        background: var(--card) !important; border-radius: 8px !important;
+        min-height: 2.1rem !important; font-family: var(--mono) !important; font-size: 0.8rem !important;
+    }
+    .st-key-nav_sub [data-baseweb="select"] { min-width: 150px; }
+
+    /* ================= Mobile bottom bar: one icon per section ================= */
+    /* Desktop hides it; mobile shows a fixed bottom tab bar (icon over label). */
+    @media (min-width: 768px) { .st-key-nav_bottom { display: none !important; } }
+    @media (max-width: 767px) {
+        /* clear the fixed header (stMain is position:absolute on mobile, so the app
+           container's --nav-h offset is ignored — pad the block container instead)
+           and reserve room for the fixed bottom bar. */
+        [data-testid="stMainBlockContainer"] {
+            padding-top: calc(var(--nav-h) + 0.6rem) !important;
+            padding-bottom: calc(var(--bottomnav-h) + 1rem) !important;
         }
+        /* Top bar keeps only the brand — hide every other column (links + gear), brand left. */
+        .st-key-nav_top [data-testid="stColumn"]:not(:has(.st-key-nav_brand)) { display: none !important; }
+        .st-key-nav_top [data-testid="stHorizontalBlock"] { justify-content: flex-start !important; }
+
+        .st-key-nav_bottom {
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+            height: var(--bottomnav-h);
+            background: var(--header-bg);
+            border-top: 1px solid var(--line);
+            box-shadow: 0 -6px 18px rgba(20,16,10,0.06);
+            padding: 0 0.2rem; box-sizing: border-box;
+            display: flex; align-items: stretch;
+        }
+        .st-key-nav_bottom [data-testid="stLayoutWrapper"],
+        .st-key-nav_bottom > div:first-child { width: 100%; }
+        .st-key-nav_bottom [data-testid="stHorizontalBlock"] {
+            width: 100%; flex-wrap: nowrap !important; gap: 0 !important;
+        }
+        .st-key-nav_bottom [data-testid="stColumn"] { flex: 1 1 0 !important; min-width: 0 !important; }
+        .st-key-nav_bottom .stButton > button {
+            display: flex !important; flex-direction: column;
+            align-items: center; justify-content: center; gap: 3px;
+            min-height: var(--bottomnav-h); padding: 0.3rem 0 !important;
+            background: transparent !important; color: var(--ink-3) !important;
+            border: none !important; border-radius: 0 !important; box-shadow: none !important;
+        }
+        .st-key-nav_bottom .stButton > button:hover { transform: none !important; box-shadow: none !important; }
+        /* bigger icons, muted until the section is active (mask icons: paint via background-color) */
+        .st-key-nav_bottom .stButton > button::before {
+            width: 1.5rem; height: 1.5rem; background-color: var(--ink-3);
+        }
+        .st-key-nav_bottom .stButton > button p {
+            font-size: 0.6rem !important; font-weight: 600; white-space: nowrap; line-height: 1;
+        }
+        .st-key-nav_bottom .stButton > button[kind="primary"] { color: var(--cobalt) !important; }
+        .st-key-nav_bottom .stButton > button[kind="primary"]::before { background-color: var(--cobalt) !important; }
+        .st-key-nav_bottom .stButton > button[kind="primary"] p { color: var(--cobalt) !important; }
+
         /* Season Summary metric tiles: two per row instead of four cramped columns. */
         .st-key-ss_metrics [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
         .st-key-ss_metrics [data-testid="stColumn"] {
             flex: 1 1 46% !important; min-width: 46% !important; width: 46% !important;
         }
-    }
-    [data-testid="stSidebar"] .nav-scope-label { display: block; margin: 0.2rem 0 0.6rem; }
-    /* Week picker in the left rail */
-    [data-testid="stSidebar"] [data-baseweb="select"] > div {
-        background: var(--card) !important;
-        border-radius: 8px !important;
-        min-height: 2.1rem !important;
-        font-family: var(--mono) !important;
-        font-size: 0.8rem !important;
-    }
-    /* Vertical link buttons: left-aligned text, active = cobalt inset bar */
-    [data-testid="stSidebar"] .stButton > button {
-        background: transparent !important;
-        color: var(--ink-2) !important;
-        border: none !important;
-        box-shadow: none !important;
-        border-radius: 6px !important;
-        padding: 0.5rem 0.7rem !important;
-        font-weight: 600 !important;
-        text-align: left !important;
-        justify-content: flex-start !important;
-    }
-    [data-testid="stSidebar"] .stButton > button p {
-        white-space: nowrap; font-size: 0.9rem; width: 100%; text-align: left;
-    }
-    [data-testid="stSidebar"] .stButton > button:hover {
-        color: var(--ink) !important;
-        background: var(--cobalt-soft) !important;
-        transform: none !important;
-        box-shadow: none !important;
-    }
-    [data-testid="stSidebar"] .stButton > button[kind="primary"],
-    [data-testid="stSidebar"] .stButton [data-testid="stBaseButton-primary"] {
-        color: var(--ink) !important;
-        background: var(--cobalt-soft) !important;
-        box-shadow: inset 3px 0 0 var(--cobalt) !important;
-    }
-    [data-testid="stSidebar"] .stButton > button:focus-visible {
-        outline: 2px solid var(--cobalt) !important; outline-offset: 2px;
     }
 
     /* -------- Tabs: underline the active one, cobalt -------- */

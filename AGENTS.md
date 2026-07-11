@@ -18,12 +18,13 @@ and correctness over generality.
 
 | File | Role |
 |------|------|
-| [streamlit_app.py](streamlit_app.py) | UI entry point. `main()`, the fixed top-nav (`render_top_nav`), the "This Week" left rail, the per-page `if active_page == …` bodies, the Home landing, Season Summary, and Settings. Orchestrates everything. |
+| [streamlit_app.py](streamlit_app.py) | UI entry point. `main()`, the section nav (`render_top_nav` + `NAV_SECTIONS`), the per-page `if active_page == …` bodies, the Home landing, Season Summary, and Settings. Orchestrates everything. |
 | [data.py](data.py) | ESPN connection, roster/matchup/box-score fetch, NBA schedule scraping, and **games-left counting** (injury-aware, IR-aware, 10-per-day cap). |
 | [simulation.py](simulation.py) | Simulation engine: per-team category sim, matchup comparison, streamer analysis, bench strategy, league stats, playoff bracket. |
 | [visualizations.py](visualizations.py) | Plotly charts + the scoreboard HTML. All chart colors live here. |
 | [config.py](config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
 | [styles.py](styles.py) | The "Analyst Sheet" design system as one big CSS string (`CUSTOM_CSS`), including the fixed-header / centered-column layout shell. Light-only (no `DARK_CSS`). |
+| [assets/icon_font.py](assets/icon_font.py) | **Self-hosted Bootstrap Icons** — the font subset to the ~37 glyphs the app uses, base64-embedded as `@font-face` (`ICON_FONT_CSS`, imported as `from assets.icon_font import …`). Injected separately so it can never render-block the layout. Regenerate with [assets/build_icon_font.py](assets/build_icon_font.py) if the icon set changes. |
 | [.streamlit/config.toml](.streamlit/config.toml) | Streamlit's native light theme (must match `styles.py`). |
 | [.streamlit/secrets.toml](.streamlit/secrets.toml) | Template only — real creds are in `config.py`. |
 | `Old Models/` | The original single-file version. Historical reference; do not edit or import. |
@@ -69,8 +70,8 @@ come from the API and are resolved to an id with `data.resolve_team_id`.
 ## Design system — "Analyst Sheet" (do not drift from this)
 
 Light, print-inspired, restrained. The owner explicitly dislikes flashy / "AI-slop"
-looks and **emoji** — use none (Bootstrap Icons are fine; they render via the icon
-font). Keep it calm.
+looks and **emoji** — use none (Bootstrap Icons are fine; they render via the
+self-hosted embedded font in [assets/icon_font.py](assets/icon_font.py), not a CDN). Keep it calm.
 
 | Token | Value | Use |
 |-------|-------|-----|
@@ -103,58 +104,112 @@ scoring date). Because of that:
 
 ### Layout shell (`styles.py`, verified with Selenium)
 
-**Navigation is a fixed full-width top bar, not tabs** (`render_top_nav`). The bar
-(`.st-key-nav_top`) is `position: fixed; top/left/right: 0`, `height: var(--nav-h)`
-(`3.9rem`), z-index 1000 — so it spans the **whole viewport** and stays pinned while
-scrolling. The app is pushed below it by `padding-top: var(--nav-h)` on
-`[data-testid="stAppViewContainer"]` (which offsets both the main column and the
-sidebar). Because the bar is a Streamlit column-flex, `justify-content: center`
-(main axis = vertical) is what vertically centres the nav row; the brand's column
-shrinks to its text line so the taller logo overflows ~8px low and is nudged back
-with `transform: translateY(-8px)` on `.nav-brand`. Streamlit's own header is hidden.
-Nav links are muted text that darken on hover; the active page is ink with a cobalt
-underline.
+**Desktop and mobile navigation deliberately differ** ("a website is not a phone app").
+`render_top_nav` renders three Streamlit containers; CSS shows the right ones per width.
+
+- **`nav_top`** — a `position: fixed; top/left/right:0` full-viewport top bar
+  (`height: var(--nav-h)` = `3.9rem`, z-index 1000). On **desktop** it is a **single flat
+  row**: the **brand button = Home** (basketball SVG `::before` + wordmark), then a plain
+  **text link per page** (from `FLAT_NAV`, *no icons*), then **Settings = a gear icon**
+  (only header icon; label visually hidden for a11y). The nav **row is capped to
+  `var(--content-max)` + `margin:auto` + `--page-pad` gutters (so it lines up exactly with
+  the centered page content) and uses `justify-content: space-between`** — brand at the
+  content's left edge, gear at the right, links spread between. Columns are `min-width:max-content`
+  so links never squish; `overflow-x:auto` scrolls sideways only if too wide.
+  Current header order: **Season Summary · Current Matchup · Schedule · Stats▾ · Tools▾**.
+  `FLAT_NAV` does **not** include the This Week pages — "Current Matchup" (→ Matchup,
+  highlighted for any `WEEK_PAGES` page) enters the side rail. A `FLAT_NAV` item is either
+  `("link", label, page)` or a **dropdown** `("menu", label, ((sub-label, page), …))`:
+  **"Stats"** (Season / League) and **"Tools"** (Power Rankings / Playoff Odds / Trade
+  Analyzer) are `st.popover`s styled to look like nav links. Each is wrapped in a container
+  keyed `navmenu_<slug>` (+`_active` when one of its pages is open → cobalt underline; CSS
+  matches `[class*="st-key-navmenu_"]`). The panel is nudged down (`stPopoverBody{margin-top}`)
+  so it drops **below** the fixed header instead of overlapping it. On **mobile** CSS hides
+  every column except the brand. App pushed below the bar by `padding-top: var(--nav-h)`.
+  Muted links darken on hover; active page = ink + cobalt underline (brand exempted).
+- **Gap gotcha (fixed):** the nav containers (`nav_top`, `nav_bottom`, `nav_sub`) are
+  `position:fixed`/hidden but Streamlit still renders each as a flex item at the top of the
+  main column, so the column's 16px `gap` stacked ~64px of empty space before the page
+  content. Fix: pull those wrappers out of flow —
+  `stMainBlockContainer > stVerticalBlock > *:has(.st-key-nav_top|.st-key-nav_bottom)` (and
+  `:has(.st-key-nav_sub)` on desktop only, since nav_sub is in-flow on mobile) get
+  `position:absolute; height:0`. Don't reintroduce a fixed/hidden nav container as a plain
+  in-flow block or the gap returns.
+- **The "This Week" side rail** — Streamlit's **native sidebar**, rendered *only* on
+  `WEEK_PAGES` (Matchup/Streamers/Bench/Roster), holding the **Week/Round picker** (`week_sel`)
+  + those four page links. On **desktop** it's a permanent **230px left rail**; on **mobile**
+  CSS turns it into a **fixed sub-bar under the header**. The empty sidebar on other pages is
+  hidden (`:not(:has(.stButton)){display:none}`); the unreliable collapse control /
+  `stSidebarHeader` is hidden at all widths. `initial_sidebar_state="auto"`.
+- **`nav_bottom`** — a `position: fixed; bottom:0` **mobile-only bottom icon bar**, one
+  icon-over-label per section (`NAV_SECTIONS`: Home · This Week · Season · Tools · Settings).
+  Hidden `@media (min-width:768px)`.
+- **`nav_sub`** — a **mobile-only** labeled sub-row for the **Season / Tools** sub-pages (This
+  Week uses the side rail instead). Hidden `@media (min-width:768px)` — desktop reaches those
+  pages as top-level links. **No second header row on desktop besides the This Week rail.**
+
+The **Week/Round picker** (`week_sel`) lives in the side rail (not the page, not the top bar);
+`render_top_nav` reads it from `st.session_state` via a self-assign so it survives runs where
+the rail isn't rendered.
+
+**The Settings gear + mobile bottom icons are inline SVG, not the icon font** (deliberately).
+Each gets a monochrome Bootstrap-Icons SVG as a `--nav-ic` data-URI and CSS `mask` paints it
+with `background-color` (`.st-key-navb_* / .st-key-navp_settings button::before`); the brand
+is a full-colour SVG `background-image`. Bulletproof: renders instantly, zero font/network
+dependency. (The **desktop flat links carry no icons** — per the owner, icons are a mobile
+pattern.) Earlier the nav used icon-font glyphs; when the CDN `@import` was slow/blocked, the
+whole stylesheet was render-blocked and the header — brand, icons, label-hidden gear — vanished
+behind Streamlit's default blue decoration bar.
+
+**Icons elsewhere** (section headers, cards) still use `<i class="bi …">`, now backed by
+the **self-hosted embedded font** in [assets/icon_font.py](assets/icon_font.py) — no CDN `@import`. Never
+re-add a leading `@import url(cdn)`; a leading `@import` is render-blocking. If you use a new
+`bi-*` class, regenerate the subset ([assets/build_icon_font.py](assets/build_icon_font.py)) so the glyph is included.
+
+**The native sidebar is used only for the This Week rail** (above) — it is force-hidden on
+every other page, so don't render unrelated widgets into it.
 
 **Content is a centred column.** `.block-container` is `max-width: var(--content-max)`
-(`1180px`) with `margin: auto`. The **nav row spans full width** (not capped at
-`--content-max`) so ten links + the brand have room. Two layout knobs live in `:root`:
-`--nav-h` (bar height / app offset) and `--content-max` (content column width).
+(`1180px`) with `margin: auto`. The nav bars span full width (fixed positioning breaks out
+of the centered column). `:root` knobs: `--nav-h`, `--content-max`, and `--bottomnav-h`.
 
-**No horizontal scroll.** `html, body { overflow-x: hidden }` and the Streamlit scroll
-containers carry `overflow-x: clip`. Do **not** size the bar with `100vw` — it overflows
-past the scrollbar. Wide dataframes scroll inside their own box: the grid's vertical
-scrollbar is hidden (it reserved a phantom gutter) but a **slim horizontal scrollbar
+**No horizontal scroll.** `html, body { overflow-x: hidden }`; Streamlit scroll containers
+carry `overflow-x: clip`. Do **not** size the bar with `100vw` — it overflows past the
+scrollbar. The top-bar row is `flex-wrap: nowrap` + `overflow-x: auto`, so a
+narrow/windowed header **scrolls sideways** instead of wrapping. Wide dataframes scroll
+inside their own box: the vertical scrollbar is hidden but a **slim horizontal scrollbar
 is kept** so 15-category stat sheets can reach their last column.
 
-**Responsive (phones / iPads).** Breakpoint is **767px**. At `>=768px` (iPad portrait
-and up) the This Week rail is the 240px left bar. At `<=767px` (phones) it becomes a
-**fixed horizontal sub-bar** pinned under the header (Streamlit's mobile drawer toggle
-is unreliable), the brand collapses to its icon, nav tap targets are ≥44px, and Season
-Summary metric tiles wrap 2-up. Note Streamlit makes `stMain` `position:absolute` on
-mobile, so the header offset must be applied via `stMainBlockContainer` padding, not the
-app container. **Before changing responsive CSS, read the `mobile-responsive-ux` skill**
-(navigation patterns, the Selenium device-emulation audit, and these Streamlit gotchas).
+**Responsive (phones / iPads).** Breakpoint is **767px** — iPad portrait (768) gets the
+**desktop** treatment (flat text header, no bottom bar; verified with deviceMetrics 768).
+At `<=767px` the top bar keeps **only the brand** (other columns hidden via
+`:not(:has(.st-key-nav_brand))`), pages move to the fixed **bottom icon bar** + `nav_sub` +
+the This Week rail-as-sub-bar (≥44px targets), and Season Summary metric tiles wrap 2-up.
+Streamlit makes `stMain` `position:absolute` on mobile, so header/footer offsets go on
+`stMainBlockContainer` padding (top `= --nav-h`, bottom `= --bottomnav-h`; This Week pages
+add ~3.3rem more top room for the sub-bar via a `:has(sidebar .stButton)` rule). **Before
+changing responsive CSS, read the `mobile-responsive-ux` skill** (navigation patterns, the
+Selenium device-emulation audit, and these Streamlit gotchas).
 
-Scope is tracked by `st.session_state.active_page`:
+Scope is tracked by `st.session_state.active_page`. Desktop links come from `FLAT_NAV`;
+the mobile bottom bar / sub-row use `NAV_SECTIONS` (`_section_for_page` maps a page to its
+section, `_section_landing` gives the page a section opens to):
 
-- **Home** is the default landing (`render_home`) — an overview with quick-link cards,
-  no data-load gate.
-- **Season** (`SEASON_PAGES`): Season Summary · Season Stats · League Stats · Playoff
-  Odds — independent of any week. Season Summary shows a single **"YYYY–YY Season
-  Complete"** heading, champion card, four metric tiles, and the standings table,
-  tuned to fit one 1080p screen without scrolling.
-- **This Week** (`WEEK_PAGES`): rendered as a **vertical left rail in Streamlit's
-  native sidebar** — a Week/Round picker (`week_sel`) + Matchup · Streamers · Bench ·
-  Roster — shown only while a week page is active. It is **non-collapsible on
-  purpose**: Streamlit fails to create a reopen control after collapse, so the collapse
-  button is hidden **and** `[data-testid="stSidebar"]:has(.stButton)` force-shows it
-  (`transform:none; width:240px !important`) even if a session got stuck collapsed.
-  `initial_sidebar_state="expanded"`.
-- **Settings** — its own nav page (`render_settings`). App options (team, sims,
-  streamers, roster flags, untouchables, watchlist) live in `st.session_state` under
-  `cfg_*` keys, seeded/re-registered every run by `init_settings()` so values survive
-  page switches (Streamlit drops widget state when a widget isn't rendered — the
-  self-assign trick prevents that).
+- **Home** is the default landing (`render_home`) — an overview with quick-link cards, no
+  data-load gate. Reached by clicking the brand.
+- **This Week** (`WEEK_PAGES`): Matchup · Streamers · Bench · Roster, reached from the side
+  rail (entered via "Current Matchup"); the rail also holds the `week_sel` Week/Round picker
+  (kept alive across page switches by a self-assign so its state survives runs where the rail
+  isn't rendered).
+- **Season** (`SEASON_PAGES`): Season Summary · Season Stats · League Stats · Playoff Odds.
+  Season Summary shows a single **"YYYY–YY Season Complete"** heading, champion card, four
+  metric tiles, and the standings table, tuned to fit one 1080p screen. (Season Summary is
+  dropped from the section until the season is over.)
+- **Tools** (`TOOLS_PAGES`): Schedule · Power Rankings · Trade Analyzer.
+- **Settings** — the gear (`render_settings`). App options (team, sims, streamers, roster
+  flags, untouchables, watchlist) live in `st.session_state` under `cfg_*` keys,
+  seeded/re-registered every run by `init_settings()` so values survive page switches
+  (Streamlit drops widget state when a widget isn't rendered — the self-assign prevents that).
 
 The app is **light-only** — the dark-mode toggle and `DARK_CSS` were removed (per
 web-dev feedback). `styles.py` carries a single palette, `.streamlit/config.toml`
