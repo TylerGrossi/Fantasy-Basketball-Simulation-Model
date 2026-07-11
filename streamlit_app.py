@@ -5,6 +5,7 @@ A web-based Monte Carlo simulation tool for ESPN Fantasy Basketball
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import threading
@@ -54,6 +55,7 @@ from visualizations import (
 )
 from styles import CUSTOM_CSS
 from assets.icon_font import ICON_FONT_CSS
+from assets.touch_icon import TOUCH_ICON_PNG_B64
 
 # The background cache-warming threads (and pooled schedule prefetch) call
 # Streamlit-cached functions off the main thread, which logs a harmless
@@ -78,6 +80,27 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # Bootstrap Icons font is self-hosted (embedded base64), injected separately so a slow
 # asset can never render-block the layout stylesheet the way a CDN @import did.
 st.markdown(f"<style>{ICON_FONT_CSS}</style>", unsafe_allow_html=True)
+# "Add to Home Screen" icon (iOS Safari / Android Chrome). Streamlit's own index.html ships
+# a Streamlit-branded apple-touch-icon that `page_icon` does NOT override (page_icon only
+# controls the tab favicon), so home-screen shortcuts showed the Streamlit logo. st.markdown
+# can't run <script> (inserted via innerHTML, which browsers never execute) — use
+# components.html instead: it's an iframe with allow-same-origin, so its script can reach
+# through `window.parent.document` to edit the real page's <head>. Wrapped in a keyed
+# container so styles.py's nav-gap-collapse rule can zero it out too (see GAP gotcha).
+with st.container(key="touch_icon_injector"):
+    components.html(
+        f"""<script>
+        (function() {{
+            const doc = window.parent.document;
+            doc.querySelectorAll('link[rel~="apple-touch-icon"]').forEach(el => el.remove());
+            const link = doc.createElement('link');
+            link.rel = 'apple-touch-icon';
+            link.href = 'data:image/png;base64,{TOUCH_ICON_PNG_B64}';
+            doc.head.appendChild(link);
+        }})();
+        </script>""",
+        height=0,
+    )
 
 # ESPN-style periods: regular weeks 1–19, then playoff matchup 1 = periods 20–21, matchup 2 = 22–23.
 REGULAR_SEASON_WEEKS = 19
@@ -281,7 +304,12 @@ def render_sortable_table(df, key, default_col=None, default_desc=True, max_heig
     if default_col in cols:
         df = df.sort_values(default_col, ascending=not default_desc, kind="mergesort").reset_index(drop=True)
 
-    cfg = {cols[0]: st.column_config.TextColumn(width="medium")}
+    # The first column defaults to "medium" (sized for a name like Team/Player), but a
+    # short first column (e.g. "Rank") shouldn't eat that much width — size it off the
+    # actual values so more of the other columns fit on screen.
+    first_len = df[cols[0]].astype(str).str.len().max()
+    first_width = "small" if pd.notna(first_len) and first_len <= 4 else "medium"
+    cfg = {cols[0]: st.column_config.TextColumn(width=first_width)}
     for c in pct_cols:
         cfg[c] = st.column_config.NumberColumn(format="%.1f%%")
     kwargs = dict(width='stretch', hide_index=True, column_config=cfg, key=f"srt_{key}")
@@ -1189,8 +1217,12 @@ def warm_caches(sim_count, blend_weight, team_name):
 
 
 WEEK_PAGES = ("Matchup", "Streamers", "Bench", "Roster")
-SEASON_PAGES = ("Season Summary", "Season Stats", "League Stats", "Playoff Odds")
-TOOLS_PAGES = ("Schedule", "Power Rankings", "Trade Analyzer")
+# Mobile section grouping (bottom icon bar + sub-row). Note this differs slightly from the
+# desktop dropdowns by request: Schedule lives under Season, Playoff Odds under Tools.
+# Season Summary is intentionally NOT in any nav section — it's reachable only from the
+# Home page tiles (owner request).
+SEASON_PAGES = ("Season Stats", "League Stats", "Schedule")
+TOOLS_PAGES = ("Power Rankings", "Playoff Odds", "Trade Analyzer")
 
 # Section-based navigation. Each section groups related pages. The top bar (desktop)
 # and the fixed bottom icon bar (mobile) show one control per section; a labeled
@@ -1215,9 +1247,7 @@ def _section_for_page(page):
 
 
 def _section_landing(key, pages, season_over):
-    """The page a section opens to. Season skips the (offseason-only) Summary until it exists."""
-    if key == "season" and not season_over:
-        return "Season Stats"
+    """The page a section opens to."""
     return pages[0]
 
 
@@ -1284,60 +1314,101 @@ def render_settings(meta):
 
 
 def render_home(meta, team_name):
-    """Landing page: a short overview plus quick links into the app."""
+    """
+    Landing page. Desktop and mobile are deliberately different layouts (a website is not
+    a phone app) — both are rendered; CSS shows only the one that matches the breakpoint
+    (`.st-key-home_desktop` / `.st-key-home_mobile`), so there is no server-side width
+    detection and no flash of the wrong layout.
+
+    - Desktop: the original 4-card layout — icon, title, description, and a separate
+      "Open" button per card.
+    - Mobile: a compact hero + a 2-up grid of single-tap icon tiles (no description, no
+      separate Open button) so the whole page fits without scrolling on a phone.
+    """
     league_name = meta.get("league_name", "Your League") if meta else "Your League"
     today = datetime.now(ZoneInfo("America/New_York")).date()
     status = "Season complete" if today > SEASON_END_DATE else "Season in progress"
 
-    st.markdown(
-        f"""
-        <div style="text-align:center; padding:2.6rem 1rem 1.4rem;">
-            <div style="font-family: system-ui, Segoe UI, sans-serif; font-size:0.72rem;
-                        letter-spacing:0.16em; text-transform:uppercase; color:var(--ink-2);">
-                {league_name} &middot; {status}
-            </div>
-            <div class="main-header" style="font-size:2.6rem; margin-top:0.3rem;">FANTASY BASKETBALL SIMULATOR</div>
-            <p style="color:var(--ink-2); max-width:560px; margin:0.7rem auto 0;">
-                Monte Carlo projections and season analytics for your ESPN league.
-                You're analyzing <strong style="color:var(--ink);">{team_name}</strong>.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     def _go(page):
         st.session_state.active_page = page
 
-    links = [
-        ("Season Summary", "Final standings, champion &amp; all-play", "Season Summary", "bi-trophy-fill"),
-        ("Current Matchup", "Weekly matchup, win % &amp; category sims", "Matchup", "bi-bar-chart-fill"),
-        ("League Stats", "Team records &amp; category totals", "League Stats", "bi-table"),
-        ("Playoff Odds", "Championship probabilities", "Playoff Odds", "bi-diagram-3-fill"),
-    ]
-    with st.container(key="home_links"):
-        cols = st.columns(4, gap="medium")
-        for col, (title, desc, target, icon) in zip(cols, links):
-            with col:
-                st.markdown(
-                    f"""
-                    <div class="home-card">
-                        <div class="home-card-icon"><i class="bi {icon}"></i></div>
-                        <div class="home-card-title">{title}</div>
-                        <div class="home-card-desc">{desc}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.button("Open", key=f"home_{target}", on_click=_go, args=(target,),
-                          width='stretch')
+    # -------- Desktop: original hero + 4-card layout --------
+    with st.container(key="home_desktop"):
+        st.markdown(
+            f"""
+            <div style="text-align:center; padding:2.6rem 1rem 1.4rem;">
+                <div style="font-family: system-ui, Segoe UI, sans-serif; font-size:0.72rem;
+                            letter-spacing:0.16em; text-transform:uppercase; color:var(--ink-2);">
+                    {league_name} &middot; {status}
+                </div>
+                <div class="main-header" style="font-size:2.6rem; margin-top:0.3rem;">FANTASY BASKETBALL SIMULATOR</div>
+                <p style="color:var(--ink-2); max-width:560px; margin:0.7rem auto 0;">
+                    Monte Carlo projections and season analytics for your ESPN league.
+                    You're analyzing <strong style="color:var(--ink);">{team_name}</strong>.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        cards = [
+            ("Season Summary", "Final standings, champion &amp; all-play", "Season Summary", "bi-trophy-fill"),
+            ("Current Matchup", "Weekly matchup, win % &amp; category sims", "Matchup", "bi-bar-chart-fill"),
+            ("League Stats", "Team records &amp; category totals", "League Stats", "bi-table"),
+            ("Playoff Odds", "Championship probabilities", "Playoff Odds", "bi-diagram-3-fill"),
+        ]
+        with st.container(key="home_links"):
+            cols = st.columns(4, gap="medium")
+            for col, (title, desc, target, icon) in zip(cols, cards):
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class="home-card">
+                            <div class="home-card-icon"><i class="bi {icon}"></i></div>
+                            <div class="home-card-title">{title}</div>
+                            <div class="home-card-desc">{desc}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.button("Open", key=f"home_{target}", on_click=_go, args=(target,),
+                              width='stretch')
+
+    # -------- Mobile: compact hero + 2-up tile grid --------
+    with st.container(key="home_mobile"):
+        st.markdown(
+            f"""
+            <div class="home-hero">
+                <div class="home-eyebrow">{league_name} &middot; {status}</div>
+                <div class="main-header home-title">Fantasy Basketball Simulator</div>
+                <p class="home-sub">Monte Carlo projections and season analytics for your ESPN
+                league. You're analyzing <strong>{team_name}</strong>.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # (label, page, key-slug). Icons are attached by slug in styles.py (--home-ic).
+        tiles = [
+            ("Season Summary", "Season Summary", "ss"),
+            ("Current Matchup", "Matchup", "cm"),
+            ("Season Stats", "Season Stats", "sst"),
+            ("League Stats", "League Stats", "ls"),
+            ("Playoff Odds", "Playoff Odds", "po"),
+            ("Schedule", "Schedule", "sch"),
+            ("Power Rankings", "Power Rankings", "pr"),
+            ("Trade Analyzer", "Trade Analyzer", "ta"),
+        ]
+        with st.container(key="home_tiles"):
+            for label, page, slug in tiles:
+                st.button(label, key=f"hometile_{slug}", on_click=_go, args=(page,), width='stretch')
 
 
 # Desktop header items. Each is either a plain page link or a dropdown menu:
 #   ("link", label, page)
 #   ("menu", label, ((sub-label, page), ...))   -> a st.popover dropdown
 # The This Week pages (Matchup/Streamers/Bench/Roster) are NOT here — they live in the
-# left "This Week" side rail, entered via "Current Matchup". Season Summary only over.
+# left "This Week" side rail, entered via "Current Matchup". Season Summary IS a header
+# link (desktop) — only removed from the mobile "Season" bottom-nav grouping, where it's
+# reachable via the Home tiles instead (owner request).
 FLAT_NAV = (
     ("link", "Season Summary", "Season Summary"),
     ("link", "Current Matchup", "Matchup"),
@@ -1440,22 +1511,20 @@ def render_top_nav(meta, team_name):
                             type="primary" if active_section == key else "secondary")
 
     # -------- Mobile sub-row: Season/Tools sub-pages (This Week uses the rail above) -----
-    sub_label, sub_pages = None, None
+    # No section-name label — the sub-row already only appears under its own section.
+    sub_pages = None
     for key, label, pages in NAV_SECTIONS:
         if key == active_section and key in ("season", "tools") and len(pages) > 1:
-            sub_label, sub_pages = label, list(pages)
+            sub_pages = list(pages)
     if sub_pages and active_section == "season" and not season_over:
         sub_pages = [p for p in sub_pages if p != "Season Summary"]
     if sub_pages:
         with st.container(key="nav_sub"):
-            cols = st.columns([1.1] + [1.0] * len(sub_pages), gap="small",
-                              vertical_alignment="center")
-            cols[0].markdown(f"<div class='nav-scope-label'>{sub_label}</div>",
-                             unsafe_allow_html=True)
+            cols = st.columns(len(sub_pages), gap="small", vertical_alignment="center")
             for i, pg in enumerate(sub_pages):
-                cols[i + 1].button(pg, key=f"navsub_{i}", width='stretch',
-                                   on_click=_go, args=(pg,),
-                                   type="primary" if active == pg else "secondary")
+                cols[i].button(pg, key=f"navsub_{i}", width='stretch',
+                                on_click=_go, args=(pg,),
+                                type="primary" if active == pg else "secondary")
 
     return st.session_state.active_page, st.session_state.week_sel, view_map[st.session_state.week_sel]
 
@@ -1504,13 +1573,26 @@ def main():
         return
 
     if active_page:
+        # These loading indicators (2 spinners + the progress bar below) are shared by This
+        # Week pages, where they're genuine useful feedback during a multi-second simulation,
+        # AND by Season Stats / League Stats, which don't actually use any of this work (they
+        # fetch their own data separately — a known rough edge). Even after a spinner/`.empty()`
+        # finishes, Streamlit leaves a zero-height placeholder that still counts toward the
+        # page's flex `gap`, which was pushing the Season/Tools sub-row out of alignment with
+        # the This Week rail. So on non-week pages, wrap each one in a keyed container that CSS
+        # collapses out of flow entirely; on This Week pages, use a different key prefix that
+        # CSS leaves alone, so the progress UI stays visible during the real computation.
+        _hide_progress = active_page not in WEEK_PAGES
+        def _pkey(i):
+            return f"mp_hide_{i}" if _hide_progress else f"mp_live_{i}"
+
         try:
             year = ESPN_SEASON_YEAR
-            with st.spinner("Loading from ESPN..."):
+            with st.container(key=_pkey(1)), st.spinner("Loading from ESPN..."):
                 league = get_league_cached(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
                 injury_data = get_injury_cached()
                 team_id, resolved_team_name = resolve_team_id(league, team_name, DEFAULT_TEAM_ID)
-            
+
             # League's live period, and the period the user chose to view.
             league_cw = current_matchup_period_effective(league)
             st.session_state["league_matchup_period"] = league_cw
@@ -1523,7 +1605,7 @@ def main():
 
             blend_weight = 0.7  # used for bracket projection + stat merge below
             # Get matchup info for the selected period
-            with st.spinner("Loading matchup data..."):
+            with st.container(key=_pkey(2)), st.spinner("Loading matchup data..."):
                 your_team_obj, opp_team_obj, matchup, current_week = get_matchup_info(
                     league, team_id, matchup_period=view_period
                 )
@@ -1575,9 +1657,10 @@ def main():
                         f"Completed matchups show final totals - no games remain to simulate."
                     )
 
-            # Build player stats
-            status_text = st.empty()
-            progress = st.progress(0)
+            # Build player stats.
+            with st.container(key=_pkey(3)):
+                status_text = st.empty()
+                progress = st.progress(0)
             status_text.text("Loading player stats...")
             
             your_roster = your_team_obj.roster

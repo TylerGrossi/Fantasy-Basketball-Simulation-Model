@@ -182,30 +182,41 @@ is kept** so 15-category stat sheets can reach their last column.
 
 **Responsive (phones / iPads).** Breakpoint is **767px** — iPad portrait (768) gets the
 **desktop** treatment (flat text header, no bottom bar; verified with deviceMetrics 768).
-At `<=767px` the top bar keeps **only the brand** (other columns hidden via
-`:not(:has(.st-key-nav_brand))`), pages move to the fixed **bottom icon bar** + `nav_sub` +
-the This Week rail-as-sub-bar (≥44px targets), and Season Summary metric tiles wrap 2-up.
-Streamlit makes `stMain` `position:absolute` on mobile, so header/footer offsets go on
-`stMainBlockContainer` padding (top `= --nav-h`, bottom `= --bottomnav-h`; This Week pages
-add ~3.3rem more top room for the sub-bar via a `:has(sidebar .stButton)` rule). **Before
-changing responsive CSS, read the `mobile-responsive-ux` skill** (navigation patterns, the
-Selenium device-emulation audit, and these Streamlit gotchas).
+At `<=767px` there is **no top header at all** — `.st-key-nav_top { display:none }`; all
+navigation is the fixed **bottom icon bar** + `nav_sub` + the This Week rail (which becomes a
+fixed sub-bar pinned at `top:0`, since there's no header above it). Streamlit makes `stMain`
+`position:absolute` on mobile, so offsets go on `stMainBlockContainer` padding: `top:0.5rem`
+normally, `top:3.4rem` on This Week pages (clear the sub-bar, via `:has(sidebar .stButton)`),
+`bottom: --bottomnav-h + 1rem` (clear the bottom bar). Season Summary metric tiles wrap 2-up.
+**Before changing responsive CSS, read the `mobile-responsive-ux` skill** (navigation
+patterns, the Selenium device-emulation audit, and these Streamlit gotchas).
 
 Scope is tracked by `st.session_state.active_page`. Desktop links come from `FLAT_NAV`;
 the mobile bottom bar / sub-row use `NAV_SECTIONS` (`_section_for_page` maps a page to its
 section, `_section_landing` gives the page a section opens to):
 
-- **Home** is the default landing (`render_home`) — an overview with quick-link cards, no
-  data-load gate. Reached by clicking the brand.
+- **Home** is the default landing (`render_home`) — **desktop and mobile are different
+  layouts, rendered simultaneously, shown/hidden by CSS breakpoint** (no server-side width
+  detection, no flash of the wrong layout): `.st-key-home_desktop` (hidden `<=767px`) is the
+  original hero + **4-card layout** (icon, title, description, separate "Open" button,
+  `.home-card`); `.st-key-home_mobile` (shown only `<=767px`) is a compact hero + a **2-up
+  grid of single-tap icon tiles** (`.st-key-home_tiles` is the grid — each tile is one
+  `st.button` styled as a card, icon set by slug via `--home-ic`), tuned to fit one phone
+  screen without scrolling. No data-load gate; reached by the brand (desktop) or the Home
+  bottom-bar icon (mobile).
 - **This Week** (`WEEK_PAGES`): Matchup · Streamers · Bench · Roster, reached from the side
   rail (entered via "Current Matchup"); the rail also holds the `week_sel` Week/Round picker
   (kept alive across page switches by a self-assign so its state survives runs where the rail
   isn't rendered).
-- **Season** (`SEASON_PAGES`): Season Summary · Season Stats · League Stats · Playoff Odds.
-  Season Summary shows a single **"YYYY–YY Season Complete"** heading, champion card, four
-  metric tiles, and the standings table, tuned to fit one 1080p screen. (Season Summary is
-  dropped from the section until the season is over.)
-- **Tools** (`TOOLS_PAGES`): Schedule · Power Rankings · Trade Analyzer.
+- **Season** (`SEASON_PAGES`, *mobile grouping*): Season Summary · Season Stats · League
+  Stats · **Schedule**. Season Summary shows a single **"YYYY–YY Season Complete"** heading,
+  champion card, four metric tiles, and the standings table, tuned to fit one 1080p screen.
+  (Season Summary is dropped from the section until the season is over.)
+- **Tools** (`TOOLS_PAGES`, *mobile grouping*): Power Rankings · **Playoff Odds** · Trade
+  Analyzer. Note the mobile sections **intentionally differ from the desktop dropdowns** (by
+  request): on mobile Schedule lives under Season and Playoff Odds under Tools; on desktop
+  Schedule is a top-level link and Playoff Odds is in the Tools dropdown. `SEASON_PAGES` /
+  `TOOLS_PAGES` are used *only* by `NAV_SECTIONS` (mobile), so they can diverge from `FLAT_NAV`.
 - **Settings** — the gear (`render_settings`). App options (team, sims, streamers, roster
   flags, untouchables, watchlist) live in `st.session_state` under `cfg_*` keys,
   seeded/re-registered every run by `init_settings()` so values survive page switches

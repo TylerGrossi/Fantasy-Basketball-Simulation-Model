@@ -70,6 +70,11 @@ CUSTOM_CSS = """
        only way to reopen it once collapsed, e.g. on mobile). */
     [data-testid="stHeader"] { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
+    /* Hide Streamlit Community Cloud chrome: the main menu, the "Manage app" status widget,
+       and the "Hosted with Streamlit" badge in the bottom-right (only appears on cloud). */
+    #MainMenu, footer, [data-testid="stStatusWidget"] { display: none !important; }
+    [class*="viewerBadge"], [data-testid="stAppDeployButton"],
+    a[href^="https://streamlit.io"], a[href*="//streamlit.io"] { display: none !important; }
 
     html, body, [class*="css"], .stMarkdown, p, span, label, div {
         font-family: var(--sans);
@@ -214,7 +219,16 @@ CUSTOM_CSS = """
     /* Season Summary metric row: match the champion card / standings width. */
     .st-key-ss_metrics { max-width: 960px; margin-left: auto; margin-right: auto; }
 
-    /* Home landing: quick-link cards */
+    /* ======= Home landing: DESKTOP and MOBILE are different layouts, on purpose =======
+       Both are rendered server-side; CSS shows only the one matching the breakpoint, so
+       there's no server-side width detection and no flash of the wrong layout. */
+    .st-key-home_mobile { display: none; }
+    @media (max-width: 767px) {
+        .st-key-home_desktop { display: none !important; }
+        .st-key-home_mobile { display: block; }
+    }
+
+    /* -------- Desktop: original 4-card layout (icon, title, desc, Open button) -------- */
     .st-key-home_links { max-width: 1040px; margin-left: auto; margin-right: auto; }
     .home-card {
         background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -225,12 +239,56 @@ CUSTOM_CSS = """
     .home-card-title { font-weight: 700; color: var(--ink); margin-top: 0.45rem; }
     .home-card-desc { color: var(--ink-2); font-size: 0.84rem; margin-top: 0.3rem; }
 
+    /* -------- Mobile: compact hero + 2-up icon-tile grid -------- */
+    .home-hero { text-align: center; padding: 0.7rem 0.5rem 0.6rem; }
+    .home-eyebrow {
+        font-family: var(--sans); font-size: 0.68rem; letter-spacing: 0.16em;
+        text-transform: uppercase; color: var(--ink-2);
+    }
+    .home-title { font-size: 1.4rem !important; margin-top: 0.15rem; }
+    .home-sub { color: var(--ink-2); margin: 0.4rem auto 0; font-size: 0.9rem; max-width: 560px; }
+    .home-sub strong { color: var(--ink); }
+
+    /* .st-key-home_tiles IS the vertical block holding the button element-containers —
+       make it the grid directly (2-up phones). Each tile is a single-tap button styled as
+       a card, icon set per slug via `--home-ic` (embedded bi font). */
+    .st-key-home_tiles {
+        max-width: 900px; margin: 1.1rem auto 0;
+        display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 0.6rem !important;
+    }
+    .st-key-home_tiles > [data-testid="stElementContainer"] { width: 100% !important; }
+    .st-key-home_tiles .stButton > button {
+        background: var(--card) !important; border: 1px solid var(--line) !important;
+        border-radius: 12px !important; color: var(--ink) !important; font-weight: 700 !important;
+        display: flex !important; flex-direction: column; align-items: center; justify-content: center;
+        gap: 0.5rem; min-height: 84px; padding: 0.9rem 0.6rem !important;
+        box-shadow: 0 1px 2px rgba(27,29,34,0.04) !important;
+    }
+    .st-key-home_tiles .stButton > button::before {
+        font-family: "bootstrap-icons"; content: var(--home-ic, "\\f5e6");
+        color: var(--cobalt); font-size: 1.5rem; line-height: 1;
+    }
+    .st-key-home_tiles .stButton > button p { font-size: 0.92rem; }
+    .st-key-home_tiles .stButton > button:hover {
+        border-color: var(--cobalt) !important; background: var(--card) !important;
+        color: var(--ink) !important; transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(47,111,237,0.12) !important;
+    }
+    .st-key-hometile_ss  button { --home-ic: "\\f5e6"; }  /* trophy-fill */
+    .st-key-hometile_cm  button { --home-ic: "\\f17a"; }  /* bar-chart-fill */
+    .st-key-hometile_sst button { --home-ic: "\\f71c"; }  /* clipboard-data-fill */
+    .st-key-hometile_ls  button { --home-ic: "\\f5aa"; }  /* table */
+    .st-key-hometile_po  button { --home-ic: "\\f2ed"; }  /* diagram-3-fill */
+    .st-key-hometile_sch button { --home-ic: "\\f214"; }  /* calendar3 */
+    .st-key-hometile_pr  button { --home-ic: "\\f673"; }  /* graph-up-arrow */
+    .st-key-hometile_ta  button { --home-ic: "\\f12b"; }  /* arrow-left-right */
+
     /* ================= Section navigation: light site header ================= */
     /* One control per section (This Week / Season / Tools + brand=Home + gear=Settings).
        Desktop: a fixed full-width top bar. Mobile: the top bar keeps only the brand and
        the sections move to a fixed bottom icon bar. A labeled sub-row exposes the pages
        inside the active multi-page section. The sidebar is retired. */
-    :root { --bottomnav-h: 4.1rem; }
+    :root { --bottomnav-h: 4.7rem; }
 
     /* The native sidebar is the "This Week" side rail — but only when it holds nav (i.e.
        on This Week pages). On every other page nothing renders into it, so hide the empty
@@ -268,9 +326,15 @@ CUSTOM_CSS = """
        a flex item at the top of the main column — and the column's 16px `gap` then stacks up
        as empty space before the page content (one gap per nav container). Pull those wrappers
        out of the flex flow so they add zero gap. nav_top + nav_bottom are always fixed/hidden;
-       nav_sub is in-flow only on mobile, so collapse it only on desktop. */
+       nav_sub is in-flow only on mobile, so collapse it only on desktop. The apple-touch-icon
+       injector (a zero-height components.html iframe) is invisible but is the same kind of
+       flex item, so it's collapsed here too — otherwise it pushes everything below it down by
+       a full gap and puts the This Week rail (fixed, top:0) out of alignment with the in-flow
+       Season/Tools sub-row. */
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_top),
-    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_bottom) {
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_bottom),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-touch_icon_injector),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has([class*="st-key-mp_hide_"]) {
         position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
     }
     @media (min-width: 768px) {
@@ -437,10 +501,10 @@ CUSTOM_CSS = """
         }
     }
     @media (max-width: 767px) {
-        /* becomes a fixed sub-bar pinned under the header (Streamlit's mobile drawer
-           toggle is unreliable), items laid out in one swipeable row */
+        /* becomes a fixed sub-bar pinned at the very top (no header on mobile; Streamlit's
+           mobile drawer toggle is unreliable), items laid out in one swipeable row */
         [data-testid="stSidebar"]:has(.stButton) {
-            position: fixed !important; top: var(--nav-h) !important;
+            position: fixed !important; top: 0 !important;
             left: 0 !important; right: 0 !important;
             width: 100% !important; min-width: 0 !important; max-width: none !important;
             height: auto !important; transform: none !important; visibility: visible !important;
@@ -460,9 +524,27 @@ CUSTOM_CSS = """
         [data-testid="stSidebar"] [data-baseweb="select"] { min-width: 150px; }
         [data-testid="stSidebar"] .stButton > button { white-space: nowrap; min-height: 44px; }
         [data-testid="stSidebar"] [data-testid="stSidebarHeader"] { display: none !important; padding: 0 !important; height: 0 !important; }
-        /* reserve room under BOTH the fixed header and this fixed sub-bar (This Week only) */
+        /* This Week pages: reserve room for the fixed sub-bar now pinned at top:0 */
         [data-testid="stAppViewContainer"]:has([data-testid="stSidebar"] .stButton) [data-testid="stMainBlockContainer"] {
-            padding-top: calc(var(--nav-h) + 3.3rem) !important;
+            padding-top: 3.4rem !important;
+        }
+        /* Match the other mobile sub-bars (Season / Tools, .st-key-nav_sub): plain text
+           tabs, no box, no left inset bar — just a cobalt underline when active. Overrides
+           the desktop rail's left-aligned/inset-bar look, which only makes sense vertically. */
+        [data-testid="stSidebar"] .stButton > button {
+            padding: 0.3rem 0.55rem !important; border-radius: 0 !important;
+            text-align: center !important; justify-content: center !important;
+        }
+        [data-testid="stSidebar"] .stButton > button p { font-size: 0.82rem; text-align: center; }
+        [data-testid="stSidebar"] .stButton > button:hover { background: transparent !important; }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"],
+        [data-testid="stSidebar"] .stButton [data-testid="stBaseButton-primary"] {
+            background: transparent !important;
+            box-shadow: inset 0 -2px 0 var(--cobalt) !important;
+        }
+        /* Lighten the week picker to match the flatter mobile look. */
+        [data-testid="stSidebar"] [data-baseweb="select"] > div {
+            border: none !important; background: transparent !important;
         }
     }
     [data-testid="stSidebar"] .nav-scope-label { display: block; margin: 0.2rem 0 0.6rem; }
@@ -506,20 +588,20 @@ CUSTOM_CSS = """
     .st-key-nav_sub [data-testid="stColumn"] {
         flex: 0 0 auto !important; width: auto !important; min-width: max-content !important;
     }
-    .st-key-nav_sub .nav-scope-label { padding-right: 0.4rem; }
     .st-key-nav_sub .stButton > button {
         background: transparent !important; color: var(--ink-2) !important;
-        border: none !important; box-shadow: none !important; border-radius: 6px !important;
-        padding: 0.35rem 0.7rem !important; font-weight: 600 !important;
+        border: none !important; box-shadow: none !important; border-radius: 0 !important;
+        padding: 0.3rem 0.55rem !important; font-weight: 600 !important;
     }
-    .st-key-nav_sub .stButton > button p { white-space: nowrap; font-size: 0.92rem; }
+    .st-key-nav_sub .stButton > button p { white-space: nowrap; font-size: 0.82rem; }
     .st-key-nav_sub .stButton > button:hover {
-        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        color: var(--ink) !important; background: transparent !important;
         transform: none !important; box-shadow: none !important;
     }
+    /* Active = just a cobalt underline, no background/box */
     .st-key-nav_sub .stButton > button[kind="primary"],
     .st-key-nav_sub .stButton [data-testid="stBaseButton-primary"] {
-        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        color: var(--ink) !important; background: transparent !important;
         box-shadow: inset 0 -2px 0 var(--cobalt) !important;
     }
     .st-key-nav_sub [data-baseweb="select"] > div {
@@ -532,16 +614,14 @@ CUSTOM_CSS = """
     /* Desktop hides it; mobile shows a fixed bottom tab bar (icon over label). */
     @media (min-width: 768px) { .st-key-nav_bottom { display: none !important; } }
     @media (max-width: 767px) {
-        /* clear the fixed header (stMain is position:absolute on mobile, so the app
-           container's --nav-h offset is ignored — pad the block container instead)
-           and reserve room for the fixed bottom bar. */
+        /* No top header on mobile — navigation is the fixed bottom icon bar. The whole top
+           bar is hidden; content starts near the top and only reserves room for the bottom
+           bar (stMain is position:absolute on mobile, so pad the block container directly). */
+        .st-key-nav_top { display: none !important; }
         [data-testid="stMainBlockContainer"] {
-            padding-top: calc(var(--nav-h) + 0.6rem) !important;
+            padding-top: 0.5rem !important;
             padding-bottom: calc(var(--bottomnav-h) + 1rem) !important;
         }
-        /* Top bar keeps only the brand — hide every other column (links + gear), brand left. */
-        .st-key-nav_top [data-testid="stColumn"]:not(:has(.st-key-nav_brand)) { display: none !important; }
-        .st-key-nav_top [data-testid="stHorizontalBlock"] { justify-content: flex-start !important; }
 
         .st-key-nav_bottom {
             position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
@@ -700,6 +780,13 @@ CUSTOM_CSS = """
         [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
         .stat-card { padding: 0.9rem; }
         [data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
+        /* Any row of st.metric tiles (Season Stats, League Stats, etc.) wraps 2-up instead
+           of stacking one-per-screen — same treatment as the Season Summary metric row. More
+           specific than the blanket column rule above, so it wins despite both !important. */
+        [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) { flex-wrap: wrap !important; }
+        [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) [data-testid="stColumn"] {
+            flex: 1 1 46% !important; width: 46% !important; min-width: 46% !important;
+        }
         .dataframe { font-size: 0.75rem !important; }
         .dataframe th, .dataframe td { padding: 4px 6px !important; }
         .js-plotly-plot { max-width: 100% !important; }
