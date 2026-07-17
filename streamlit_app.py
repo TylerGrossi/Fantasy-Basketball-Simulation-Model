@@ -448,7 +448,7 @@ def render_season_summary(meta, your_team_name):
 
     def _cell(v, align="right", color=ink, mono=True):
         fam = "ui-monospace,Consolas,monospace" if mono else "system-ui,Segoe UI,sans-serif"
-        return f"<td style='padding:6px 12px; text-align:{align}; font-family:{fam}; color:{color};'>{v}</td>"
+        return f"<td style='padding:6px 12px; text-align:{align}; font-family:{fam}; color:{color}; white-space:nowrap;'>{v}</td>"
 
     head_cells = [("Rank", "left"), ("Team", "left"), ("Record", "right"), ("Win %", "right")]
     if has_all_play:
@@ -468,8 +468,8 @@ def render_season_summary(meta, your_team_name):
         name_wt = "700" if is_you else "500"
         bar = "border-left:3px solid var(--cobalt);" if is_you else "border-left:3px solid transparent;"
         cells = (
-            f"<td style='{bar} padding:6px 12px; text-align:left; font-family:ui-monospace,Consolas,monospace; color:{ink2};'>{r['rank']}</td>"
-            f"<td style='padding:6px 12px; text-align:left; font-weight:{name_wt}; color:{ink};'>{r['name']}</td>"
+            f"<td style='{bar} padding:6px 12px; text-align:left; font-family:ui-monospace,Consolas,monospace; color:{ink2}; white-space:nowrap;'>{r['rank']}</td>"
+            f"<td style='padding:6px 12px; text-align:left; font-weight:{name_wt}; color:{ink}; white-space:nowrap;'>{r['name']}</td>"
             + _cell(rec)
             + _cell(f"{sd.get('actual_pct', 0) * 100:.1f}%" if sd else "&ndash;")
         )
@@ -482,9 +482,9 @@ def render_season_summary(meta, your_team_name):
 
     st.markdown(
         f"""
-        <div style="max-width:960px; margin:0.7rem auto 0; border:1px solid var(--line);
+        <div class="ss-standings-scroll" style="max-width:960px; margin:0.7rem auto 0; border:1px solid var(--line);
                     border-radius:12px; overflow-x:auto; background:var(--card);">
-            <table style="width:100%; border-collapse:collapse; font-family:system-ui, Segoe UI, sans-serif; min-width:520px;">
+            <table style="width:100%; border-collapse:collapse; font-family:system-ui, Segoe UI, sans-serif;">
                 <thead><tr style="background:var(--surface-2); border-bottom:1px solid var(--line);">{thead}</tr></thead>
                 <tbody>{body}</tbody>
             </table>
@@ -1743,16 +1743,15 @@ def main():
         return
 
     if active_page:
-        # These loading indicators (2 spinners + the progress bar below) are shared by This
-        # Week pages, where they're genuine useful feedback during a multi-second simulation,
-        # AND by Season Stats / League Stats, which don't actually use any of this work (they
-        # fetch their own data separately — a known rough edge). Even after a spinner/`.empty()`
+        # These loading indicators (2 spinners + the progress bar below) are genuinely
+        # useful feedback only on the Matchup page (the one page that shows the picker
+        # header and visibly waits on the live simulation). Even after a spinner/`.empty()`
         # finishes, Streamlit leaves a zero-height placeholder that still counts toward the
-        # page's flex `gap`, which was pushing the Season/Tools sub-row out of alignment with
-        # the This Week rail. So on non-week pages, wrap each one in a keyed container that CSS
-        # collapses out of flow entirely; on This Week pages, use a different key prefix that
-        # CSS leaves alone, so the progress UI stays visible during the real computation.
-        _hide_progress = active_page not in WEEK_PAGES
+        # page's flex `gap` - on every other page (Season Stats/League Stats, and now also
+        # Scoreboard/Streamers/Bench/Roster, which dropped their own redundant header) that
+        # was leaving a visible empty band at the top. Collapse it out of flow everywhere
+        # except Matchup.
+        _hide_progress = active_page != "Matchup"
         def _pkey(i):
             return f"mp_hide_{i}" if _hide_progress else f"mp_live_{i}"
 
@@ -1807,7 +1806,10 @@ def main():
                 # Completed weeks have no games left, so results show as final.
                 game_window_start, game_window_end, week_span, period_end_date = resolve_view_window(view_period, year)
 
-            if active_page in WEEK_PAGES:
+            # Only the Matchup page shows the Week/Round picker + team-names header - the
+            # other This Week pages (Scoreboard, Streamers, Bench, Roster) each start
+            # straight into their own content instead of repeating it (owner request).
+            if active_page == "Matchup":
                 # Matchup header, two rows: the Week/Round picker gets a full-width row to
                 # itself (its text, e.g. "Playoffs - Round 2", doesn't truncate, so it needs
                 # room free of any neighbor); team names get their own row below with far
@@ -1859,12 +1861,21 @@ def main():
                 window_start=game_window_start,
                 window_end=game_window_end,
             )
-            # Warm cache in parallel, then one schedule pass per fantasy team (was four).
-            prefetch_team_schedules_for_rosters(your_roster, opp_roster)
             your_merged = blend_season_last30(your_season, your_last30, blend_weight)
             opp_merged = blend_season_last30(opp_season, opp_last30, blend_weight)
-            your_merged = add_games_left_with_injury(your_merged, your_roster, injury_data, **_ag_kw)
-            opp_merged = add_games_left_with_injury(opp_merged, opp_roster, injury_data, **_ag_kw)
+            if is_live_view:
+                # Warm cache in parallel, then one schedule pass per fantasy team (was four).
+                prefetch_team_schedules_for_rosters(your_roster, opp_roster)
+                your_merged = add_games_left_with_injury(your_merged, your_roster, injury_data, **_ag_kw)
+                opp_merged = add_games_left_with_injury(opp_merged, opp_roster, injury_data, **_ag_kw)
+            else:
+                # A completed week has zero games left for everyone, by definition - no NBA
+                # schedule lookups or injury data needed to know that, so skip straight to it
+                # (this is what add_games_left_with_injury would come back with anyway, just
+                # ~2s of ESPN/NBA-schedule work later). The real final totals already fetched
+                # above (current_you/current_opp) carry the actual result from here.
+                your_merged["Games Left"] = 0
+                opp_merged["Games Left"] = 0
             
             progress.progress(50)
             status_text.text("Preparing matchup simulation...")
@@ -1913,8 +1924,10 @@ def main():
             # Pages are chosen by the top nav (active_page).
             
             # ==================== SCOREBOARD (its own page — see WEEK_PAGES) ====================
+            # No heading here - the "Scoreboard" nav tab already says what this page is,
+            # and create_scoreboard_vertical's own hero row (team names + W-L-T) repeats
+            # it again right below.
             if active_page == "Scoreboard":
-                st.markdown('<h2><i class="bi bi-trophy-fill" style="color: var(--clay);"></i> Scoreboard</h2>', unsafe_allow_html=True)
                 st.markdown(create_scoreboard_vertical(current_you, current_opp, your_team_name, opp_team_name), unsafe_allow_html=True)
 
             # ==================== TAB 1: MATCHUP ANALYSIS ====================
@@ -1925,19 +1938,41 @@ def main():
                 st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: var(--good);"></i> Key Metrics</h3>', unsafe_allow_html=True)
                 your_roster_games = int(your_team_df["Games Left"].sum())
                 opp_roster_games = int(opp_team_df["Games Left"].sum())
-                metric_cols = st.columns(5)
-                with metric_cols[0]:
-                    st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{baseline_avg_cats - 7.5:.1f} vs even")
-                with metric_cols[1]:
-                    sorted_outcomes = sorted(outcome_counts.items(), key=lambda x: x[1], reverse=True)
-                    most_likely = sorted_outcomes[0][0]
-                    st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
-                with metric_cols[2]:
-                    st.metric("Simulations", f"{sim_count:,}")
-                with metric_cols[3]:
-                    st.metric("Your Games Left", your_roster_games, help=f"{your_team_name}")
-                with metric_cols[4]:
-                    st.metric("Opp Games Left", opp_roster_games, help=f"{opp_team_name}")
+                sorted_outcomes = sorted(outcome_counts.items(), key=lambda x: x[1], reverse=True)
+                most_likely = sorted_outcomes[0][0]
+                cats_delta = baseline_avg_cats - 7.5
+
+                # Desktop: original 5-across row. Mobile: regrouped (own CSS breakpoint,
+                # not a wrap-based layout) so Your/Opp Games Left share a row together
+                # instead of each landing next to whichever metric happens to precede it,
+                # and Expected Cats gets its value+delta on one line instead of stacked.
+                with st.container(key="matchup_metrics_desktop"):
+                    metric_cols = st.columns(5)
+                    with metric_cols[0]:
+                        st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{cats_delta:.1f} vs even")
+                    with metric_cols[1]:
+                        st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
+                    with metric_cols[2]:
+                        st.metric("Simulations", f"{sim_count:,}")
+                    with metric_cols[3]:
+                        st.metric("Your Games Left", your_roster_games, help=f"{your_team_name}")
+                    with metric_cols[4]:
+                        st.metric("Opp Games Left", opp_roster_games, help=f"{opp_team_name}")
+
+                with st.container(key="matchup_metrics_mobile"):
+                    # Plain st.metric cards, 2x2 (the existing mobile stMetric wrap rule
+                    # handles that) - Simulations dropped here, it's not something worth a
+                    # whole card's worth of space on a phone.
+                    r1c1, r1c2 = st.columns(2)
+                    with r1c1:
+                        st.metric("Expected Cats", f"{baseline_avg_cats:.1f}", delta=f"{cats_delta:.1f} vs even")
+                    with r1c2:
+                        st.metric("Most Likely", f"{most_likely[0]}-{most_likely[1]}")
+                    r2c1, r2c2 = st.columns(2)
+                    with r2c1:
+                        st.metric("Your Games Left", your_roster_games, help=f"{your_team_name}")
+                    with r2c2:
+                        st.metric("Opp Games Left", opp_roster_games, help=f"{opp_team_name}")
                 
                 # Win probability gauge and Score Distribution side by side
                 col1, col2 = st.columns([1, 1])
@@ -1997,12 +2032,6 @@ def main():
             # ==================== ROSTER ====================
             if active_page == "Roster":
                 st.markdown('<h2><i class="bi bi-people-fill" style="color: var(--cobalt);"></i> Rosters</h2>', unsafe_allow_html=True)
-                st.markdown(
-                    f'<p style="color: var(--ink-2);">Projected per-game stats and games left this period for '
-                    f'<strong style="color: var(--ink);">{your_team_name}</strong> vs '
-                    f'<strong style="color: var(--ink);">{opp_team_name}</strong>.</p>',
-                    unsafe_allow_html=True,
-                )
                 roster_cols = ["Player", "NBA_Team", "Games Left", "PTS", "REB", "AST",
                                "STL", "BLK", "3PM", "TO", "FG%", "FT%"]
 
@@ -2025,8 +2054,7 @@ def main():
             # ==================== TAB 2: BENCH STRATEGY ====================
             if active_page == "Bench":
                 st.markdown('<h2><i class="bi bi-pause-circle-fill" style="color: var(--cobalt);"></i> Bench Strategy Analysis</h2>', unsafe_allow_html=True)
-                st.markdown('<p style="color: var(--ink-2);">Should you bench your players today to protect your lead? This analyzes whether sitting everyone improves your expected categories won.</p>', unsafe_allow_html=True)
-                
+
                 with st.spinner("Analyzing bench vs play scenarios..."):
                     bench_analysis = analyze_bench_strategy(
                         your_team_df, opp_team_df,
@@ -2120,25 +2148,48 @@ def main():
                 
                 # Season Totals Summary Card
                 st.markdown('<h3><i class="bi bi-bar-chart-line-fill" style="color: var(--good);"></i> Team Season Totals</h3>', unsafe_allow_html=True)
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Total Points", f"{int(season_totals['PTS']):,}")
-                    st.metric("Total Rebounds", f"{int(season_totals['REB']):,}")
-                with col2:
-                    st.metric("Total Assists", f"{int(season_totals['AST']):,}")
-                    st.metric("Total Steals", f"{int(season_totals['STL']):,}")
-                with col3:
-                    st.metric("Total Blocks", f"{int(season_totals['BLK']):,}")
-                    st.metric("Total 3PM", f"{int(season_totals['3PM']):,}")
-                with col4:
-                    st.metric("FG%", f"{season_fg_pct:.3f}")
-                    st.metric("FT%", f"{season_ft_pct:.3f}")
-                
+
+                season_stat_items = [
+                    ("Total Points", f"{int(season_totals['PTS']):,}"),
+                    ("Total Rebounds", f"{int(season_totals['REB']):,}"),
+                    ("Total Assists", f"{int(season_totals['AST']):,}"),
+                    ("Total Steals", f"{int(season_totals['STL']):,}"),
+                    ("Total Blocks", f"{int(season_totals['BLK']):,}"),
+                    ("Total 3PM", f"{int(season_totals['3PM']):,}"),
+                    ("FG%", f"{season_fg_pct:.3f}"),
+                    ("FT%", f"{season_ft_pct:.3f}"),
+                ]
+                # Desktop: original 4x2 st.metric card grid. Mobile: a compact strip (same
+                # numbers, a fraction of the height) - 8 full bordered cards each ~116px
+                # tall pushed the real content (the player tables) well below the fold.
+                with st.container(key="ss_totals_desktop"):
+                    cols = st.columns(4)
+                    for col, (label, val) in zip(cols, season_stat_items[:4]):
+                        col.metric(label, val)
+                    cols2 = st.columns(4)
+                    for col, (label, val) in zip(cols2, season_stat_items[4:]):
+                        col.metric(label, val)
+                with st.container(key="ss_totals_mobile"):
+                    strip = "".join(
+                        f'<div class="ss-strip-item"><span class="ss-strip-label">{label}</span>'
+                        f'<span class="ss-strip-value">{val}</span></div>'
+                        for label, val in season_stat_items
+                    )
+                    st.markdown(f'<div class="ss-strip">{strip}</div>', unsafe_allow_html=True)
+
                 # Player Stats Table - TOTALS
-                st.markdown('<h3><i class="bi bi-person-lines-fill" style="color: var(--cobalt);"></i> Player Contributions (Season Totals)</h3>', unsafe_allow_html=True)
-                
+                st.markdown('<h3><i class="bi bi-person-lines-fill" style="color: var(--cobalt);"></i> Player Contributions</h3>', unsafe_allow_html=True)
+
                 if player_season_stats:
+                    # A 16-column table is unreadable on a narrow screen (mostly horizontal
+                    # scrolling); let the stat groups be viewed separately instead - each
+                    # view is narrow enough to read without much scrolling on any screen,
+                    # desktop included. Applies to both tables below (totals + per-game).
+                    STAT_VIEWS = {
+                        "Overview": ["GP", "PTS", "REB", "AST", "STL", "BLK", "TO"],
+                        "Shooting": ["GP", "FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%"],
+                        "Other": ["GP", "DD", "TW"],
+                    }
                     # Build player dataframe for totals
                     player_data_total = []
                     
@@ -2178,11 +2229,8 @@ def main():
                         del p["_pts_raw"]
                     
                     player_df_total = pd.DataFrame(player_data_total)
-                    render_sortable_table(player_df_total, "ss_total", default_col="PTS")
-                    
+
                     # Player Stats Table - PER GAME AVERAGES
-                    st.markdown('<h3><i class="bi bi-calculator" style="color: var(--good);"></i> Player Contributions (Per Game Average)</h3>', unsafe_allow_html=True)
-                    
                     player_data_avg = []
                     
                     for name, stats in player_season_stats.items():
@@ -2223,8 +2271,33 @@ def main():
                         del p["_pts_raw"]
                     
                     player_df_avg = pd.DataFrame(player_data_avg)
-                    render_sortable_table(player_df_avg, "ss_avg", default_col="PTS")
-                    
+
+                    # Desktop: unchanged - one "Show" (stat group) picker, both tables
+                    # shown stacked. Mobile: two tables stacked was too much scrolling, so
+                    # a second picker (default Per Game - the more commonly useful view)
+                    # chooses which single table is shown, sitting to the left of "Show".
+                    with st.container(key="ss_tables_desktop"):
+                        stat_view_d = st.selectbox("Show", list(STAT_VIEWS), key="ss_stat_view_desktop")
+                        view_cols_d = ["Player"] + STAT_VIEWS[stat_view_d]
+                        st.markdown('<h4>Season Totals</h4>', unsafe_allow_html=True)
+                        render_sortable_table(player_df_total[[c for c in view_cols_d if c in player_df_total.columns]],
+                                              "ss_total", default_col="PTS")
+                        st.markdown('<h4>Per Game Average</h4>', unsafe_allow_html=True)
+                        render_sortable_table(player_df_avg[[c for c in view_cols_d if c in player_df_avg.columns]],
+                                              "ss_avg", default_col="PTS")
+
+                    with st.container(key="ss_tables_mobile"):
+                        with st.container(key="ss_picker_row"):
+                            vcol, scol = st.columns(2)
+                            with vcol:
+                                table_view_m = st.selectbox("View", ["Per Game", "Totals"], key="ss_table_view_mobile")
+                            with scol:
+                                stat_view_m = st.selectbox("Show", list(STAT_VIEWS), key="ss_stat_view_mobile")
+                        view_cols_m = ["Player"] + STAT_VIEWS[stat_view_m]
+                        active_df = player_df_avg if table_view_m == "Per Game" else player_df_total
+                        render_sortable_table(active_df[[c for c in view_cols_m if c in active_df.columns]],
+                                              "ss_mobile", default_col="PTS")
+
                     # Top contributors summary - use total data for leaders
                     st.markdown('<h3><i class="bi bi-award-fill" style="color: var(--clay);"></i> Top Contributors</h3>', unsafe_allow_html=True)
                     

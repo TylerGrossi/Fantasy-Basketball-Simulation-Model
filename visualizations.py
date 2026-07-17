@@ -84,8 +84,13 @@ def create_scoreboard_vertical(current_you, current_opp, your_team_name, opp_tea
         lower_better = cat == "TO"
         y_win = (y_val < o_val) if lower_better else (y_val > o_val)
         o_win = (o_val < y_val) if lower_better else (o_val > y_val)
-        y_color = GOOD if y_win else BAD if o_win else INK_3
-        o_color = GOOD if o_win else BAD if y_win else INK_3
+        # Lead is shown by the two-tone bar (cobalt/clay) + weight, not red/green on the
+        # numbers themselves - stays legible and matches the rest of the design system,
+        # where clay/bad-red are reserved for warnings, not "you're losing this stat".
+        y_weight = 700 if y_win else 400
+        o_weight = 700 if o_win else 400
+        y_color = INK if y_win else INK_3
+        o_color = INK if o_win else INK_3
         y_str = f"{y_val:.4f}" if "%" in cat else str(int(y_val))
         o_str = f"{o_val:.4f}" if "%" in cat else str(int(o_val))
         # Bar share reflects who's WINNING the category, not raw magnitude — for TO
@@ -102,14 +107,14 @@ def create_scoreboard_vertical(current_you, current_opp, your_team_name, opp_tea
         # after the first rendered as raw `<div ...>` text until this was flattened.
         rows += (
             f'<div style="display:flex; align-items:center; gap:0.6rem; padding:0.6rem 0.1rem; border-bottom:1px solid {LINE};">'
-            f'<div style="min-width:56px; text-align:left; font-family:{MONO}; font-weight:700; font-size:0.98rem; color:{y_color};">{y_str}</div>'
+            f'<div style="min-width:56px; text-align:left; font-family:{MONO}; font-weight:{y_weight}; font-size:0.98rem; color:{y_color};">{y_str}</div>'
             f'<div style="flex:1; min-width:0;">'
             f'<div style="text-align:center; font-family:{SANS}; font-size:0.66rem; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:{INK_2}; margin-bottom:0.3rem;">{cat}</div>'
             f'<div style="height:4px; border-radius:2px; overflow:hidden; display:flex; background:{LINE};">'
             f'<div style="width:{y_pct}%; background:{COBALT};"></div>'
             f'<div style="width:{100 - y_pct}%; background:{CLAY};"></div>'
             f'</div></div>'
-            f'<div style="min-width:56px; text-align:right; font-family:{MONO}; font-weight:700; font-size:0.98rem; color:{o_color};">{o_str}</div>'
+            f'<div style="min-width:56px; text-align:right; font-family:{MONO}; font-weight:{o_weight}; font-size:0.98rem; color:{o_color};">{o_str}</div>'
             f'</div>'
         )
 

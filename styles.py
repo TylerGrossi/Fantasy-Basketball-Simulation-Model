@@ -904,6 +904,16 @@ CUSTOM_CSS = """
         margin: 0 !important; border-radius: 0 !important;
     }
 
+    /* Season Summary standings table: a plain HTML table (not the dataframe grid), so it
+       doesn't inherit the dataframe scrollbar CSS below - give it the same visible
+       horizontal scrollbar explicitly. Without one, a table wider than the phone screen
+       just reads as silently cut off (no visible affordance that swiping scrolls it). */
+    .ss-standings-scroll::-webkit-scrollbar { height: 10px; }
+    .ss-standings-scroll::-webkit-scrollbar-thumb {
+        background: var(--line-strong); border-radius: 5px;
+    }
+    .ss-standings-scroll::-webkit-scrollbar-track { background: transparent; }
+
     /* -------- Matchup header: team · Week/Round picker · team, always ONE line -------
        Streamlit's blanket mobile rule stacks stColumns to 100% width (one per row); this
        row is explicitly kept horizontal at every width, with each team name truncated by
@@ -929,6 +939,64 @@ CUSTOM_CSS = """
     /* The date-range caption under the header is dropped on mobile — too much small
        text clutter on a narrow screen; the date range still shows in the table below. */
     @media (max-width: 767px) { .st-key-matchup_caption { display: none !important; } }
+
+    /* Matchup "Key Metrics": desktop keeps the original 5-across st.metric row (incl.
+       Simulations); mobile drops Simulations and shows the remaining 4 as plain
+       st.metric cards, 2x2 (the existing mobile stMetric wrap rule below handles the
+       2-up layout) - same both-rendered-CSS-toggles-visibility pattern as
+       .st-key-home_desktop/_mobile. */
+    .st-key-matchup_metrics_mobile { display: none; }
+    @media (max-width: 767px) {
+        .st-key-matchup_metrics_desktop { display: none !important; }
+        /* flex, not block: this container's children (two st.columns rows) rely on
+           Streamlit's own flex `gap` for spacing between them - `gap` is a no-op on a
+           block container, which was silently collapsing all spacing between the rows
+           to zero (the reported "overlapping" cards). */
+        .st-key-matchup_metrics_mobile { display: flex !important; flex-direction: column; }
+    }
+
+    /* Season Stats "Team Season Totals": desktop keeps the 4x2 st.metric card grid;
+       mobile gets a compact strip instead - 8 full 116px-tall bordered cards pushed the
+       actual content (the player tables) well below the fold on a phone. */
+    .st-key-ss_totals_mobile { display: none; }
+    @media (max-width: 767px) {
+        .st-key-ss_totals_desktop { display: none !important; }
+        .st-key-ss_totals_mobile { display: block; }
+    }
+    .ss-strip {
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 1.2rem;
+        background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+        padding: 0.2rem 0.9rem; margin-bottom: 0.5rem;
+    }
+    /* Season Stats player tables: desktop keeps both tables (Season Totals + Per Game
+       Average) stacked with one "Show" stat-group picker; mobile shows only one table
+       at a time (default Per Game) via its own "View" picker next to "Show" - two full
+       tables stacked was too much scrolling on a phone. display:flex (not block) here
+       for the same reason as .st-key-matchup_metrics_mobile above: these containers'
+       children rely on Streamlit's own flex `gap` for spacing, which is a no-op once a
+       container is display:block. */
+    .st-key-ss_tables_mobile { display: none; }
+    @media (max-width: 767px) {
+        .st-key-ss_tables_desktop { display: none !important; }
+        .st-key-ss_tables_mobile { display: flex !important; flex-direction: column; }
+        /* The blanket mobile rule below stacks every st.columns row to one column per
+           row (100% width) - override just this one, so "View" and "Show" stay side by
+           side as asked ("a dropdown to the left of the show dropdown"), not stacked. */
+        .st-key-ss_picker_row [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 0.6rem !important; }
+        .st-key-ss_picker_row [data-testid="stColumn"] {
+            width: 50% !important; flex: 1 1 50% !important; min-width: 0 !important;
+        }
+    }
+    .ss-strip-item {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.55rem 0; border-bottom: 1px solid var(--line-2);
+    }
+    .ss-strip-item:nth-last-child(-n+2) { border-bottom: none; }
+    .ss-strip-label { color: var(--ink-2); font-size: 0.76rem; }
+    .ss-strip-value {
+        font-family: var(--mono); font-variant-numeric: tabular-nums;
+        font-weight: 700; color: var(--ink); font-size: 0.9rem;
+    }
 
     /* ========================================================================
        RESPONSIVE

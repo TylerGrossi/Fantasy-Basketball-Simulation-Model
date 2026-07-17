@@ -26,26 +26,30 @@ WHITE = (255, 255, 255)
 
 
 def main():
-    img = Image.new("RGB", (SIZE, SIZE), WHITE)
+    # Supersample: draw at 4x then downscale, so thin curved strokes anti-alias cleanly
+    # instead of looking chunky/jagged at native size.
+    SS = 4
+    img = Image.new("RGB", (SIZE * SS, SIZE * SS), WHITE)
     d = ImageDraw.Draw(img)
 
-    r = (SIZE - 2 * MARGIN) // 2
-    cx = cy = SIZE // 2
+    r = (SIZE - 2 * MARGIN) // 2 * SS
+    cx = cy = SIZE * SS // 2
     bbox = (cx - r, cy - r, cx + r, cy + r)
 
-    line_w = max(3, r // 18)
+    line_w = max(1, r // 34) * SS  # thin seams (previous versions' lines were too heavy)
     d.ellipse(bbox, fill=ORANGE, outline=INK, width=line_w)
 
-    # Vertical + horizontal seams (full diameter, clipped to the circle by construction).
+    # Just the cross seams (vertical + horizontal, full diameter so they meet the outline
+    # exactly) - no curved side seams. At the size this actually renders at on a phone
+    # home screen (~60-120px), curved pole-to-pole seams read as stray/misaligned noise
+    # rather than a basketball (tried several widths - too narrow looked like globe
+    # meridians, too wide nearly vanished into the outline). A clean cross-in-circle is
+    # the standard simplified-flat-icon treatment for a basketball at small sizes, and it
+    # sidesteps that whole class of alignment problems entirely.
     d.line((cx, cy - r, cx, cy + r), fill=INK, width=line_w)
     d.line((cx - r, cy, cx + r, cy), fill=INK, width=line_w)
 
-    # Two curved side seams, anchored on the circle boundary (top/bottom), bowing inward -
-    # unlike the old design, these never leave the circle's own silhouette.
-    curve_bbox_left = (cx - r * 1.7, cy - r, cx - r * 0.3, cy + r)
-    curve_bbox_right = (cx + r * 0.3, cy - r, cx + r * 1.7, cy + r)
-    d.arc(curve_bbox_left, start=300, end=60, fill=INK, width=line_w)
-    d.arc(curve_bbox_right, start=120, end=240, fill=INK, width=line_w)
+    img = img.resize((SIZE, SIZE), Image.LANCZOS)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
