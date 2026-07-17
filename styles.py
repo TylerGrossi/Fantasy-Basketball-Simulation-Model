@@ -264,25 +264,26 @@ CUSTOM_CSS = """
     .home-sub strong { color: var(--ink); }
 
     /* .st-key-home_tiles IS the vertical block holding the button element-containers —
-       make it the grid directly (2-up phones). Each tile is a single-tap button styled as
-       a card, icon set per slug via `--home-ic` (embedded bi font). */
+       make it the grid directly (3-up phones, so 9 tiles fit in 3 rows without scrolling).
+       Each tile is a single-tap button styled as a card, icon set per slug via `--home-ic`
+       (embedded bi font). */
     .st-key-home_tiles {
-        max-width: 900px; margin: 1.3rem auto 0; width: 100%;
-        display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 0.8rem !important;
+        max-width: 900px; margin: 1.1rem auto 0; width: 100%;
+        display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 0.6rem !important;
     }
     .st-key-home_tiles > [data-testid="stElementContainer"] { width: 100% !important; }
     .st-key-home_tiles .stButton > button {
         background: var(--card) !important; border: 1px solid var(--line) !important;
         border-radius: 14px !important; color: var(--ink) !important; font-weight: 700 !important;
         display: flex !important; flex-direction: column; align-items: center; justify-content: center;
-        gap: 0.6rem; min-height: 118px; padding: 1rem 0.8rem !important;
+        gap: 0.6rem; min-height: 188px; padding: 1rem 0.5rem !important;
         box-shadow: 0 1px 2px rgba(27,29,34,0.04) !important;
     }
     .st-key-home_tiles .stButton > button::before {
         font-family: "bootstrap-icons"; content: var(--home-ic, "\\f5e6");
-        color: var(--cobalt); font-size: 1.9rem; line-height: 1;
+        color: var(--cobalt); font-size: 2.2rem; line-height: 1;
     }
-    .st-key-home_tiles .stButton > button p { font-size: 0.98rem; }
+    .st-key-home_tiles .stButton > button p { font-size: 0.92rem; line-height: 1.15; text-align: center; }
     .st-key-home_tiles .stButton > button:hover {
         border-color: var(--cobalt) !important; background: var(--card) !important;
         color: var(--ink) !important; transform: translateY(-1px);
@@ -295,14 +296,15 @@ CUSTOM_CSS = """
     .st-key-hometile_po  button { --home-ic: "\\f2ed"; }  /* diagram-3-fill */
     .st-key-hometile_sch button { --home-ic: "\\f214"; }  /* calendar3 */
     .st-key-hometile_pr  button { --home-ic: "\\f673"; }  /* graph-up-arrow */
-    .st-key-hometile_ta  button { --home-ic: "\\f12b"; }  /* arrow-left-right */
+    .st-key-hometile_pv  button { --home-ic: "\\f4d3"; }  /* person-badge */
+    .st-key-hometile_ts  button { --home-ic: "\\f544"; }  /* shuffle */
 
     /* ================= Section navigation: light site header ================= */
     /* One control per section (This Week / Season / Tools + brand=Home + gear=Settings).
        Desktop: a fixed full-width top bar. Mobile: the top bar keeps only the brand and
        the sections move to a fixed bottom icon bar. A labeled sub-row exposes the pages
        inside the active multi-page section. The sidebar is retired. */
-    :root { --bottomnav-h: 5.4rem; }
+    :root { --bottomnav-h: 6.3rem; }
 
     /* The native sidebar is the "This Week" side rail — but only when it holds nav (i.e.
        on This Week pages). On every other page nothing renders into it, so hide the empty
@@ -357,6 +359,41 @@ CUSTOM_CSS = """
             position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
         }
     }
+
+    /* ================= Page footer: minimal utility footer, every page ================= */
+    /* A slim brand/source line + "back to top" - no link farm, this is a single-owner tool
+       not a marketing site. On a short page (e.g. Home) it would otherwise land mid-page
+       with dead space below it, which is the exact "content feels cut off" complaint this
+       was added to fix - so the classic flexbox sticky-footer trick pushes it to the bottom
+       of the viewport instead: the top-level vertical block gets a min-height matching the
+       visible viewport (100vh minus the fixed top bar it's already padded below), and the
+       footer's own wrapper gets margin-top:auto to soak up any leftover space. On a long
+       page the block is already taller than that min-height, so this is a no-op there and
+       the footer just sits right after the real content, same as a normal footer. */
+    @media (min-width: 768px) {
+        [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] {
+            min-height: calc(100vh - var(--nav-h));
+        }
+        [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-app_footer) {
+            margin-top: auto;
+        }
+    }
+    .st-key-app_footer {
+        border-top: 1px solid var(--line); margin-top: 2.5rem; padding-top: 1rem;
+    }
+    .app-footer-inner {
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: 0.5rem;
+        max-width: var(--content-max); margin: 0 auto; padding: 0 var(--page-pad) 1rem;
+    }
+    .app-footer-brand {
+        font-size: 0.78rem; color: var(--ink-3);
+    }
+    .app-footer-top {
+        font-size: 0.78rem; color: var(--ink-2) !important; text-decoration: none !important;
+        font-weight: 600;
+    }
+    .app-footer-top:hover { color: var(--cobalt) !important; }
 
     .nav-scope-label {
         font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase;
@@ -466,11 +503,16 @@ CUSTOM_CSS = """
         box-shadow: 0 10px 28px rgba(20,16,10,0.14), 0 2px 6px rgba(20,16,10,0.06) !important;
     }
     [data-testid="stPopoverBody"] [data-testid="stVerticalBlock"] { gap: 0.15rem !important; }
+    /* The button itself only sizes to its text unless forced wide, so left-align on its
+       label had nothing to align against inside the (wider, centered) popover panel. */
+    [data-testid="stPopoverBody"] [data-testid="stElementContainer"],
+    [data-testid="stPopoverBody"] .stButton { width: 100% !important; }
     [data-testid="stPopoverBody"] .stButton > button {
         background: transparent !important; color: var(--ink-2) !important;
         border: none !important; box-shadow: none !important; border-radius: 8px !important;
         text-align: left !important; justify-content: flex-start !important;
         font-weight: 600 !important; padding: 0.55rem 0.8rem !important;
+        width: 100% !important;
         transition: background 0.12s ease, color 0.12s ease;
     }
     [data-testid="stPopoverBody"] .stButton > button p { text-align: left; width: 100%; margin: 0; }

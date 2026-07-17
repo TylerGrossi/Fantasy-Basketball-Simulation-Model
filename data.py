@@ -536,6 +536,7 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
         rows.append({
             "Player": p.name,
             "NBA_Team": p.proTeam,
+            "Position": getattr(p, "position", "") or "",
             "Team": fantasy_team_name,
             "FGM": fgm, "FGA": fga,
             "FG%": fgm / fga if fga > 0 else 0,

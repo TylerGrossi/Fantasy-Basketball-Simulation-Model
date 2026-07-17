@@ -323,17 +323,24 @@ def render_sortable_table(df, key, default_col=None, default_desc=True, max_heig
         return int(min(max_px, max(min_px, round(n * px_per_char) + pad)))
 
     cfg = {}
+    total_width = 0
     for c in cols:
         width_px = _fit_width(c, df[c])
+        total_width += width_px
         if c == cols[0]:
             cfg[c] = st.column_config.TextColumn(width=width_px)
         elif c in pct_cols:
             cfg[c] = st.column_config.NumberColumn(format="%.1f%%", width=width_px)
         else:
             cfg[c] = st.column_config.Column(width=width_px)
-    # 'stretch' would re-expand every fixed pixel width to fill the container,
-    # undoing the fit-to-content sizing above (most visible on narrow mobile screens).
-    kwargs = dict(width='content', hide_index=True, column_config=cfg, key=f"srt_{key}")
+    # A table narrower than the page's content column grows to fill it ('stretch'); one
+    # wider than that would, left at 'content', exceed the page's centered column and get
+    # silently clipped by the page's own overflow rule instead of scrolling (see html/body
+    # overflow-x rule) - so give it its exact natural (longest-column-sum) width instead,
+    # which the grid then scrolls internally to reveal, same as any other wide content block.
+    PAGE_CONTENT_CAP_PX = 1100
+    table_width = "stretch" if total_width <= PAGE_CONTENT_CAP_PX else total_width
+    kwargs = dict(width=table_width, hide_index=True, column_config=cfg, key=f"srt_{key}")
     rows = len(df)
     # Size the grid to show every row with headroom so it never scrolls internally.
     # Glide rows are 35px (header + rows) plus ~12px chrome; a too-tight height leaves a
@@ -342,6 +349,8 @@ def render_sortable_table(df, key, default_col=None, default_desc=True, max_heig
     # row at the bottom, so keep the overshoot well under one row's height.
     if 0 < rows <= 25:
         kwargs["height"] = rows * 35 + 32
+    elif rows > 25:
+        kwargs["height"] = min(rows * 35 + 32, max_height)
     if selectable:
         kwargs["on_select"] = "rerun"
         kwargs["selection_mode"] = "single-row"
@@ -937,17 +946,19 @@ def _nine_cat_value(df, ref):
 def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     """
     Every rostered player (all teams) plus the top free agents, each with per-game
-    category stats, a 9-cat z-score **Value**, a last-30 **Recent** value on the same
-    scale, and their **Trend** (Recent - Value). Powers the Trade Analyzer. Cached.
+    category stats, a 9-cat z-score **Value**, last-30/last-15 **Recent**/**Recent15**
+    values on the same scale, and **Trend**/**Trend15** (Recent[15] - Value). Powers
+    Player Value / Trade Simulator. Cached.
     """
     league = get_league_cached(league_id, year, espn_s2, swid)
     owner = {}
-    season_frames, last30_frames = [], []
+    season_frames, last30_frames, last15_frames = [], [], []
     for t in league.teams:
         for p in t.roster:
             owner[p.name] = t.team_name
         season_frames.append(build_stat_df(t.roster, f"{year}_total", "Season", t.team_name, year))
         last30_frames.append(build_stat_df(t.roster, f"{year}_last_30", "Last30", t.team_name, year))
+        last15_frames.append(build_stat_df(t.roster, f"{year}_last_15", "Last15", t.team_name, year))
     try:
         fas = league.free_agents(size=fa_size)
     except Exception:
@@ -956,16 +967,21 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
         owner.setdefault(getattr(p, "name", ""), "FA")
     season_frames.append(build_stat_df(fas, f"{year}_total", "Season", "FA", year))
     last30_frames.append(build_stat_df(fas, f"{year}_last_30", "Last30", "FA", year))
+    last15_frames.append(build_stat_df(fas, f"{year}_last_15", "Last15", "FA", year))
 
     season_df = pd.concat([f for f in season_frames if not f.empty], ignore_index=True) \
         if any(not f.empty for f in season_frames) else pd.DataFrame()
     last30_df = pd.concat([f for f in last30_frames if not f.empty], ignore_index=True) \
         if any(not f.empty for f in last30_frames) else pd.DataFrame()
+    last15_df = pd.concat([f for f in last15_frames if not f.empty], ignore_index=True) \
+        if any(not f.empty for f in last15_frames) else pd.DataFrame()
     if season_df.empty:
         return []
     season_df = season_df.drop_duplicates("Player", keep="first").reset_index(drop=True)
     if not last30_df.empty:
         last30_df = last30_df.drop_duplicates("Player", keep="first").reset_index(drop=True)
+    if not last15_df.empty:
+        last15_df = last15_df.drop_duplicates("Player", keep="first").reset_index(drop=True)
 
     season_df["Value"] = _nine_cat_value(season_df, season_df).values
     if not last30_df.empty:
@@ -976,9 +992,19 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     season_df["Recent"] = season_df["Player"].map(recent_map)
     season_df["Recent"] = season_df["Recent"].fillna(season_df["Value"])
     season_df["Trend"] = season_df["Recent"] - season_df["Value"]
+
+    if not last15_df.empty:
+        recent15 = _nine_cat_value(last15_df, season_df)
+        recent15_map = dict(zip(last15_df["Player"], recent15))
+    else:
+        recent15_map = {}
+    season_df["Recent15"] = season_df["Player"].map(recent15_map)
+    season_df["Recent15"] = season_df["Recent15"].fillna(season_df["Value"])
+    season_df["Trend15"] = season_df["Recent15"] - season_df["Value"]
+
     season_df["Owner"] = season_df["Player"].map(owner).fillna("FA")
 
-    keep = (["Player", "NBA_Team", "Owner", "Value", "Recent", "Trend",
+    keep = (["Player", "NBA_Team", "Position", "Owner", "Value", "Recent", "Trend", "Recent15", "Trend15",
              "FG%", "FT%", "3P%"] + _AGG_KEYS)
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))
     return season_df[keep].to_dict("records")
@@ -1023,9 +1049,84 @@ def _all_play_cats(you_agg, other_aggs):
     return w, l, t
 
 
-def render_trade_analyzer(meta, team_name):
-    """Player value (9-cat), buy-low / sell-high trends, and a live trade simulator."""
-    st.markdown('<h2><i class="bi bi-arrow-left-right" style="color: var(--cobalt);"></i> Trade Analyzer</h2>', unsafe_allow_html=True)
+def _player_value_rows(sub, disp_cats, with_owner=False, rank_by_value=False):
+    if rank_by_value:
+        sub = sub.sort_values("Value", ascending=False, kind="mergesort").reset_index(drop=True)
+    out = []
+    for i, (_, r) in enumerate(sub.iterrows(), start=1):
+        row = {"Rank": i} if rank_by_value else {}
+        row["Player"] = r["Player"]
+        row["Pos"] = r.get("Position", "")
+        row["NBA"] = r.get("NBA_Team", "")
+        if with_owner:
+            row["Owner"] = r.get("Owner", "")
+        row["Value"] = round(float(r["Value"]), 1)
+        row["30D Trend"] = round(float(r.get("Trend", 0) or 0), 1)
+        row["15D Trend"] = round(float(r.get("Trend15", 0) or 0), 1)
+        for c in disp_cats:
+            row[c] = round(float(r.get(c, 0) or 0), 1)
+        row["FG%"] = f"{float(r.get('FG%', 0) or 0) * 100:.1f}%"
+        row["FT%"] = f"{float(r.get('FT%', 0) or 0) * 100:.1f}%"
+        out.append(row)
+    return pd.DataFrame(out)
+
+
+def render_player_value(meta, team_name):
+    """Every rostered player + top free agents: 9-cat Value/Trend, filterable by
+    player name, position, NBA team, and fantasy owner."""
+    st.markdown('<h2><i class="bi bi-person-badge" style="color: var(--cobalt);"></i> Player Value</h2>', unsafe_allow_html=True)
+    try:
+        pool = get_player_pool(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+    except Exception:
+        pool = []
+    if not pool:
+        st.info("Player values unavailable.")
+        return
+
+    df = pd.DataFrame(pool)
+    st.caption(
+        "**Value** is a 9-category z-score (points above/below an average leaguer, turnovers "
+        "and percentages included). **30D/15D Trend** compare the last 30 or 15 days to the "
+        "season on that same scale: positive = heating up. Covers every rostered player plus "
+        "the top free agents."
+    )
+
+    disp_cats = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO"]
+
+    f1, f2, f3, f4 = st.columns([1, 1, 1, 1], gap="medium")
+    with f1:
+        name_filter = st.text_input("Player name", key="pv_name", placeholder="Search...")
+    with f2:
+        positions = sorted(p for p in df["Position"].dropna().unique().tolist() if p)
+        pos_filter = st.multiselect("Position", positions, key="pv_pos")
+    with f3:
+        teams = sorted(t for t in df["NBA_Team"].dropna().unique().tolist() if t)
+        team_filter = st.multiselect("NBA Team", teams, key="pv_team")
+    with f4:
+        owners = sorted(o for o in df["Owner"].dropna().unique().tolist() if o)
+        owner_filter = st.multiselect("Fantasy Owner", owners, key="pv_owner")
+
+    filtered = df
+    if name_filter:
+        filtered = filtered[filtered["Player"].str.contains(name_filter, case=False, na=False)]
+    if pos_filter:
+        filtered = filtered[filtered["Position"].isin(pos_filter)]
+    if team_filter:
+        filtered = filtered[filtered["NBA_Team"].isin(team_filter)]
+    if owner_filter:
+        filtered = filtered[filtered["Owner"].isin(owner_filter)]
+
+    if filtered.empty:
+        st.info("No players match these filters.")
+        return
+
+    render_sortable_table(_player_value_rows(filtered, disp_cats, with_owner=True, rank_by_value=True),
+                           "pv_all", default_col="Value", max_height=1200)
+
+
+def render_trade_simulator(meta, team_name):
+    """Buy-low / sell-high trends, then a live give-and-get trade simulator."""
+    st.markdown('<h2><i class="bi bi-shuffle" style="color: var(--cobalt);"></i> Trade Simulator</h2>', unsafe_allow_html=True)
     resolved = team_name
     try:
         league = get_league_cached(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
@@ -1043,29 +1144,6 @@ def render_trade_analyzer(meta, team_name):
     if mine.empty:
         st.warning(f"No rostered players found for {resolved}.")
         return
-
-    st.caption(
-        "**Value** is a 9-category z-score (points above/below an average leaguer, turnovers "
-        "and percentages included). **Trend** is the last 30 days versus the season on that same "
-        "scale: positive = heating up. Values cover every rostered player plus the top free agents."
-    )
-
-    disp_cats = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO"]
-
-    def _value_rows(sub):
-        out = []
-        for _, r in sub.iterrows():
-            row = {"Player": r["Player"], "NBA": r.get("NBA_Team", ""),
-                   "Value": round(float(r["Value"]), 1), "Trend": round(float(r["Trend"]), 1)}
-            for c in disp_cats:
-                row[c] = round(float(r.get(c, 0) or 0), 1)
-            row["FG%"] = f"{float(r.get('FG%', 0) or 0) * 100:.1f}%"
-            row["FT%"] = f"{float(r.get('FT%', 0) or 0) * 100:.1f}%"
-            out.append(row)
-        return pd.DataFrame(out)
-
-    st.markdown(f'<h3><i class="bi bi-person-badge" style="color: var(--cobalt);"></i> {resolved} - Player Value</h3>', unsafe_allow_html=True)
-    render_sortable_table(_value_rows(mine), "tv_mine", default_col="Value")
 
     # Buy-low / sell-high
     st.markdown('<h3><i class="bi bi-arrow-down-up" style="color: var(--clay);"></i> Buy Low / Sell High</h3>', unsafe_allow_html=True)
@@ -1101,8 +1179,8 @@ def render_trade_analyzer(meta, team_name):
                     unsafe_allow_html=True,
                 )
 
-    # Trade simulator
-    st.markdown('<h3><i class="bi bi-shuffle" style="color: var(--cobalt);"></i> Trade Simulator</h3>', unsafe_allow_html=True)
+    # Give-and-get simulator
+    st.markdown('<h3><i class="bi bi-arrow-left-right" style="color: var(--cobalt);"></i> Simulate a Trade</h3>', unsafe_allow_html=True)
     st.caption("Pick players to give and receive, then see how your category strength moves.")
     my_names = sorted(mine["Player"].tolist())
     other_names = sorted(df[df["Owner"] != resolved]["Player"].tolist())
@@ -1244,7 +1322,7 @@ WEEK_PAGES = ("Matchup", "Scoreboard", "Streamers", "Bench", "Roster")
 # Season Summary is intentionally NOT in any nav section — it's reachable only from the
 # Home page tiles (owner request).
 SEASON_PAGES = ("Season Stats", "League Stats", "Schedule")
-TOOLS_PAGES = ("Power Rankings", "Playoff Odds", "Trade Analyzer")
+TOOLS_PAGES = ("Power Rankings", "Playoff Odds", "Player Value", "Trade Simulator")
 
 # Section-based navigation. Each section groups related pages. The top bar (desktop)
 # and the fixed bottom icon bar (mobile) show one control per section; a labeled
@@ -1284,6 +1362,44 @@ SETTINGS_DEFAULTS = {
     "cfg_untouchables": "",
     "cfg_watchlist": "",
 }
+
+
+def render_footer():
+    """Minimal utility footer (brand/source + back-to-top), rendered at the end of every
+    page. See styles.py .st-key-app_footer for the sticky-to-viewport-bottom behavior on
+    short pages.
+
+    The back-to-top link can't just be an onclick attribute - st.markdown's sanitizer
+    strips inline event-handler attributes (and force-adds target="_blank" to every <a>,
+    which would break a plain #hash anchor too). Wire the click up via components.html
+    instead, same same-origin-iframe trick as the apple-touch-icon injector: the iframe
+    script reaches into `window.parent.document` to attach a real listener. It also has
+    to scroll `[data-testid=stMain]`, not the window - that's the actual internal
+    scroll container Streamlit uses, not the page/document itself.
+    """
+    with st.container(key="app_footer"):
+        st.markdown(
+            '<div class="app-footer-inner">'
+            '<span class="app-footer-brand">Fantasy Basketball Simulator &middot; Data via ESPN</span>'
+            '<a href="javascript:void(0)" class="app-footer-top">Back to top &uarr;</a>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        components.html(
+            """<script>
+            (function() {
+                const doc = window.parent.document;
+                doc.querySelectorAll('.app-footer-top').forEach(function(el) {
+                    el.onclick = function(e) {
+                        e.preventDefault();
+                        const main = doc.querySelector('[data-testid="stMain"]');
+                        (main || window).scrollTo({top: 0, behavior: 'smooth'});
+                    };
+                });
+            })();
+            </script>""",
+            height=0,
+        )
 
 
 def init_settings():
@@ -1417,7 +1533,8 @@ def render_home(meta, team_name):
             ("Playoff Odds", "Playoff Odds", "po"),
             ("Schedule", "Schedule", "sch"),
             ("Power Rankings", "Power Rankings", "pr"),
-            ("Trade Analyzer", "Trade Analyzer", "ta"),
+            ("Player Value", "Player Value", "pv"),
+            ("Trade Simulator", "Trade Simulator", "ts"),
         ]
         with st.container(key="home_tiles"):
             for label, page, slug in tiles:
@@ -1438,7 +1555,8 @@ FLAT_NAV = (
     ("menu", "Stats", (("Season", "Season Stats"), ("League", "League Stats"))),
     ("menu", "Tools", (("Power Rankings", "Power Rankings"),
                        ("Playoff Odds", "Playoff Odds"),
-                       ("Trade Analyzer", "Trade Analyzer"))),
+                       ("Player Value", "Player Value"),
+                       ("Trade Simulator", "Trade Simulator"))),
 )
 
 
@@ -1581,18 +1699,27 @@ def main():
         return
     if active_page == "Season Summary":
         render_season_summary(league_meta, team_name)
+        render_footer()
         return
     if active_page == "Schedule":
         render_schedule(league_meta, team_name)
+        render_footer()
         return
     if active_page == "Power Rankings":
         render_power_rankings(league_meta, team_name)
+        render_footer()
         return
-    if active_page == "Trade Analyzer":
-        render_trade_analyzer(league_meta, team_name)
+    if active_page == "Player Value":
+        render_player_value(league_meta, team_name)
+        render_footer()
+        return
+    if active_page == "Trade Simulator":
+        render_trade_simulator(league_meta, team_name)
+        render_footer()
         return
     if active_page == "Settings":
         render_settings(league_meta)
+        render_footer()
         return
 
     if active_page:
@@ -2518,6 +2645,8 @@ def main():
         except Exception as e:
             st.error(f"Error: {str(e)}")
             st.exception(e)
+
+        render_footer()
 
 
 if __name__ == "__main__":
