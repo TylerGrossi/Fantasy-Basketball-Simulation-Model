@@ -71,6 +71,38 @@ CUSTOM_CSS = """
         padding-right: var(--page-pad) !important;
     }
 
+    /* ================= Page-change loading state ================= */
+    /* Streamlit marks every element data-stale="true" during a rerun (e.g. navigating to
+       a new page) and just fades it, leaving the PREVIOUS page's content half-visible -
+       nav already shows the new active section, but the content below is a dimmed ghost
+       of the old page, which reads as broken/mismatched rather than "loading". Dim it
+       much further (near-invisible) and show a small centered spinner instead, so a slow
+       page change reads as a clean loading state. A short transition-delay (not instant)
+       matches Streamlit's own default behavior of not flashing this on fast reruns -
+       only a page change that's actually slow enough to notice shows it.
+       This only touches page CONTENT, not the nav bars, so navigation itself always stays
+       crisp and clickable. */
+    [data-testid="stMainBlockContainer"] [data-stale="true"] {
+        opacity: 0.08 !important;
+        transition: opacity 0.2s ease-in 0.25s !important;
+    }
+    [data-testid="stMain"]:has([data-stale="true"])::after {
+        content: "";
+        position: fixed; top: 50%; left: 50%;
+        width: 34px; height: 34px; margin: -17px 0 0 -17px;
+        border: 3px solid var(--line); border-top-color: var(--cobalt);
+        border-radius: 50%;
+        animation: fbb-spin 0.7s linear infinite;
+        animation-delay: 0.25s;
+        opacity: 0; animation-fill-mode: forwards;
+        z-index: 2000;
+    }
+    @keyframes fbb-spin {
+        0% { opacity: 0; transform: rotate(0deg); }
+        1% { opacity: 1; }
+        100% { opacity: 1; transform: rotate(360deg); }
+    }
+
     /* Hide Streamlit's own chrome so the nav bar is the site header. The sidebar
        collapse control stays visible — it toggles the "This Week" left nav (the
        only way to reopen it once collapsed, e.g. on mobile). */
