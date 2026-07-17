@@ -161,7 +161,7 @@ def get_league_meta(league_id, year, espn_s2, swid):
     Lightweight league info for the sidebar and the Season Summary page.
     Cached 1 hour. Returns a dict of plain (serializable) values.
     """
-    league = connect_to_espn(int(league_id), int(year), espn_s2, swid)
+    league = get_league_cached(league_id, year, espn_s2, swid)
     seen, names = set(), []
     rows = []
     for t in league.teams:
@@ -198,7 +198,7 @@ def get_league_meta(league_id, year, espn_s2, swid):
 @st.cache_data(ttl=3600, show_spinner="Crunching season stats...")
 def get_season_stats(league_id, year, espn_s2, swid):
     """All-play records, win %, luck, and points-for per team. Cached 1 hour."""
-    league = connect_to_espn(int(league_id), int(year), espn_s2, swid)
+    league = get_league_cached(league_id, year, espn_s2, swid)
     return calculate_league_stats(league, year)
 
 
@@ -506,6 +506,20 @@ def get_injury_cached():
     return get_espn_injury_data()
 
 
+@st.cache_resource(ttl=3600, show_spinner=False)
+def get_week_box_scores(league_id, year, espn_s2, swid, week):
+    """
+    One week's box scores, cached per-week (cache_resource - these are rich ESPN
+    objects, not plain data, so they're kept in memory rather than pickled). Season
+    Stats, Schedule, and Power Rankings each independently loop the full season
+    calling league.box_scores(week) - most weeks overlap across all three, so caching
+    per-week here means each week is only ever fetched from ESPN once, no matter how
+    many of those pages (or teams) ask for it.
+    """
+    league = get_league_cached(league_id, year, espn_s2, swid)
+    return league.box_scores(matchup_period=week)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_playoff_probabilities(year, sims, league_stats, blend_weight, injury_data):
     """
@@ -548,7 +562,7 @@ def get_team_season_stats(league_id, year, espn_s2, swid, team_id):
 
     for week in periods:
         try:
-            boxscores = league.box_scores(matchup_period=week)
+            boxscores = get_week_box_scores(league_id, year, espn_s2, swid, week)
             for matchup in boxscores:
                 if matchup.home_team.team_id == team_id:
                     week_stats = flatten_stat_dict(matchup.home_stats)
@@ -687,7 +701,7 @@ def get_team_schedule_data(league_id, year, espn_s2, swid, team_id):
     rows = []
     for period, label in periods:
         try:
-            boxscores = league.box_scores(matchup_period=period)
+            boxscores = get_week_box_scores(league_id, year, espn_s2, swid, period)
         except Exception:
             continue
         for m in boxscores:
@@ -797,7 +811,7 @@ def get_power_rankings(league_id, year, espn_s2, swid):
 
     for week in range(1, REGULAR_SEASON_WEEKS + 1):
         try:
-            boxscores = league.box_scores(matchup_period=week)
+            boxscores = get_week_box_scores(league_id, year, espn_s2, swid, week)
         except Exception:
             continue
         wk_stats, wk_opp = {}, {}
@@ -1674,11 +1688,6 @@ def main():
     # Settings live on their own nav page; values persist in session_state.
     init_settings()
 
-    try:
-        league_meta = get_league_meta(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
-    except Exception:
-        league_meta = None
-
     team_name = st.session_state["cfg_team"]
     sim_count = int(st.session_state["cfg_sims"])
     num_streamers = int(st.session_state["cfg_streamers"])
@@ -1690,8 +1699,19 @@ def main():
     # Warm the heavy season/league/playoff caches in the background on first load.
     warm_caches(sim_count, 0.7, team_name)
 
-    # Two-tier top navigation: season pages up top, week pages (with a picker) below.
-    active_page, selected_view_label, selected_view_period = render_top_nav(league_meta, team_name)
+    # Render the nav shell BEFORE fetching league_meta (a blocking ESPN call, ~1-5s on a
+    # cold cache). render_top_nav only touches meta to pre-seed the week picker on a brand
+    # new session, and already falls back cleanly when meta is None, so there's no reason
+    # to make every single visitor stare at a blank page behind "Loading league from
+    # ESPN..." before they even see the header. The one-time cost of a wrong first-load
+    # week-picker default (only possible on a session's very first render, and only until
+    # the user picks a week themselves) is a much better trade than that.
+    active_page, selected_view_label, selected_view_period = render_top_nav(None, team_name)
+
+    try:
+        league_meta = get_league_meta(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+    except Exception:
+        league_meta = None
 
     # Standalone pages - no week context needed.
     if active_page == "Home":

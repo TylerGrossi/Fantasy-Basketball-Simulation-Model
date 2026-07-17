@@ -276,14 +276,19 @@ CUSTOM_CSS = """
         background: var(--card) !important; border: 1px solid var(--line) !important;
         border-radius: 14px !important; color: var(--ink) !important; font-weight: 700 !important;
         display: flex !important; flex-direction: column; align-items: center; justify-content: center;
-        gap: 0.6rem; min-height: 188px; padding: 1rem 0.5rem !important;
+        /* clamp() against dvh (dynamic viewport height - accounts for mobile browser
+           chrome like the address bar), not a fixed px: a height tuned to fill one
+           specific test-window size overflows on shorter real screens (browser chrome
+           eats into the visible height) and cuts off the bottom row. This scales with
+           whatever's actually visible instead. */
+        gap: 0.55rem; min-height: clamp(96px, 17dvh, 150px); padding: 0.9rem 0.5rem !important;
         box-shadow: 0 1px 2px rgba(27,29,34,0.04) !important;
     }
     .st-key-home_tiles .stButton > button::before {
         font-family: "bootstrap-icons"; content: var(--home-ic, "\\f5e6");
-        color: var(--cobalt); font-size: 2.2rem; line-height: 1;
+        color: var(--cobalt); font-size: 2rem; line-height: 1;
     }
-    .st-key-home_tiles .stButton > button p { font-size: 0.92rem; line-height: 1.15; text-align: center; }
+    .st-key-home_tiles .stButton > button p { font-size: 0.88rem; line-height: 1.15; text-align: center; }
     .st-key-home_tiles .stButton > button:hover {
         border-color: var(--cobalt) !important; background: var(--card) !important;
         color: var(--ink) !important; transform: translateY(-1px);
@@ -606,7 +611,13 @@ CUSTOM_CSS = """
         /* becomes a fixed sub-bar pinned at the very top (no header on mobile; Streamlit's
            mobile drawer toggle is unreliable), items laid out in one swipeable row */
         [data-testid="stSidebar"]:has(.stButton) {
-            position: fixed !important; top: 0 !important;
+            /* top:0.5rem, not 0 - matches [data-testid=stMainBlockContainer]'s own
+               padding-top on mobile (below), which is what actually positions the
+               in-flow Season/Tools sub-row. Fixed elements ignore that padding entirely,
+               so at top:0 this rail sat 8px higher than the sub-row it's meant to align
+               with (same height, different Y position - a taller/shorter box wasn't
+               the bug, a fixed-vs-in-flow top offset was). */
+            position: fixed !important; top: 0.5rem !important;
             left: 0 !important; right: 0 !important;
             width: 100% !important; min-width: 0 !important; max-width: none !important;
             height: auto !important; transform: none !important; visibility: visible !important;
@@ -646,9 +657,10 @@ CUSTOM_CSS = """
            (same button padding already), so the two bars match exactly. */
         [data-testid="stSidebar"] .stButton > button { white-space: nowrap; }
         [data-testid="stSidebar"] [data-testid="stSidebarHeader"] { display: none !important; padding: 0 !important; height: 0 !important; }
-        /* This Week pages: reserve room for the fixed sub-bar now pinned at top:0 */
+        /* This Week pages: reserve room for the fixed sub-bar (pinned at top:0.5rem, so
+           its bottom edge sits 0.5rem lower than the old top:0 - clearance grows to match). */
         [data-testid="stAppViewContainer"]:has([data-testid="stSidebar"] .stButton) [data-testid="stMainBlockContainer"] {
-            padding-top: 3.4rem !important;
+            padding-top: 3.9rem !important;
         }
         /* Match the other mobile sub-bars (Season / Tools, .st-key-nav_sub): plain text
            tabs, no box, no left inset bar — just a cobalt underline when active. Overrides
