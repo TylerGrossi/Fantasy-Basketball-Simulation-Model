@@ -33,6 +33,12 @@ CUSTOM_CSS = """
         --mono: ui-monospace, 'SF Mono', 'Consolas', 'Liberation Mono', monospace;
         --nav-h: 3.9rem;           /* height of the fixed top bar */
         --content-max: 1180px;     /* centered content column width */
+        /* Side gutter. Declared at :root (not just .block-container) because CSS custom
+           properties only inherit down the actual DOM tree — the sidebar is a SIBLING of
+           .block-container (not a descendant), so a var(--page-pad) used inside it would
+           silently resolve to nothing and break the whole padding shorthand (computes to
+           0, not an error). This bit the This Week rail's mobile sub-bar padding once. */
+        --page-pad: clamp(1rem, 4vw, 2.5rem);
     }
 
     /* Hide anchor link icons and Streamlit header chrome */
@@ -53,9 +59,9 @@ CUSTOM_CSS = """
        is position:fixed, so it overlays this reserved band at the top. */
     [data-testid="stAppViewContainer"] { padding-top: var(--nav-h) !important; }
     /* Centered content column with a comfortable max width, so every page's
-       content sits in the same centered lane. --page-pad is the side gutter. */
+       content sits in the same centered lane. --page-pad (the side gutter) is
+       declared at :root, above — not here, see that comment for why. */
     .block-container {
-        --page-pad: clamp(1rem, 4vw, 2.5rem);
         max-width: var(--content-max) !important;
         margin-left: auto !important;
         margin-right: auto !important;
@@ -71,10 +77,18 @@ CUSTOM_CSS = """
     [data-testid="stHeader"] { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
     /* Hide Streamlit Community Cloud chrome: the main menu, the "Manage app" status widget,
-       and the "Hosted with Streamlit" badge in the bottom-right (only appears on cloud). */
+       and the "Hosted with Streamlit" viewer badge in the bottom-right (only appears once
+       deployed to Cloud — cannot be seen/verified from a local run). The badge's wrapping
+       div/classnames are hashed and can change between Streamlit releases, so target it two
+       ways: known testids/class-name fragments, AND (more durable) any container that holds
+       a link to streamlit.io — hiding the actual `<a>` removes the visible badge even if a
+       still-hidden empty wrapper div is left behind. Also hidden at every width, not just
+       mobile, since the badge can appear on desktop too. */
     #MainMenu, footer, [data-testid="stStatusWidget"] { display: none !important; }
-    [class*="viewerBadge"], [data-testid="stAppDeployButton"],
-    a[href^="https://streamlit.io"], a[href*="//streamlit.io"] { display: none !important; }
+    [class*="viewerBadge" i], [class*="profileContainer" i], [data-testid="stAppDeployButton"],
+    [data-testid*="Badge" i], [id*="streamlit-badge" i] { display: none !important; }
+    a[href*="streamlit.io"] { display: none !important; }
+    body > div:has(> a[href*="streamlit.io"]) { display: none !important; }
 
     html, body, [class*="css"], .stMarkdown, p, span, label, div {
         font-family: var(--sans);
@@ -253,22 +267,22 @@ CUSTOM_CSS = """
        make it the grid directly (2-up phones). Each tile is a single-tap button styled as
        a card, icon set per slug via `--home-ic` (embedded bi font). */
     .st-key-home_tiles {
-        max-width: 900px; margin: 1.1rem auto 0;
-        display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 0.6rem !important;
+        max-width: 900px; margin: 1.3rem auto 0; width: 100%;
+        display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 0.8rem !important;
     }
     .st-key-home_tiles > [data-testid="stElementContainer"] { width: 100% !important; }
     .st-key-home_tiles .stButton > button {
         background: var(--card) !important; border: 1px solid var(--line) !important;
-        border-radius: 12px !important; color: var(--ink) !important; font-weight: 700 !important;
+        border-radius: 14px !important; color: var(--ink) !important; font-weight: 700 !important;
         display: flex !important; flex-direction: column; align-items: center; justify-content: center;
-        gap: 0.5rem; min-height: 84px; padding: 0.9rem 0.6rem !important;
+        gap: 0.6rem; min-height: 118px; padding: 1rem 0.8rem !important;
         box-shadow: 0 1px 2px rgba(27,29,34,0.04) !important;
     }
     .st-key-home_tiles .stButton > button::before {
         font-family: "bootstrap-icons"; content: var(--home-ic, "\\f5e6");
-        color: var(--cobalt); font-size: 1.5rem; line-height: 1;
+        color: var(--cobalt); font-size: 1.9rem; line-height: 1;
     }
-    .st-key-home_tiles .stButton > button p { font-size: 0.92rem; }
+    .st-key-home_tiles .stButton > button p { font-size: 0.98rem; }
     .st-key-home_tiles .stButton > button:hover {
         border-color: var(--cobalt) !important; background: var(--card) !important;
         color: var(--ink) !important; transform: translateY(-1px);
@@ -288,7 +302,7 @@ CUSTOM_CSS = """
        Desktop: a fixed full-width top bar. Mobile: the top bar keeps only the brand and
        the sections move to a fixed bottom icon bar. A labeled sub-row exposes the pages
        inside the active multi-page section. The sidebar is retired. */
-    :root { --bottomnav-h: 4.7rem; }
+    :root { --bottomnav-h: 5.4rem; }
 
     /* The native sidebar is the "This Week" side rail — but only when it holds nav (i.e.
        on This Week pages). On every other page nothing renders into it, so hide the empty
@@ -334,6 +348,7 @@ CUSTOM_CSS = """
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_top),
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_bottom),
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-touch_icon_injector),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-css_injector),
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has([class*="st-key-mp_hide_"]) {
         position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
     }
@@ -442,27 +457,42 @@ CUSTOM_CSS = """
         color: var(--ink) !important; box-shadow: inset 0 -2px 0 var(--cobalt) !important;
     }
     /* dropdown panel = a clean menu of the sub-pages. BaseWeb anchors it at the trigger's
-       top (inside the fixed header); nudge it down so it drops *below* the bar. */
+       top (inside the fixed header); nudge it down so it drops *below* the bar. A soft
+       shadow gives it depth since it floats over content, not just a hairline border. */
     [data-testid="stPopoverBody"] {
         background: var(--card) !important; border: 1px solid var(--line) !important;
-        border-radius: 10px !important; padding: 0.35rem !important; min-width: 150px !important;
+        border-radius: 12px !important; padding: 0.4rem !important; min-width: 168px !important;
         margin-top: 3.1rem !important;
+        box-shadow: 0 10px 28px rgba(20,16,10,0.14), 0 2px 6px rgba(20,16,10,0.06) !important;
     }
+    [data-testid="stPopoverBody"] [data-testid="stVerticalBlock"] { gap: 0.15rem !important; }
     [data-testid="stPopoverBody"] .stButton > button {
         background: transparent !important; color: var(--ink-2) !important;
-        border: none !important; box-shadow: none !important; border-radius: 6px !important;
+        border: none !important; box-shadow: none !important; border-radius: 8px !important;
         text-align: left !important; justify-content: flex-start !important;
-        font-weight: 600 !important; padding: 0.45rem 0.7rem !important;
+        font-weight: 600 !important; padding: 0.55rem 0.8rem !important;
+        transition: background 0.12s ease, color 0.12s ease;
     }
-    [data-testid="stPopoverBody"] .stButton > button p { text-align: left; width: 100%; }
+    [data-testid="stPopoverBody"] .stButton > button p { text-align: left; width: 100%; margin: 0; }
     [data-testid="stPopoverBody"] .stButton > button:hover {
-        color: var(--ink) !important; background: var(--cobalt-soft) !important;
+        color: var(--ink) !important; background: var(--surface-2) !important;
         transform: none !important; box-shadow: none !important;
     }
+    /* Active page: soft cobalt fill + bold ink text — no left bar (clashes with the
+       menu's rounded corners; that treatment is for vertical rails, not floating menus). */
     [data-testid="stPopoverBody"] .stButton > button[kind="primary"],
     [data-testid="stPopoverBody"] .stButton [data-testid="stBaseButton-primary"] {
         color: var(--ink) !important; background: var(--cobalt-soft) !important;
-        box-shadow: inset 3px 0 0 var(--cobalt) !important;
+        box-shadow: none !important; font-weight: 700 !important;
+    }
+    /* Streamlit auto-focuses the open item on every popover open (not just real keyboard
+       navigation), so the generic `.stButton > button:focus-visible` ring shows up as an
+       empty box around whichever item happens to be first/active — with no fill behind it
+       (that's only added for the active/kind=primary item), it reads as a stray outline.
+       Hover + the active cobalt-soft fill already give plenty of feedback; drop the ring. */
+    [data-testid="stPopoverBody"] .stButton > button:focus-visible {
+        outline: none !important;
+        box-shadow: none !important;
     }
 
     /* -------- One horizontal row, capped to the page's content width, items spread ------
@@ -500,53 +530,10 @@ CUSTOM_CSS = """
             min-width: 230px !important; width: 230px !important;
         }
     }
-    @media (max-width: 767px) {
-        /* becomes a fixed sub-bar pinned at the very top (no header on mobile; Streamlit's
-           mobile drawer toggle is unreliable), items laid out in one swipeable row */
-        [data-testid="stSidebar"]:has(.stButton) {
-            position: fixed !important; top: 0 !important;
-            left: 0 !important; right: 0 !important;
-            width: 100% !important; min-width: 0 !important; max-width: none !important;
-            height: auto !important; transform: none !important; visibility: visible !important;
-            z-index: 900 !important; background: var(--surface-2) !important;
-            border-right: none !important; border-bottom: 1px solid var(--line) !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stSidebarContent"] { width: 100% !important; height: auto !important; }
-        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] { padding: 0.4rem var(--page-pad) !important; }
-        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"] {
-            flex-direction: row !important; align-items: center !important; flex-wrap: nowrap !important;
-            overflow-x: auto !important; gap: 0.4rem !important; scrollbar-width: none;
-        }
-        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"]::-webkit-scrollbar { display: none; }
-        [data-testid="stSidebar"] [data-testid="stElementContainer"],
-        [data-testid="stSidebar"] [data-testid="stLayoutWrapper"] { flex: 0 0 auto !important; width: auto !important; }
-        [data-testid="stSidebar"] .nav-scope-label { display: none !important; }
-        [data-testid="stSidebar"] [data-baseweb="select"] { min-width: 150px; }
-        [data-testid="stSidebar"] .stButton > button { white-space: nowrap; min-height: 44px; }
-        [data-testid="stSidebar"] [data-testid="stSidebarHeader"] { display: none !important; padding: 0 !important; height: 0 !important; }
-        /* This Week pages: reserve room for the fixed sub-bar now pinned at top:0 */
-        [data-testid="stAppViewContainer"]:has([data-testid="stSidebar"] .stButton) [data-testid="stMainBlockContainer"] {
-            padding-top: 3.4rem !important;
-        }
-        /* Match the other mobile sub-bars (Season / Tools, .st-key-nav_sub): plain text
-           tabs, no box, no left inset bar — just a cobalt underline when active. Overrides
-           the desktop rail's left-aligned/inset-bar look, which only makes sense vertically. */
-        [data-testid="stSidebar"] .stButton > button {
-            padding: 0.3rem 0.55rem !important; border-radius: 0 !important;
-            text-align: center !important; justify-content: center !important;
-        }
-        [data-testid="stSidebar"] .stButton > button p { font-size: 0.82rem; text-align: center; }
-        [data-testid="stSidebar"] .stButton > button:hover { background: transparent !important; }
-        [data-testid="stSidebar"] .stButton > button[kind="primary"],
-        [data-testid="stSidebar"] .stButton [data-testid="stBaseButton-primary"] {
-            background: transparent !important;
-            box-shadow: inset 0 -2px 0 var(--cobalt) !important;
-        }
-        /* Lighten the week picker to match the flatter mobile look. */
-        [data-testid="stSidebar"] [data-baseweb="select"] > div {
-            border: none !important; background: transparent !important;
-        }
-    }
+    /* Base (desktop-rail) styling for the picker + link buttons. Must come BEFORE the
+       @media(max-width:767px) block below: both target the same selectors at identical
+       specificity (all !important), so source order decides the tie — putting the mobile
+       overrides LAST is what makes them win on phones instead of these desktop-only rules. */
     [data-testid="stSidebar"] .nav-scope-label { display: block; margin: 0.2rem 0 0.6rem; }
     [data-testid="stSidebar"] [data-baseweb="select"] > div {
         background: var(--card) !important; border-radius: 8px !important;
@@ -571,6 +558,74 @@ CUSTOM_CSS = """
     }
     [data-testid="stSidebar"] .stButton > button:focus-visible {
         outline: 2px solid var(--cobalt) !important; outline-offset: 2px;
+    }
+
+    @media (max-width: 767px) {
+        /* becomes a fixed sub-bar pinned at the very top (no header on mobile; Streamlit's
+           mobile drawer toggle is unreliable), items laid out in one swipeable row */
+        [data-testid="stSidebar"]:has(.stButton) {
+            position: fixed !important; top: 0 !important;
+            left: 0 !important; right: 0 !important;
+            width: 100% !important; min-width: 0 !important; max-width: none !important;
+            height: auto !important; transform: none !important; visibility: visible !important;
+            z-index: 900 !important;
+            /* Same plain page background as the other mobile sub-bars (.st-key-nav_sub) —
+               not the tinted --surface-2 the desktop rail uses (that's a vertical-rail cue
+               that reads as "boxed" in a horizontal bar). */
+            background: var(--paper) !important;
+            border-right: none !important; border-bottom: 1px solid var(--line) !important;
+        }
+        /* stSidebarContent carries its OWN default 20px horizontal padding (Streamlit's
+           base sidebar style) — zero it here so stSidebarUserContent's padding below is
+           the ONLY side gutter, matching nav_sub's single layer of padding exactly
+           (the two were stacking, offsetting This Week's row ~20px further right than
+           the Season/Tools sub-row). */
+        [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+            width: 100% !important; height: auto !important; padding: 0 !important;
+        }
+        /* Match nav_sub's shape: no top padding, small bottom padding, same side gutter. */
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] { padding: 0 var(--page-pad) 0.3rem !important; }
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"] {
+            flex-direction: row !important; align-items: center !important; flex-wrap: nowrap !important;
+            overflow-x: auto !important; gap: 0.4rem !important; scrollbar-width: none;
+        }
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"]::-webkit-scrollbar { display: none; }
+        [data-testid="stSidebar"] [data-testid="stElementContainer"],
+        [data-testid="stSidebar"] [data-testid="stLayoutWrapper"] { flex: 0 0 auto !important; width: auto !important; }
+        /* Hide the WHOLE wrapping element, not just the inner label text — a hidden
+           inner div still leaves its stElementContainer occupying its own box (~16px),
+           throwing off the row's start x vs. the Season/Tools sub-row. Same "invisible
+           element still consumes flex space" gotcha as elsewhere in this file. */
+        [data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.nav-scope-label) {
+            display: none !important;
+        }
+        [data-testid="stSidebar"] [data-baseweb="select"] { min-width: 150px; }
+        /* No forced min-height — let it size the same as the Season/Tools sub-row
+           (same button padding already), so the two bars match exactly. */
+        [data-testid="stSidebar"] .stButton > button { white-space: nowrap; }
+        [data-testid="stSidebar"] [data-testid="stSidebarHeader"] { display: none !important; padding: 0 !important; height: 0 !important; }
+        /* This Week pages: reserve room for the fixed sub-bar now pinned at top:0 */
+        [data-testid="stAppViewContainer"]:has([data-testid="stSidebar"] .stButton) [data-testid="stMainBlockContainer"] {
+            padding-top: 3.4rem !important;
+        }
+        /* Match the other mobile sub-bars (Season / Tools, .st-key-nav_sub): plain text
+           tabs, no box, no left inset bar — just a cobalt underline when active. Overrides
+           the desktop rail's left-aligned/inset-bar look, which only makes sense vertically. */
+        [data-testid="stSidebar"] .stButton > button {
+            padding: 0.3rem 0.55rem !important; border-radius: 0 !important;
+            text-align: center !important; justify-content: center !important;
+        }
+        [data-testid="stSidebar"] .stButton > button p { font-size: 0.82rem; text-align: center; }
+        [data-testid="stSidebar"] .stButton > button:hover { background: transparent !important; }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"],
+        [data-testid="stSidebar"] .stButton [data-testid="stBaseButton-primary"] {
+            background: transparent !important;
+            box-shadow: inset 0 -2px 0 var(--cobalt) !important;
+        }
+        /* Lighten the week picker to match the flatter mobile look. */
+        [data-testid="stSidebar"] [data-baseweb="select"] > div {
+            border: none !important; background: transparent !important;
+        }
     }
 
     /* ============ Mobile-only section sub-row: the active section's pages ============ */
@@ -763,7 +818,31 @@ CUSTOM_CSS = """
         margin: 0 !important; border-radius: 0 !important;
     }
 
-    .scoreboard-table { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* -------- Matchup header: team · Week/Round picker · team, always ONE line -------
+       Streamlit's blanket mobile rule stacks stColumns to 100% width (one per row); this
+       row is explicitly kept horizontal at every width, with each team name truncated by
+       ellipsis (not wrapped) so a long name can't blow out the row height. */
+    .st-key-matchup_header [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+    .st-key-matchup_header [data-testid="stColumn"] { width: auto !important; min-width: 0 !important; }
+    /* Picker gets its own full-width row (centered) — its text doesn't ellipsis-safely
+       truncate, so it needs room free of any neighbor. Team names sit in a second row
+       below, each now getting ~50% of the width instead of splitting it with the picker. */
+    .st-key-matchup_header [data-baseweb="select"] { max-width: 260px; margin: 0 auto 0.5rem; }
+    .st-key-matchup_header h3.mh-name {
+        margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .st-key-matchup_header h3.mh-name-right { text-align: right; }
+    .st-key-matchup_header [data-baseweb="select"] > div {
+        background: transparent !important; border: none !important;
+    }
+    .st-key-matchup_header [data-baseweb="select"] input,
+    .st-key-matchup_header [data-baseweb="select"] > div > div {
+        color: var(--cobalt) !important; font-weight: 700 !important; text-align: center;
+        font-size: 1.08rem !important;
+    }
+    /* The date-range caption under the header is dropped on mobile — too much small
+       text clutter on a narrow screen; the date range still shows in the table below. */
+    @media (max-width: 767px) { .st-key-matchup_caption { display: none !important; } }
 
     /* ========================================================================
        RESPONSIVE
@@ -790,8 +869,17 @@ CUSTOM_CSS = """
         .dataframe { font-size: 0.75rem !important; }
         .dataframe th, .dataframe td { padding: 4px 6px !important; }
         .js-plotly-plot { max-width: 100% !important; }
-        .scoreboard-table table { font-size: 0.72rem; }
-        .scoreboard-table th, .scoreboard-table td { padding: 4px 3px !important; }
+        /* Scoreboard header (team names + W-L-T score): the "sb-name" spans already
+           truncate with an ellipsis instead of wrapping (min-width:0 on their flex
+           parent + white-space:nowrap in visualizations.py), but still shrink the type
+           so a long team name gets more characters before it has to truncate. */
+        .scoreboard-header { gap: 0.35rem !important; }
+        .sb-name { font-size: 1rem !important; }
+        .sb-score-main { font-size: 1.7rem !important; }
+        .sb-score-sub { font-size: 0.85rem !important; margin-left: 0.5rem !important; }
+        .st-key-matchup_header h3.mh-name { font-size: 0.92rem !important; }
+        .st-key-matchup_header [data-baseweb="select"] input,
+        .st-key-matchup_header [data-baseweb="select"] > div > div { font-size: 0.9rem !important; }
     }
     @media screen and (max-width: 480px) {
         .main-header { font-size: 1.2rem !important; }
@@ -799,6 +887,13 @@ CUSTOM_CSS = """
         .hide-mobile { display: none !important; }
         .dataframe { font-size: 0.66rem !important; }
         .stButton > button { padding: 0.5rem 1rem !important; font-size: 0.9rem !important; }
+        .sb-name { font-size: 0.9rem !important; }
+        .sb-score-main { font-size: 1.4rem !important; }
+        .sb-score-sub { font-size: 0.72rem !important; margin-left: 0.35rem !important; }
+        .st-key-matchup_header h3.mh-name { font-size: 0.78rem !important; }
+        .st-key-matchup_header h3.mh-name .bi { font-size: 0.85em; }
+        .st-key-matchup_header [data-baseweb="select"] input,
+        .st-key-matchup_header [data-baseweb="select"] > div > div { font-size: 0.78rem !important; }
     }
 </style>
 """

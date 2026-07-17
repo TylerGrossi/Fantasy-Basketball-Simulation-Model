@@ -25,6 +25,7 @@ and correctness over generality.
 | [config.py](config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
 | [styles.py](styles.py) | The "Analyst Sheet" design system as one big CSS string (`CUSTOM_CSS`), including the fixed-header / centered-column layout shell. Light-only (no `DARK_CSS`). |
 | [assets/icon_font.py](assets/icon_font.py) | **Self-hosted Bootstrap Icons** — the font subset to the ~37 glyphs the app uses, base64-embedded as `@font-face` (`ICON_FONT_CSS`, imported as `from assets.icon_font import …`). Injected separately so it can never render-block the layout. Regenerate with [assets/build_icon_font.py](assets/build_icon_font.py) if the icon set changes. |
+| [assets/touch_icon.py](assets/touch_icon.py) | Base64 PNG of the basketball mark (`TOUCH_ICON_PNG_B64`), injected via `components.html` as an `apple-touch-icon` `<link>` so "Add to Home Screen" shows the app's logo instead of Streamlit's default. Regenerate the PNG with the Pillow snippet in its docstring/history if the mark changes. |
 | [.streamlit/config.toml](.streamlit/config.toml) | Streamlit's native light theme (must match `styles.py`). |
 | [.streamlit/secrets.toml](.streamlit/secrets.toml) | Template only — real creds are in `config.py`. |
 | `Old Models/` | The original single-file version. Historical reference; do not edit or import. |
@@ -136,9 +137,9 @@ scoring date). Because of that:
   `position:absolute; height:0`. Don't reintroduce a fixed/hidden nav container as a plain
   in-flow block or the gap returns.
 - **The "This Week" side rail** — Streamlit's **native sidebar**, rendered *only* on
-  `WEEK_PAGES` (Matchup/Streamers/Bench/Roster), holding the **Week/Round picker** (`week_sel`)
-  + those four page links. On **desktop** it's a permanent **230px left rail**; on **mobile**
-  CSS turns it into a **fixed sub-bar under the header**. The empty sidebar on other pages is
+  `WEEK_PAGES` (Matchup/Scoreboard/Streamers/Bench/Roster), holding just those five page links (no
+  picker — see below). On **desktop** it's a permanent **230px left rail**; on **mobile** CSS
+  turns it into a **fixed sub-bar under the header**. The empty sidebar on other pages is
   hidden (`:not(:has(.stButton)){display:none}`); the unreliable collapse control /
   `stSidebarHeader` is hidden at all widths. `initial_sidebar_state="auto"`.
 - **`nav_bottom`** — a `position: fixed; bottom:0` **mobile-only bottom icon bar**, one
@@ -148,9 +149,21 @@ scoring date). Because of that:
   Week uses the side rail instead). Hidden `@media (min-width:768px)` — desktop reaches those
   pages as top-level links. **No second header row on desktop besides the This Week rail.**
 
-The **Week/Round picker** (`week_sel`) lives in the side rail (not the page, not the top bar);
-`render_top_nav` reads it from `st.session_state` via a self-assign so it survives runs where
-the rail isn't rendered.
+**The Week/Round picker (`week_sel`) lives in the matchup header row itself**, not the side
+rail and not the top bar. `main()` renders `st.container(key="matchup_header")` as **two
+rows** (team names don't need to share a line with the picker — the picker's own text, e.g.
+"Playoffs - Round 2", doesn't ellipsis-truncate safely, so it gets a full-width row to
+itself; team names get their own row below with far more room each): row 1 is
+`st.selectbox(..., key="week_sel", label_visibility="collapsed")` alone, centered; row 2 is
+`st.columns([1, 1])` with your team name (`h3.mh-name`, ellipsis-truncated) and the
+opponent's (`h3.mh-name.mh-name-right`). CSS (`.st-key-matchup_header`) forces the team-name
+row to stay horizontal at every width (overriding Streamlit's blanket mobile
+column-stacking). `render_top_nav` still reads `week_sel` from `st.session_state` via a
+self-assign so it survives runs where the picker isn't rendered (i.e. any non-`WEEK_PAGES`
+page). Don't re-add a second `week_sel` widget in the rail — one widget per key per run. The
+date-range caption below the header (`st.container(key="matchup_caption")`) is hidden
+`@media (max-width:767px)` — too much small text on a phone; the date range still shows in
+the results below.
 
 **The Settings gear + mobile bottom icons are inline SVG, not the icon font** (deliberately).
 Each gets a monochrome Bootstrap-Icons SVG as a `--nav-ic` data-URI and CSS `mask` paints it
@@ -204,14 +217,25 @@ section, `_section_landing` gives the page a section opens to):
   `st.button` styled as a card, icon set by slug via `--home-ic`), tuned to fit one phone
   screen without scrolling. No data-load gate; reached by the brand (desktop) or the Home
   bottom-bar icon (mobile).
-- **This Week** (`WEEK_PAGES`): Matchup · Streamers · Bench · Roster, reached from the side
-  rail (entered via "Current Matchup"); the rail also holds the `week_sel` Week/Round picker
-  (kept alive across page switches by a self-assign so its state survives runs where the rail
-  isn't rendered).
-- **Season** (`SEASON_PAGES`, *mobile grouping*): Season Summary · Season Stats · League
-  Stats · **Schedule**. Season Summary shows a single **"YYYY–YY Season Complete"** heading,
-  champion card, four metric tiles, and the standings table, tuned to fit one 1080p screen.
-  (Season Summary is dropped from the section until the season is over.)
+- **This Week** (`WEEK_PAGES`): Matchup · **Scoreboard** · Streamers · Bench · Roster, reached
+  from the side rail (entered via "Current Matchup"). **Scoreboard** is the current-week
+  category comparison, moved out of the Matchup page into its own page (owner request — a
+  15-column wide table doesn't work well on a phone) and redesigned **vertically**:
+  `visualizations.create_scoreboard_vertical` renders a hero row (team names + big overall
+  W-L-T) then one stacked row **per category** (your value · category label · a two-tone
+  cobalt/clay lead bar · opponent value), the pattern ESPN/Yahoo fantasy apps use — no
+  horizontal scrolling needed at any width. The `week_sel` Week/Round picker lives in the
+  matchup header row (the "Playoffs - Round N" dropdown between the two team names), kept
+  alive across page switches by a self-assign so its state survives runs where that row isn't
+  rendered.
+- **Season Summary** has its own page (`render_season_summary`) but is **not in any nav
+  section/grouping** — reachable only via the desktop header link (`FLAT_NAV`, first item)
+  and the Home page tiles (both desktop and mobile). It shows a single **"YYYY–YY Season
+  Complete"** heading, champion card, four metric tiles, and the standings table, tuned to
+  fit one 1080p screen; the header link only appears once the season is over.
+- **Season** (`SEASON_PAGES`, *mobile grouping*): Season Stats · League Stats · **Schedule**
+  (deliberately does **not** include Season Summary — owner request: keep it off the Season
+  bottom-nav section, reachable from Home instead).
 - **Tools** (`TOOLS_PAGES`, *mobile grouping*): Power Rankings · **Playoff Odds** · Trade
   Analyzer. Note the mobile sections **intentionally differ from the desktop dropdowns** (by
   request): on mobile Schedule lives under Season and Playoff Odds under Tools; on desktop
@@ -272,3 +296,76 @@ still runs for non-summary season pages, so a brief progress bar can flash on th
   over fighting those quirks.
 - CSS selectors here target Streamlit `data-testid`s and emotion classes, which can
   shift on Streamlit upgrades. After bumping Streamlit, re-verify the layout shell.
+- **GAP gotcha, extended:** any `st.markdown`/`st.container`/`components.html` call that
+  renders a real-but-invisible DOM element at the top level of the main column — even
+  something as innocuous as `st.markdown(CUSTOM_CSS, ...)` injecting a `<style>` tag, or a
+  `with st.spinner(...):` block whose content later disappears — still counts as a flex item
+  and still consumes the column's 16px `gap`. Two prior instances of this: (1) the CSS/font
+  injection markdown calls themselves (fixed by wrapping both in
+  `st.container(key="css_injector")`); (2) the shared "Loading from ESPN…" / "Loading matchup
+  data…" spinners + progress bar that run even for Season Stats/League Stats, which don't use
+  their output (fixed with a conditional key, `mp_hide_N` on non-`WEEK_PAGES` vs `mp_live_N`
+  on `WEEK_PAGES`, so the progress UI stays visible where it's genuinely useful but collapses
+  to zero everywhere else). All of these keys are matched by the same always-collapse rule in
+  `styles.py` (`*:has(.st-key-nav_top | .st-key-nav_bottom | .st-key-touch_icon_injector |
+  .st-key-css_injector | [class*="st-key-mp_hide_"])`). **If you add a new
+  `st.markdown`/`st.empty`/`st.spinner`/`components.html` call outside any page's visible
+  content — especially near the top of `main()` — wrap it in a keyed container and add that
+  key to this rule, or it will silently push every page's content down.**
+- `st.markdown(..., unsafe_allow_html=True)` **cannot run `<script>` tags** — they're
+  inserted via `innerHTML`, which browsers never execute. To inject `<head>` changes (e.g.
+  the apple-touch-icon in `main()`), use `st.components.v1.html(...)`: it renders a
+  same-origin iframe whose script can reach the real page via `window.parent.document`.
+- **Indented multi-line f-strings inside a loop can silently break `st.markdown` HTML:**
+  CommonMark treats 4+ leading spaces on a line as an **indented code block** — a single
+  multi-line indented HTML f-string passed to `st.markdown(unsafe_allow_html=True)` renders
+  fine (seen throughout `visualizations.py`), but **concatenating many such indented
+  templates in a loop** (as `create_scoreboard_vertical` first did, one block per stat
+  category) made every iteration *after the first* render as literal escaped text instead of
+  HTML — no error, just wrong-looking output. Fix: build loop-repeated HTML as a **single
+  line per iteration** (chained `f'...'` string concatenation, no embedded newlines/leading
+  spaces), not a multi-line indented `f"""..."""` per row. If you're generating repeated HTML
+  fragments in a loop for `st.markdown`, keep them on one line each.
+- **CSS cascade-order trap in the This Week rail block:** the desktop (unscoped) rail button/
+  select rules and the `@media (max-width: 767px)` mobile overrides target the *identical*
+  selectors at *identical* specificity (both `!important`) — when that happens, **source
+  order** breaks the tie, not the media query. The desktop rules must appear *before* the
+  mobile block in `styles.py`, or the desktop styling (tinted background, boxed active state,
+  bordered select) silently wins on phones too, even though the mobile block looks like it
+  should override. If you add another `!important` rule pair like this, check which one is
+  declared last in the file — that's the one that actually applies at every width.
+- **`render_sortable_table` sizes every column to fit its own content**, not the
+  `"small"/"medium"/"large"` presets (those are fixed buckets — "small" was still much wider
+  than a 1-2 digit "Rank" column needs). `st.column_config`'s `width` accepts an **exact
+  integer pixel value** in this Streamlit version (`ColumnWidth = Literal["small","medium",
+  "large"] | int` — confirmed via `inspect.signature`/the `ColumnWidth` type, not just docs),
+  so `_fit_width(header, series)` computes `max(header_len, content_len) * px_per_char + pad`
+  per column, clamped to `[48, 420]`px. Don't revert to the size presets — they aren't truly
+  content-based. The grid `height` calc also had a **bug**, not just cosmetics: the old
+  `(rows + 1) * 35 + 22` overshoot (a full extra row of headroom, meant to avoid a double
+  scrollbar) rendered as a **visible blank row** at the bottom of every table; it's now
+  `rows * 35 + 32` (a small buffer, not a whole extra row).
+- **Dead-CSS-class trap:** `visualizations.create_scoreboard`'s outer table `<div>` never
+  actually carried `class="scoreboard-table"` even though `styles.py` had mobile-shrink rules
+  written for that exact class — they silently did nothing until the class was added to the
+  HTML. When you add a CSS class rule for a specific piece of raw-HTML output (anything built
+  with an f-string in `visualizations.py` or the inline HTML in `streamlit_app.py`), grep the
+  emitting code to confirm the class is actually in the string you think it's in — CSS with no
+  matching selector fails silently, with no error anywhere.
+- **CSS custom properties don't cross DOM branches:** `--page-pad` (the side gutter) is
+  declared at `:root` for exactly this reason — it was originally scoped inside
+  `.block-container` only, which broke `var(--page-pad)` anywhere in the This Week rail,
+  since `[data-testid="stSidebar"]` is a **sibling** of `.block-container` (under
+  `stAppViewContainer`), not a descendant. A custom property only inherits down the actual
+  DOM tree from wherever it's declared — matching a CSS *selector* elsewhere doesn't
+  "export" the variable to unrelated parts of the page. Used inside a shorthand
+  (`padding: 0 var(--page-pad) 0.3rem`), an unresolvable var makes the **whole declaration**
+  invalid, silently computing to `0` — no console warning. If you introduce a new
+  `--custom-property`, declare it at `:root` unless you're certain every place that reads it
+  is a genuine descendant of where you're declaring it.
+- **Streamlit's own default padding stacks with yours:** `[data-testid="stSidebarContent"]`
+  ships a default `20px` horizontal padding that has nothing to do with any rule in
+  `styles.py` — it stacked with our own `stSidebarUserContent` padding and offset the This
+  Week rail's mobile row ~20-36px further right than the visually-identical Season/Tools
+  sub-row. When two nested Streamlit-native containers both look like plausible "add padding
+  here" targets, check the computed style of *both*, not just the one your own rule targets.

@@ -46,7 +46,7 @@ from simulation import (
     _get_matchup_variance_multiplier,
 )
 from visualizations import (
-    create_scoreboard,
+    create_scoreboard_vertical,
     create_win_probability_gauge,
     create_category_chart,
     create_outcome_distribution,
@@ -76,10 +76,15 @@ st.set_page_config(
     # on desktop, collapsed on mobile; CSS force-shows it as a rail / sub-bar when it holds nav.
     initial_sidebar_state="auto"
 )
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-# Bootstrap Icons font is self-hosted (embedded base64), injected separately so a slow
-# asset can never render-block the layout stylesheet the way a CDN @import did.
-st.markdown(f"<style>{ICON_FONT_CSS}</style>", unsafe_allow_html=True)
+# Each st.markdown(<style>...) call renders as a real (zero-height, but still in-flow)
+# DOM element — like the nav wrappers, it still consumes a slot in the main column's flex
+# `gap`, contributing to the GAP gotcha (see styles.py). Wrapped in a keyed container so
+# that collapse rule can zero these out too.
+with st.container(key="css_injector"):
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+    # Bootstrap Icons font is self-hosted (embedded base64), injected separately so a slow
+    # asset can never render-block the layout stylesheet the way a CDN @import did.
+    st.markdown(f"<style>{ICON_FONT_CSS}</style>", unsafe_allow_html=True)
 # "Add to Home Screen" icon (iOS Safari / Android Chrome). Streamlit's own index.html ships
 # a Streamlit-branded apple-touch-icon that `page_icon` does NOT override (page_icon only
 # controls the tab favicon), so home-screen shortcuts showed the Streamlit logo. st.markdown
@@ -277,7 +282,7 @@ def render_sortable_table(df, key, default_col=None, default_desc=True, max_heig
     df = df.copy()
     cols = list(df.columns)
     if not cols:
-        st.dataframe(df, width='stretch', hide_index=True, key=f"srt_{key}")
+        st.dataframe(df, width='content', hide_index=True, key=f"srt_{key}")
         return
     pct_cols = []
     for i, c in enumerate(cols):
@@ -304,22 +309,39 @@ def render_sortable_table(df, key, default_col=None, default_desc=True, max_heig
     if default_col in cols:
         df = df.sort_values(default_col, ascending=not default_desc, kind="mergesort").reset_index(drop=True)
 
-    # The first column defaults to "medium" (sized for a name like Team/Player), but a
-    # short first column (e.g. "Rank") shouldn't eat that much width — size it off the
-    # actual values so more of the other columns fit on screen.
-    first_len = df[cols[0]].astype(str).str.len().max()
-    first_width = "small" if pd.notna(first_len) and first_len <= 4 else "medium"
-    cfg = {cols[0]: st.column_config.TextColumn(width=first_width)}
-    for c in pct_cols:
-        cfg[c] = st.column_config.NumberColumn(format="%.1f%%")
-    kwargs = dict(width='stretch', hide_index=True, column_config=cfg, key=f"srt_{key}")
+    # Size every column to fit its own content (header vs. longest value), not a fixed
+    # "small"/"medium"/"large" preset — a 1-2 digit "Rank" column doesn't need the same
+    # width as a "Team" column with 18-character names. Streamlit's column_config accepts
+    # an exact pixel width (not just the size presets), so compute one per column.
+    def _fit_width(header, series, min_px=48, max_px=420, px_per_char=7.6, pad=26):
+        try:
+            content_len = series.astype(str).str.len().max()
+            content_len = int(content_len) if pd.notna(content_len) else 0
+        except Exception:
+            content_len = 0
+        n = max(content_len, len(str(header)))
+        return int(min(max_px, max(min_px, round(n * px_per_char) + pad)))
+
+    cfg = {}
+    for c in cols:
+        width_px = _fit_width(c, df[c])
+        if c == cols[0]:
+            cfg[c] = st.column_config.TextColumn(width=width_px)
+        elif c in pct_cols:
+            cfg[c] = st.column_config.NumberColumn(format="%.1f%%", width=width_px)
+        else:
+            cfg[c] = st.column_config.Column(width=width_px)
+    # 'stretch' would re-expand every fixed pixel width to fill the container,
+    # undoing the fit-to-content sizing above (most visible on narrow mobile screens).
+    kwargs = dict(width='content', hide_index=True, column_config=cfg, key=f"srt_{key}")
     rows = len(df)
     # Size the grid to show every row with headroom so it never scrolls internally.
-    # Glide rows are 35px (header + rows) plus ~12px chrome; a too-tight height
-    # leaves a few px of vertical overflow, which shows BOTH scrollbars. Overshoot
-    # slightly so clientHeight clears the content and no scrollbars appear.
+    # Glide rows are 35px (header + rows) plus ~12px chrome; a too-tight height leaves a
+    # few px of vertical overflow, showing BOTH scrollbars. A small buffer clears that —
+    # but a FULL extra row of headroom (the old `(rows+1)*35`) rendered as a visible blank
+    # row at the bottom, so keep the overshoot well under one row's height.
     if 0 < rows <= 25:
-        kwargs["height"] = (rows + 1) * 35 + 22
+        kwargs["height"] = rows * 35 + 32
     if selectable:
         kwargs["on_select"] = "rerun"
         kwargs["selection_mode"] = "single-row"
@@ -1216,7 +1238,7 @@ def warm_caches(sim_count, blend_weight, team_name):
     threading.Thread(target=_warm, daemon=True).start()
 
 
-WEEK_PAGES = ("Matchup", "Streamers", "Bench", "Roster")
+WEEK_PAGES = ("Matchup", "Scoreboard", "Streamers", "Bench", "Roster")
 # Mobile section grouping (bottom icon bar + sub-row). Note this differs slightly from the
 # desktop dropdowns by request: Schedule lives under Season, Playoff Odds under Tools.
 # Season Summary is intentionally NOT in any nav section — it's reachable only from the
@@ -1492,11 +1514,12 @@ def render_top_nav(meta, team_name):
                         type="primary" if active == "Settings" else "secondary")
 
     # -------- "This Week" side rail: only on This Week pages (left rail / mobile sub-bar) --
+    # The Week/Round picker itself lives in the matchup header row (main()), not here — it
+    # became the "Playoffs - Round 2" dropdown between the two team names, so it doesn't
+    # need a second home in the rail too.
     if active in WEEK_PAGES:
         with st.sidebar:
             st.markdown("<div class='nav-scope-label'>This Week</div>", unsafe_allow_html=True)
-            st.selectbox("Week / Round", week_labels, key="week_sel",
-                         label_visibility="collapsed")
             for i, pg in enumerate(WEEK_PAGES):
                 st.button(pg, key=f"navw_{i}", width='stretch',
                           on_click=_go, args=(pg,),
@@ -1638,24 +1661,32 @@ def main():
                 game_window_start, game_window_end, week_span, period_end_date = resolve_view_window(view_period, year)
 
             if active_page in WEEK_PAGES:
-                # (Week/Round picker lives in the left "This Week" side rail, not here.)
-                col1, col2, col3 = st.columns([2, 1, 2], vertical_alignment="center")
-                with col1:
-                    st.markdown(f'<h3><i class="bi bi-house-fill" style="color: var(--cobalt);"></i> {your_team_name}</h3>', unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f"<h3 style='text-align: center; color: var(--cobalt);'>{selected_view_label}</h3>", unsafe_allow_html=True)
-                with col3:
-                    st.markdown(f'<h3><i class="bi bi-person-fill" style="color: var(--clay);"></i> {opp_team_name}</h3>', unsafe_allow_html=True)
-                if is_live_view:
-                    st.caption(
-                        f"NBA games in this projection: **{game_window_start:%b %d} – {game_window_end:%b %d}**"
-                    )
-                else:
-                    st.caption(
-                        f"Final results for **{selected_view_label}** "
-                        f"(NBA games **{game_window_start:%b %d} – {game_window_end:%b %d}**). "
-                        f"Completed matchups show final totals - no games remain to simulate."
-                    )
+                # Matchup header, two rows: the Week/Round picker gets a full-width row to
+                # itself (its text, e.g. "Playoffs - Round 2", doesn't truncate, so it needs
+                # room free of any neighbor); team names get their own row below with far
+                # more space each than when they had to share the row with the picker.
+                week_choices = [l for l in build_week_views() if l != SEASON_SUMMARY_VIEW]
+                with st.container(key="matchup_header"):
+                    st.selectbox("Week / Round", week_choices, key="week_sel",
+                                 label_visibility="collapsed")
+                    col1, col3 = st.columns([1, 1], vertical_alignment="center")
+                    with col1:
+                        st.markdown(f'<h3 class="mh-name"><i class="bi bi-house-fill" style="color: var(--cobalt);"></i> {your_team_name}</h3>', unsafe_allow_html=True)
+                    with col3:
+                        st.markdown(f'<h3 class="mh-name mh-name-right"><i class="bi bi-person-fill" style="color: var(--clay);"></i> {opp_team_name}</h3>', unsafe_allow_html=True)
+                # Hidden on mobile (owner: too much text clutter on a small screen) —
+                # the date range is still shown in the "Simulation Results"/table context.
+                with st.container(key="matchup_caption"):
+                    if is_live_view:
+                        st.caption(
+                            f"NBA games in this projection: **{game_window_start:%b %d} – {game_window_end:%b %d}**"
+                        )
+                    else:
+                        st.caption(
+                            f"Final results for **{selected_view_label}** "
+                            f"(NBA games **{game_window_start:%b %d} – {game_window_end:%b %d}**). "
+                            f"Completed matchups show final totals - no games remain to simulate."
+                        )
 
             # Build player stats.
             with st.container(key=_pkey(3)):
@@ -1734,14 +1765,15 @@ def main():
             
             # Pages are chosen by the top nav (active_page).
             
+            # ==================== SCOREBOARD (its own page — see WEEK_PAGES) ====================
+            if active_page == "Scoreboard":
+                st.markdown('<h2><i class="bi bi-trophy-fill" style="color: var(--clay);"></i> Scoreboard</h2>', unsafe_allow_html=True)
+                st.markdown(create_scoreboard_vertical(current_you, current_opp, your_team_name, opp_team_name), unsafe_allow_html=True)
+
             # ==================== TAB 1: MATCHUP ANALYSIS ====================
             if active_page == "Matchup":
                 st.markdown('<h2><i class="bi bi-bar-chart-fill" style="color: var(--cobalt);"></i> Simulation Results</h2>', unsafe_allow_html=True)
-                
-                # Current Scoreboard
-                st.markdown('<h3><i class="bi bi-trophy-fill" style="color: var(--clay);"></i> Current Scoreboard</h3>', unsafe_allow_html=True)
-                st.markdown(create_scoreboard(current_you, current_opp, your_team_name, opp_team_name), unsafe_allow_html=True)
-                
+
                 # Key metrics row
                 st.markdown('<h3><i class="bi bi-graph-up-arrow" style="color: var(--good);"></i> Key Metrics</h3>', unsafe_allow_html=True)
                 your_roster_games = int(your_team_df["Games Left"].sum())
