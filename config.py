@@ -2,16 +2,24 @@
 Fantasy Basketball Simulator - Configuration and constants.
 """
 
-# Secrets (ESPN auth cookies + Gemini API key) live in config_secrets.py, which is NOT
-# committed to git (see .gitignore). Copy config_secrets.example.py to config_secrets.py
-# and fill in your own values.
+# Secrets (ESPN auth cookies + Gemini API key) are NOT committed to git. Two ways to
+# supply them:
+#   - LOCAL dev: config_secrets.py (copy config_secrets.example.py -> config_secrets.py).
+#   - DEPLOYMENT (Render, etc.): set environment variables ESPN_S2, ESPN_SWID,
+#     GEMINI_API_KEY in the host's dashboard (no file needed).
 try:
     from config_secrets import ESPN_S2, ESPN_SWID, GEMINI_API_KEY
-except ImportError as _e:  # pragma: no cover
-    raise RuntimeError(
-        "Missing config_secrets.py - copy config_secrets.example.py to config_secrets.py "
-        "and fill in your ESPN and Gemini credentials."
-    ) from _e
+except ImportError:
+    import os
+    ESPN_S2 = os.environ.get("ESPN_S2", "")
+    ESPN_SWID = os.environ.get("ESPN_SWID", "")
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+    if not (ESPN_S2 and ESPN_SWID and GEMINI_API_KEY):
+        raise RuntimeError(
+            "Credentials not found. Local dev: copy config_secrets.example.py to "
+            "config_secrets.py and fill it in. Deployment (Render/etc.): set the ESPN_S2, "
+            "ESPN_SWID, and GEMINI_API_KEY environment variables."
+        )
 
 # =============================================================================
 # ESPN connection - non-secret identifiers (the auth cookies are in config_secrets.py).
