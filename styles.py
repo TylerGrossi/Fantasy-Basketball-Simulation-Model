@@ -388,6 +388,7 @@ CUSTOM_CSS = """
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_bottom),
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-touch_icon_injector),
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-css_injector),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-pv_gl_injector),
     [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has([class*="st-key-mp_hide_"]) {
         position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
     }
@@ -446,13 +447,145 @@ CUSTOM_CSS = """
        here. */
     .st-key-navb_week button::before,     .st-key-navb_season button::before,
     .st-key-navb_tools button::before,    .st-key-navb_settings button::before,
-    .st-key-navb_home button::before,     .st-key-navp_settings button::before {
+    .st-key-navb_home button::before,     .st-key-navp_settings button::before,
+    .st-key-navb_search button::before,   .st-key-navp_search button::before,
+    .st-key-navb_assistant button::before, .st-key-navp_assistant button::before {
         content: ""; display: inline-block; flex: none;
         width: 1.05rem; height: 1.05rem;
         background-color: var(--cobalt);
         -webkit-mask: var(--nav-ic) center / contain no-repeat;
                 mask: var(--nav-ic) center / contain no-repeat;
     }
+    .st-key-navp_search button, .st-key-navb_search button { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktc2VhcmNoIiB2aWV3Qm94PSIwIDAgMTYgMTYiPjxwYXRoIGQ9Ik0xMS43NDIgMTAuMzQ0YTYuNSA2LjUgMCAxIDAtMS4zOTcgMS4zOThoLS4wMDFxLjA0NC4wNi4wOTguMTE1bDMuODUgMy44NWExIDEgMCAwIDAgMS40MTUtMS40MTRsLTMuODUtMy44NWExIDEgMCAwIDAtLjExNS0uMXpNMTIgNi41YTUuNSA1LjUgMCAxIDEtMTEgMCA1LjUgNS41IDAgMCAxIDExIDAiLz48L3N2Zz4="); }
+    .st-key-navp_assistant button, .st-key-navb_assistant button { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktcm9ib3QiIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHBhdGggZD0iTTYgMTIuNWEuNS41IDAgMCAxIC41LS41aDNhLjUuNSAwIDAgMSAwIDFoLTNhLjUuNSAwIDAgMS0uNS0uNU0zIDguMDYyQzMgNi43NiA0LjIzNSA1Ljc2NSA1LjUzIDUuODg2YTI2LjYgMjYuNiAwIDAgMCA0Ljk0IDBDMTEuNzY1IDUuNzY1IDEzIDYuNzYgMTMgOC4wNjJ2MS4xNTdhLjkzLjkzIDAgMCAxLS43NjUuOTM1Yy0uODQ1LjE0Ny0yLjM0LjM0Ni00LjIzNS4zNDZzLTMuMzktLjItNC4yMzUtLjM0NkEuOTMuOTMgMCAwIDEgMyA5LjIxOXptNC41NDItLjgyN2EuMjUuMjUgMCAwIDAtLjIxNy4wNjhsLS45Mi45YTI1IDI1IDAgMCAxLTEuODcxLS4xODMuMjUuMjUgMCAwIDAtLjA2OC40OTVjLjU1LjA3NiAxLjIzMi4xNDkgMi4wMi4xOTNhLjI1LjI1IDAgMCAwIC4xODktLjA3MWwuNzU0LS43MzYuODQ3IDEuNzFhLjI1LjI1IDAgMCAwIC40MDQuMDYybC45MzItLjk3YTI1IDI1IDAgMCAwIDEuOTIyLS4xODguMjUuMjUgMCAwIDAtLjA2OC0uNDk1Yy0uNTM4LjA3NC0xLjIwNy4xNDUtMS45OC4xODlhLjI1LjI1IDAgMCAwLS4xNjYuMDc2bC0uNzU0Ljc4NS0uODQyLTEuN2EuMjUuMjUgMCAwIDAtLjE4Mi0uMTM1WiIvPjxwYXRoIGQ9Ik04LjUgMS44NjZhMSAxIDAgMSAwLTEgMFYzaC0yQTQuNSA0LjUgMCAwIDAgMSA3LjVWOGExIDEgMCAwIDAtMSAxdjJhMSAxIDAgMCAwIDEgMXYxYTIgMiAwIDAgMCAyIDJoMTBhMiAyIDAgMCAwIDItMnYtMWExIDEgMCAwIDAgMS0xVjlhMSAxIDAgMCAwLTEtMXYtLjVBNC41IDQuNSAwIDAgMCAxMC41IDNoLTJ6TTE0IDcuNVYxM2ExIDEgMCAwIDEtMSAxSDNhMSAxIDAgMCAxLTEtMVY3LjVBMy41IDMuNSAwIDAgMSA1LjUgNGg1QTMuNSAzLjUgMCAwIDEgMTQgNy41Ii8+PC9zdmc+"); }
+    /* Search / AI = icon only in the desktop header: keep the label for screen readers
+       but hide it visually. */
+    .st-key-navp_search button p, .st-key-navp_assistant button p {
+        position: absolute !important; width: 1px; height: 1px;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    }
+    .st-key-navp_search button::before,
+    .st-key-navp_assistant button::before { font-size: 1.2rem; }
+
+    /* -------- AI Assistant chat page: narrow, centered chat column (Claude/Gemini feel) -- */
+    .st-key-assistant_page { max-width: 820px; margin: 0 auto; }
+    /* Empty state: greeting + chips + composer are one group, vertically centered in the
+       page (ChatGPT/Gemini style) instead of the composer being pinned to the bottom. The
+       .asst-hero marker exists only before the first message, so this targets empty only. */
+    .st-key-assistant_page:has(.asst-hero) {
+        min-height: 74vh; display: flex; flex-direction: column; justify-content: center;
+    }
+    .asst-hero { text-align: center; padding: 0 1rem 0.5rem; }
+    /* Inline composer (a form so Enter submits): a centered rounded chat bar that sits with
+       the greeting (empty) or under the conversation, never stuck at the viewport bottom. */
+    .st-key-agent_composer { max-width: 680px; width: 100%; margin: 0.5rem auto 0.3rem; }
+    .st-key-agent_composer [data-testid="stForm"] {
+        border: 1px solid var(--line) !important; border-radius: 22px !important;
+        background: var(--card) !important; padding: 0.5rem 0.6rem 0.5rem 0.95rem !important;
+        box-shadow: 0 6px 22px rgba(20,16,10,0.07) !important;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .st-key-agent_composer [data-testid="stForm"]:focus-within {
+        border-color: var(--cobalt) !important;
+        box-shadow: 0 6px 22px rgba(37,99,235,0.15) !important;
+    }
+    .st-key-agent_composer [data-baseweb="base-input"],
+    .st-key-agent_composer [data-baseweb="textarea"],
+    .st-key-agent_composer input, .st-key-agent_composer textarea {
+        background: transparent !important; border: none !important;
+        font-family: var(--sans) !important; font-size: 1.02rem !important;
+        color: var(--ink) !important;
+    }
+    /* Multi-line composer: wraps + grows with content (like Claude), then scrolls. */
+    .st-key-agent_composer [data-baseweb="textarea"] { min-height: 0 !important; height: auto !important; }
+    .st-key-agent_composer textarea {
+        resize: none !important; field-sizing: content;
+        min-height: 1.6rem !important; height: auto !important; max-height: 38vh !important;
+        line-height: 1.5; padding: 0.15rem 0 !important;
+    }
+    /* hide the 'Press Enter to submit form' helper text */
+    .st-key-agent_composer [data-testid="InputInstructions"],
+    .st-key-agent_composer [class*="InputInstructions"] { display: none !important; }
+    /* the Enter-to-submit JS injector takes no space */
+    .st-key-agent_enter_js { height: 0 !important; min-height: 0 !important;
+        margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+    .st-key-agent_enter_js iframe { height: 0 !important; display: block; }
+    .st-key-agent_composer [data-testid="stFormSubmitButton"] button {
+        background: var(--cobalt) !important; color: #fff !important; border: none !important;
+        border-radius: 12px !important; font-weight: 600 !important; box-shadow: none !important;
+    }
+    .st-key-agent_composer [data-testid="stFormSubmitButton"] button:hover {
+        filter: brightness(1.05); transform: none !important;
+    }
+
+    /* ===== Claude-style chat: white page, no avatars, clean message rows ===== */
+    /* White background across the app view while the Agent page is open. */
+    [data-testid="stApp"]:has(.st-key-assistant_page),
+    [data-testid="stApp"]:has(.st-key-assistant_page) [data-testid="stMain"],
+    [data-testid="stApp"]:has(.st-key-assistant_page) [data-testid="stMainBlockContainer"],
+    [data-testid="stApp"]:has(.st-key-assistant_page) .st-key-nav_top {
+        background: #ffffff !important;
+    }
+    /* Drop the red/yellow default chat avatars entirely (Claude shows none). */
+    .st-key-assistant_page [data-testid="stChatMessageAvatarUser"],
+    .st-key-assistant_page [data-testid="stChatMessageAvatarAssistant"] {
+        display: none !important;
+    }
+    .st-key-assistant_page [data-testid="stChatMessage"] {
+        background: transparent !important; border: none !important; box-shadow: none !important;
+        padding: 0.1rem 0 !important; gap: 0 !important; margin: 0.1rem 0 !important;
+    }
+    /* Assistant turn: plain text, comfortable reading rhythm, full column width. */
+    .st-key-assistant_page [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) [data-testid="stChatMessageContent"] {
+        background: transparent !important; padding: 0.35rem 0.1rem 0.9rem !important;
+        color: var(--ink) !important; line-height: 1.7;
+    }
+    /* User turn: a subtle rounded bubble, right-aligned and contained, like Claude. */
+    .st-key-assistant_page [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+        justify-content: flex-end !important;
+    }
+    .st-key-assistant_page [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] {
+        flex: 0 1 auto !important; width: auto !important; max-width: 80% !important;
+        margin-left: auto !important; margin-right: 0 !important;
+        background: #f4f2ee !important; border-radius: 16px !important;
+        padding: 0.6rem 1rem !important; color: var(--ink) !important;
+    }
+    /* Once there are messages on screen, pin the composer as a fixed bottom bar so it stays
+       put and the conversation scrolls above it - real-chatbot behavior. Keyed off the
+       presence of chat messages (stable across reruns) rather than the fading hero. In the
+       empty state (no messages) the composer stays in-flow, centered with the greeting. */
+    .st-key-assistant_page:has([data-testid="stChatMessage"]) .st-key-agent_composer {
+        position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+        z-index: 60; width: 100% !important; max-width: none !important; margin: 0 !important;
+        background: #ffffff !important; padding: 0.6rem 1rem 1.5rem !important;
+        box-shadow: 0 -16px 24px 8px rgba(255, 255, 255, 0.96);
+    }
+    .st-key-assistant_page:has([data-testid="stChatMessage"]) .st-key-agent_composer [data-testid="stForm"] {
+        max-width: 720px; margin: 0 auto;
+    }
+    /* room so the last message isn't hidden behind the fixed composer */
+    .st-key-assistant_page:has([data-testid="stChatMessage"]) { padding-bottom: 8rem !important; }
+    .asst-hero-badge {
+        width: 56px; height: 56px; margin: 0 auto 0.9rem; border-radius: 16px;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--cobalt); color: #fff; font-size: 1.65rem;
+        box-shadow: 0 8px 24px rgba(37,99,235,0.28);
+    }
+    .asst-hero h1 { font-size: 1.7rem; font-weight: 800; margin: 0 0 0.45rem; color: var(--ink); }
+    .asst-hero p { color: var(--ink-2); max-width: 560px; margin: 0 auto; line-height: 1.5; }
+    /* suggestion chips + Clear: pill buttons instead of heavy full-width blue bars */
+    .st-key-assistant_page [data-testid="stHorizontalBlock"] .stButton > button {
+        border: 1px solid var(--line) !important; background: var(--card) !important;
+        color: var(--ink) !important; border-radius: 999px !important;
+        font-weight: 600 !important; font-size: 0.85rem !important;
+        padding: 0.4rem 0.6rem !important; box-shadow: none !important;
+    }
+    .st-key-assistant_page [data-testid="stHorizontalBlock"] .stButton > button:hover {
+        border-color: var(--cobalt) !important; color: var(--cobalt) !important;
+        transform: none !important;
+    }
+    /* chat bubbles: a touch more breathing room */
+    .st-key-assistant_page [data-testid="stChatMessage"] { padding: 0.35rem 0.2rem; }
     .st-key-navb_week button     { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktY2FsZW5kYXItd2Vlay1maWxsIiB2aWV3Qm94PSIwIDAgMTYgMTYiPgogIDxwYXRoIGQ9Ik00IC41YS41LjUgMCAwIDAtMSAwVjFIMmEyIDIgMCAwIDAtMiAydjFoMTZWM2EyIDIgMCAwIDAtMi0yaC0xVi41YS41LjUgMCAwIDAtMSAwVjFINFYuNXpNMTYgMTRWNUgwdjlhMiAyIDAgMCAwIDIgMmgxMmEyIDIgMCAwIDAgMi0yek05LjUgN2gxYS41LjUgMCAwIDEgLjUuNXYxYS41LjUgMCAwIDEtLjUuNWgtMWEuNS41IDAgMCAxLS41LS41di0xYS41LjUgMCAwIDEgLjUtLjV6bTMgMGgxYS41LjUgMCAwIDEgLjUuNXYxYS41LjUgMCAwIDEtLjUuNWgtMWEuNS41IDAgMCAxLS41LS41di0xYS41LjUgMCAwIDEgLjUtLjV6TTIgMTAuNWEuNS41IDAgMCAxIC41LS41aDFhLjUuNSAwIDAgMSAuNS41djFhLjUuNSAwIDAgMS0uNS41aC0xYS41LjUgMCAwIDEtLjUtLjV2LTF6bTMuNS0uNWgxYS41LjUgMCAwIDEgLjUuNXYxYS41LjUgMCAwIDEtLjUuNWgtMWEuNS41IDAgMCAxLS41LS41di0xYS41LjUgMCAwIDEgLjUtLjV6Ii8+Cjwvc3ZnPg=="); }
     .st-key-navb_season button   { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktdHJvcGh5LWZpbGwiIHZpZXdCb3g9IjAgMCAxNiAxNiI+CiAgPHBhdGggZD0iTTIuNS41QS41LjUgMCAwIDEgMyAwaDEwYS41LjUgMCAwIDEgLjUuNWMwIC41MzgtLjAxMiAxLjA1LS4wMzQgMS41MzZhMyAzIDAgMSAxLTEuMTMzIDUuODljLS43OSAxLjg2NS0xLjg3OCAyLjc3Ny0yLjgzMyAzLjAxMXYyLjE3M2wxLjQyNS4zNTZjLjE5NC4wNDguMzc3LjEzNS41MzcuMjU1TDEzLjMgMTUuMWEuNS41IDAgMCAxLS4zLjlIM2EuNS41IDAgMCAxLS4zLS45bDEuODM4LTEuMzc5Yy4xNi0uMTIuMzQzLS4yMDcuNTM3LS4yNTVMNi41IDEzLjExdi0yLjE3M2MtLjk1NS0uMjM0LTIuMDQzLTEuMTQ2LTIuODMzLTMuMDEyYTMgMyAwIDEgMS0xLjEzMi01Ljg5QTMzLjA3NiAzMy4wNzYgMCAwIDEgMi41LjV6bS4wOTkgMi41NGEyIDIgMCAwIDAgLjcyIDMuOTM1Yy0uMzMzLTEuMDUtLjU4OC0yLjM0Ni0uNzItMy45MzV6bTEwLjA4MyAzLjkzNWEyIDIgMCAwIDAgLjcyLTMuOTM1Yy0uMTMzIDEuNTktLjM4OCAyLjg4NS0uNzIgMy45MzV6Ii8+Cjwvc3ZnPg=="); }
     .st-key-navb_tools button    { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktdG9vbHMiIHZpZXdCb3g9IjAgMCAxNiAxNiI+CiAgPHBhdGggZD0iTTEgMCAwIDFsMi4yIDMuMDgxYTEgMSAwIDAgMCAuODE1LjQxOWguMDdhMSAxIDAgMCAxIC43MDguMjkzbDIuNjc1IDIuNjc1LTIuNjE3IDIuNjU0QTMuMDAzIDMuMDAzIDAgMCAwIDAgMTNhMyAzIDAgMSAwIDUuODc4LS44NTFsMi42NTQtMi42MTcuOTY4Ljk2OC0uMzA1LjkxNGExIDEgMCAwIDAgLjI0MiAxLjAyM2wzLjI3IDMuMjdhLjk5Ny45OTcgMCAwIDAgMS40MTQgMGwxLjU4Ni0xLjU4NmEuOTk3Ljk5NyAwIDAgMCAwLTEuNDE0bC0zLjI3LTMuMjdhMSAxIDAgMCAwLTEuMDIzLS4yNDJMMTAuNSA5LjVsLS45Ni0uOTYgMi42OC0yLjY0M0EzLjAwNSAzLjAwNSAwIDAgMCAxNiAzYzAtLjI2OS0uMDM1LS41My0uMTAyLS43NzdsLTIuMTQgMi4xNDFMMTIgNGwtLjM2NC0xLjc1N0wxMy43NzcuMTAyYTMgMyAwIDAgMC0zLjY3NSAzLjY4TDcuNDYyIDYuNDYgNC43OTMgMy43OTNhMSAxIDAgMCAxLS4yOTMtLjcwN3YtLjA3MWExIDEgMCAwIDAtLjQxOS0uODE0TDEgMFptOS42NDYgMTAuNjQ2YS41LjUgMCAwIDEgLjcwOCAwbDIuOTE0IDIuOTE1YS41LjUgMCAwIDEtLjcwNy43MDdsLTIuOTE1LTIuOTE0YS41LjUgMCAwIDEgMC0uNzA4Wk0zIDExbC40NzEuMjQyLjUyOS4wMjYuMjg3LjQ0NS40NDUuMjg3LjAyNi41MjlMNSAxM2wtLjI0Mi40NzEtLjAyNi41MjktLjQ0NS4yODctLjI4Ny40NDUtLjUyOS4wMjZMMyAxNWwtLjQ3MS0uMjQyTDIgMTQuNzMybC0uMjg3LS40NDVMMS4yNjggMTRsLS4wMjYtLjUyOUwxIDEzbC4yNDItLjQ3MS4wMjYtLjUyOS40NDUtLjI4Ny4yODctLjQ0NS41MjktLjAyNkwzIDExWiIvPgo8L3N2Zz4="); }
@@ -540,6 +673,19 @@ CUSTOM_CSS = """
         box-shadow: 0 10px 28px rgba(20,16,10,0.14), 0 2px 6px rgba(20,16,10,0.06) !important;
     }
     [data-testid="stPopoverBody"] [data-testid="stVerticalBlock"] { gap: 0.15rem !important; }
+    /* Dropdown items are page_links (navigation links), styled to read like menu rows. */
+    [data-testid="stPopoverBody"] [data-testid="stPageLink"] a {
+        padding: 0.4rem 0.6rem !important; border-radius: 8px !important;
+        color: var(--ink-2) !important; font-weight: 600 !important;
+        text-decoration: none !important;
+    }
+    [data-testid="stPopoverBody"] [data-testid="stPageLink"] a p { font-size: 1.0rem !important; }
+    [data-testid="stPopoverBody"] [data-testid="stPageLink"] a:hover {
+        background: var(--surface-2) !important; color: var(--ink) !important;
+    }
+    [data-testid="stPopoverBody"] [data-testid="stPageLink"] a[aria-current="page"] {
+        color: var(--cobalt) !important;
+    }
     /* The button itself only sizes to its text unless forced wide, so left-align on its
        label had nothing to align against inside the (wider, centered) popover panel. */
     [data-testid="stPopoverBody"] [data-testid="stElementContainer"],
@@ -614,6 +760,10 @@ CUSTOM_CSS = """
        specificity (all !important), so source order decides the tie — putting the mobile
        overrides LAST is what makes them win on phones instead of these desktop-only rules. */
     [data-testid="stSidebar"] .nav-scope-label { display: block; margin: 0.2rem 0 0.6rem; }
+    /* Scoreboard (navw_1) leads the This Week rail at every width. The "This Week" label
+       keeps a lower order so it stays pinned above the reordered buttons on desktop. */
+    [data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.nav-scope-label) { order: -5 !important; }
+    [data-testid="stSidebar"] [class*="st-key-navw_1"] { order: -1 !important; }
     [data-testid="stSidebar"] [data-baseweb="select"] > div {
         background: var(--card) !important; border-radius: 8px !important;
         min-height: 2.1rem !important; font-family: var(--mono) !important; font-size: 0.8rem !important;
@@ -711,6 +861,24 @@ CUSTOM_CSS = """
         /* Lighten the week picker to match the flatter mobile look. */
         [data-testid="stSidebar"] [data-baseweb="select"] > div {
             border: none !important; background: transparent !important;
+        }
+        /* ---- Mobile-only rename + reorder of the This Week rail tabs ----
+           On a phone the "current matchup" numbers view (internal page "Scoreboard",
+           button navw_1) is the primary Matchup tab, and the full-simulation page
+           (internal "Matchup", navw_0) is "Projections". Desktop keeps the real labels
+           and order (these rules live inside the max-width:767px block). Text is swapped
+           via a zero-sized label + ::after replacement; order is flipped so the renamed
+           "Matchup" (navw_1) sits first. */
+        [data-testid="stSidebar"] [class*="st-key-navw_1"] { order: -1 !important; }
+        [data-testid="stSidebar"] [class*="st-key-navw_0"] .stButton > button p,
+        [data-testid="stSidebar"] [class*="st-key-navw_1"] .stButton > button p {
+            font-size: 0 !important;
+        }
+        [data-testid="stSidebar"] [class*="st-key-navw_0"] .stButton > button p::after {
+            content: "Projections"; font-size: 0.82rem;
+        }
+        [data-testid="stSidebar"] [class*="st-key-navw_1"] .stButton > button p::after {
+            content: "Matchup"; font-size: 0.82rem;
         }
     }
 
@@ -914,6 +1082,275 @@ CUSTOM_CSS = """
     }
     .ss-standings-scroll::-webkit-scrollbar-track { background: transparent; }
 
+    /* ======= Player Value: DESKTOP table vs MOBILE compact list (both rendered) =======
+       A 20+ column sortable grid is unusable on a phone (endless horizontal scroll, the
+       Value buried). Same both-rendered-CSS-toggle pattern as the Home layouts: desktop
+       gets the filterable table, mobile gets a compact value list segmented by owner. */
+    .st-key-pv_mobile { display: none; }
+    @media (max-width: 767px) {
+        .st-key-pv_desktop { display: none !important; }
+        .st-key-pv_mobile { display: block; }
+        /* Segmented owner switch: three tabs on ONE horizontal row that fill the width but
+           never clip their label. The baseweb button-group is already a flex row; using
+           flex-basis:auto (flex:1 1 auto) sizes each tab from its TEXT first, then grows to
+           share the row - so "Free Agents" keeps its full width instead of being squeezed
+           into an equal third and ellipsized. Force the inner label visible (no clip). */
+        /* Mobile Player Value controls: two dropdowns (value basis + owner) and the injury
+           toggle on ONE row. The st-key-pv_ctrl class sits directly ON the stVerticalBlock
+           (already display:flex), so flip THAT to a row; its three direct children are the
+           two selectbox containers and the toggle container. The selectboxes share the
+           width (flex:1); the toggle stays compact on the right. */
+        .st-key-pv_ctrl {
+            flex-direction: row !important; align-items: center !important;
+            flex-wrap: nowrap !important; gap: 0.4rem !important; margin-bottom: 0.75rem !important;
+        }
+        /* Two equal-width dropdowns + compact toggle. A smaller label font (and tight inner
+           padding) is what actually lets "Free Agents" fit its box without ellipsis. */
+        .st-key-pv_ctrl > [class*="st-key-pv_valuemode"],
+        .st-key-pv_ctrl > [class*="st-key-pv_seg"] { flex: 1 1 0 !important; min-width: 0 !important; }
+        .st-key-pv_ctrl > [class*="st-key-pv_show_injured"] { flex: 0 0 auto !important; width: auto !important; }
+        .st-key-pv_valuemode [data-baseweb="select"],
+        .st-key-pv_seg [data-baseweb="select"] { min-width: 0 !important; }
+        .st-key-pv_valuemode [data-baseweb="select"] *,
+        .st-key-pv_seg [data-baseweb="select"] * { font-size: 0.8rem !important; }
+        .st-key-pv_valuemode [data-baseweb="select"] > div,
+        .st-key-pv_seg [data-baseweb="select"] > div { min-height: 2.3rem !important; padding-left: 0.3rem !important; }
+        /* Reclaim room: hide the injury help "?" icon on mobile (its label already reads
+           "Injured", and the tooltip is desktop-hover only anyway). */
+        .st-key-pv_show_injured [data-testid="stTooltipIcon"] { display: none !important; }
+        /* Kill the big empty band at the top of the (heading-less) Player Value page:
+           pull the first control row up under the Tools sub-row. */
+        .st-key-pv_mobile { margin-top: -1.9rem !important; }
+        /* Smaller toggle switch + tighter label so it fits beside the two dropdowns. */
+        .st-key-pv_show_injured [data-testid="stCheckbox"] label > div:first-child {
+            transform: scale(0.8); transform-origin: center;
+        }
+        .st-key-pv_show_injured [data-testid="stCheckbox"] label { gap: 0.15rem !important; }
+        .st-key-pv_show_injured [data-testid="stWidgetLabel"] p { font-size: 0.72rem !important; white-space: nowrap; }
+    }
+    /* The compact list itself (raw HTML, so it renders the same on desktop preview too,
+       but the container is hidden there). Each row is a native <details> disclosure. */
+    .pv-list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--card); }
+    .pv-item { border-bottom: 1px solid var(--line-2); }
+    .pv-item:last-child { border-bottom: none; }
+    .pv-item[open] { background: var(--surface-2); }
+    .pv-sum {
+        position: relative; display: flex; align-items: center; gap: 0.5rem;
+        padding: 0.5rem 0.7rem; cursor: pointer; list-style: none; overflow: hidden;
+    }
+    .pv-sum::-webkit-details-marker { display: none; }
+    .pv-fill { position: absolute; left: 0; top: 0; bottom: 0; opacity: 0.14; z-index: 0; }
+    .pv-sum > span:not(.pv-fill), .pv-detail { position: relative; z-index: 1; }
+    .pv-rank { font-family: var(--mono); font-size: 0.72rem; color: var(--ink-3); min-width: 1.5rem; }
+    .pv-name {
+        flex: 1 1 auto; min-width: 0; font-weight: 600; color: var(--ink); font-size: 0.9rem;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .pv-meta { color: var(--ink-3); font-size: 0.64rem; white-space: nowrap; }
+    .pv-val { font-family: var(--mono); font-weight: 700; font-size: 0.92rem; min-width: 2.8rem; text-align: right; }
+    .pv-trend { font-size: 0.68rem; min-width: 0.9rem; text-align: center; }
+    .pv-trend.up { color: var(--good); }
+    .pv-trend.down { color: var(--bad); }
+    .pv-trend.flat { color: var(--ink-3); }
+    /* Expanded ESPN-style player card: headshot + identity header, a stat-tile grid, then
+       percentage and trend rows. */
+    .pv-detail { padding: 0.5rem 0.7rem 0.7rem; }
+    .pv-card { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.6rem; }
+    .pv-shot {
+        flex: 0 0 auto; width: 58px; height: 58px; border-radius: 50%;
+        background-size: cover; background-position: top center;
+        background-color: var(--surface-2); border: 1px solid var(--line);
+    }
+    .pv-chead { min-width: 0; }
+    .pv-cname { font-family: system-ui, 'Segoe UI', sans-serif; font-weight: 700; font-size: 1rem; color: var(--ink); line-height: 1.1; }
+    /* Team - position line, with the OUT / FA badges inline on the same row. */
+    .pv-csub {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem;
+        font-family: system-ui, sans-serif; font-size: 0.72rem; color: var(--ink-2); margin-top: 0.2rem;
+    }
+    .pv-statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; }
+    .pv-stat {
+        display: flex; flex-direction: column; align-items: center;
+        background: var(--card); border: 1px solid var(--line-2); border-radius: 6px; padding: 0.3rem 0.1rem;
+    }
+    .pv-stat-l { font-family: system-ui, sans-serif; font-size: 0.56rem; color: var(--ink-3); letter-spacing: 0.03em; }
+    .pv-stat-v { font-family: var(--mono); font-weight: 700; font-size: 0.82rem; color: var(--ink); margin-top: 0.1rem; }
+    .pv-cardrow { display: flex; gap: 0.9rem; font-family: var(--mono); font-size: 0.72rem; color: var(--ink); padding-top: 0.15rem; }
+    .pv-cardrow b { color: var(--ink-3); font-weight: 600; }
+    /* Availability badge + FA chip on the summary row. */
+    .pv-badge {
+        flex: 0 0 auto; font-family: system-ui, sans-serif; font-weight: 700; font-size: 0.56rem;
+        letter-spacing: 0.03em; padding: 0.08rem 0.34rem; border-radius: 999px; white-space: nowrap;
+    }
+    .pv-badge.out { background: rgba(192, 57, 43, 0.14); color: var(--bad); }
+    .pv-badge.day { background: rgba(224, 106, 59, 0.16); color: var(--clay); }
+    .pv-fa {
+        flex: 0 0 auto; font-family: system-ui, sans-serif; font-weight: 700; font-size: 0.54rem;
+        letter-spacing: 0.04em; padding: 0.06rem 0.3rem; border-radius: 4px; white-space: nowrap;
+        background: var(--cobalt-soft); color: var(--cobalt);
+    }
+    /* Desktop Player Value: the same player cards as mobile, stacked ONE PER ROW (full
+       width), each its own bordered card (pv_desktop is hidden on phones, so this never
+       touches the mobile single-column list). */
+    .st-key-pv_desktop .pv-list {
+        display: flex; flex-direction: column; gap: 0.5rem;
+        border: none; background: none; border-radius: 0;
+    }
+    .st-key-pv_desktop .pv-item {
+        border: 1px solid var(--line) !important; border-radius: 10px;
+        background: var(--card); overflow: hidden;
+    }
+    /* Keep the desktop injury toggle's label on one line so the filter row never wraps. */
+    .st-key-pv_show_injured_d [data-testid="stWidgetLabel"] p { white-space: nowrap; }
+    /* With one full-width card per row, the desktop has room for a larger card: a bigger
+       summary row, a larger headshot/name, all eight stat tiles on ONE row, and bigger
+       figures + game-log text. */
+    .st-key-pv_desktop .pv-sum { padding: 0.6rem 1.1rem; }
+    .st-key-pv_desktop .pv-name { font-size: 1.02rem; }
+    .st-key-pv_desktop .pv-val { font-size: 1.05rem; min-width: 3.2rem; }
+    .st-key-pv_desktop .pv-rank { font-size: 0.8rem; min-width: 2rem; }
+    .st-key-pv_desktop .pv-detail { padding: 0.5rem 1.1rem 1rem; }
+    .st-key-pv_desktop .pv-card { gap: 1rem; margin-bottom: 0.9rem; }
+    .st-key-pv_desktop .pv-shot { width: 88px; height: 88px; }
+    .st-key-pv_desktop .pv-cname { font-size: 1.35rem; }
+    .st-key-pv_desktop .pv-csub { font-size: 0.82rem; margin-top: 0.3rem; }
+    .st-key-pv_desktop .pv-statgrid { grid-template-columns: repeat(8, 1fr); gap: 0.5rem; margin-bottom: 0.7rem; }
+    .st-key-pv_desktop .pv-stat { padding: 0.55rem 0.2rem; border-radius: 8px; }
+    .st-key-pv_desktop .pv-stat-l { font-size: 0.64rem; }
+    .st-key-pv_desktop .pv-stat-v { font-size: 1.15rem; margin-top: 0.2rem; }
+    .st-key-pv_desktop .pv-gl { margin-top: 0.7rem; padding-top: 0.6rem; }
+    .st-key-pv_desktop .pv-gl-sum { font-size: 0.82rem; }
+    .st-key-pv_desktop .pv-gl-tbl { font-size: 0.78rem; }
+    .st-key-pv_desktop .pv-gl-tbl th { font-size: 0.62rem; padding: 4px 10px; }
+    .st-key-pv_desktop .pv-gl-tbl td { padding: 4px 10px; }
+    /* Team-position line: meta text can shrink; the OUT/FA badges keep their own nowrap
+       flex group so they always sit side-by-side (gapped), never stacked/overlapping. */
+    .pv-cmeta { flex: 0 1 auto; min-width: 0; }
+    .pv-badges { display: inline-flex; align-items: center; gap: 0.3rem; flex: 0 0 auto; }
+    /* Per-card "Last 10 games" disclosure + table. */
+    .pv-gl { margin-top: 0.55rem; border-top: 1px solid var(--line-2); padding-top: 0.45rem; }
+    .pv-gl-sum {
+        cursor: pointer; list-style: none; font-family: system-ui, sans-serif;
+        font-size: 0.72rem; font-weight: 600; color: var(--cobalt);
+    }
+    .pv-gl-sum::-webkit-details-marker { display: none; }
+    /* Chevron drawn from two borders (no font glyph, so it can't render as a box): points
+       right when closed, rotates down when the log opens. */
+    .pv-gl-sum::before {
+        content: ""; display: inline-block; width: 0.36rem; height: 0.36rem;
+        border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+        transform: rotate(-45deg); transform-origin: center;
+        margin-right: 0.5rem; position: relative; top: -2px; transition: transform .15s;
+    }
+    .pv-gl[open] .pv-gl-sum::before { transform: rotate(45deg); top: -3px; }
+    .pv-gl-body { margin-top: 0.4rem; overflow-x: auto; }
+    .pv-gl-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.64rem; }
+    .pv-gl-tbl th {
+        color: var(--ink-3); font-weight: 600; text-align: right; padding: 2px 5px;
+        text-transform: uppercase; font-size: 0.55rem; white-space: nowrap;
+    }
+    .pv-gl-tbl td { color: var(--ink); text-align: right; padding: 2px 5px; white-space: nowrap; border-top: 1px solid var(--line-2); }
+    .pv-gl-tbl th:first-child, .pv-gl-tbl td:first-child,
+    .pv-gl-tbl th:nth-child(2), .pv-gl-tbl td:nth-child(2) { text-align: left; }
+    .pv-gl-tbl td.pv-gl-w { color: var(--good); font-weight: 600; }
+    .pv-gl-tbl td.pv-gl-l { color: var(--bad); font-weight: 600; }
+
+    /* -------- Compare two players: head-to-head with diverging bars from the center ----
+       [A value] [A bar >|] LABEL [|< B bar] [B value]. Base sizes are the desktop (roomy)
+       version; the @media(max-width:767px) block near the bottom shrinks it for phones. */
+    .st-key-pv_cmp_pickers { max-width: 920px; margin: 0 auto; }
+    .pv-cmp { max-width: 920px; margin: 0.6rem auto 0; }
+    .pv-cmp-head { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+    .pv-cmp-player { text-align: center; min-width: 0; }
+    .pv-cmp-player .pv-shot { margin: 0 auto 0.5rem; width: 96px; height: 96px; }
+    .pv-cmp-name {
+        font-family: system-ui, 'Segoe UI', sans-serif; font-weight: 700; font-size: 1.4rem;
+        color: var(--ink); line-height: 1.15; overflow-wrap: anywhere;
+    }
+    .pv-cmp-sub { justify-content: center; font-size: 0.8rem; }
+    .pv-cmp-row {
+        display: grid; grid-template-columns: 3.7rem 1fr auto 1fr 3.7rem; align-items: center;
+        gap: 0.9rem; padding: 0.6rem 0; border-top: 1px solid var(--line-2);
+    }
+    .pv-cmp-a { text-align: right; font-family: var(--mono); font-weight: 700; font-size: 1.15rem; color: var(--ink); white-space: nowrap; }
+    .pv-cmp-b { text-align: left; font-family: var(--mono); font-weight: 700; font-size: 1.15rem; color: var(--ink); white-space: nowrap; }
+    .pv-cmp-lbl {
+        text-align: center; font-family: system-ui, sans-serif; font-size: 0.68rem;
+        letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); min-width: 3.6rem;
+    }
+    .pv-cmp-win { color: var(--good) !important; }
+    .pv-cmp-bar { height: 10px; border-radius: 5px; background: var(--surface-2); display: flex; overflow: hidden; }
+    .pv-cmp-bar-a { justify-content: flex-end; }   /* A fill hugs the center label, grows left */
+    .pv-cmp-bar-b { justify-content: flex-start; } /* B fill hugs the center label, grows right */
+    .pv-cmp-fill { height: 100%; border-radius: 5px; }
+    .pv-cmp-bar-a .pv-cmp-fill { background: var(--cobalt); }
+    .pv-cmp-bar-b .pv-cmp-fill { background: var(--clay); }
+    .pv-cmp-logs { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 2rem; margin-top: 1rem; }
+    .pv-cmp-logs .pv-gl-tbl { font-size: 0.72rem; }
+    @media (max-width: 767px) {
+        /* Drop the page heading on phones (the "Compare" nav tab already labels it) and
+           pull the pickers up under the Tools sub-row so there's no empty band. */
+        .st-key-pv_cmp_title { display: none !important; }
+        .st-key-pv_cmp_pickers { margin-top: -1.9rem !important; }
+        .pv-cmp-player .pv-shot { width: 68px; height: 68px; }
+        .pv-cmp-name { font-size: 1rem; }
+        .pv-cmp-sub { font-size: 0.72rem; }
+        .pv-cmp-row { grid-template-columns: 2.9rem 1fr auto 1fr 2.9rem; gap: 0.4rem; padding: 0.4rem 0; }
+        .pv-cmp-a, .pv-cmp-b { font-size: 0.88rem; }
+        .pv-cmp-lbl { font-size: 0.56rem; min-width: 2.6rem; }
+        .pv-cmp-bar { height: 7px; }
+        .pv-cmp-logs { grid-template-columns: 1fr; }
+        .pv-cmp-logs .pv-gl-tbl { font-size: 0.64rem; }
+    }
+
+    /* -------- Player Search: full one-player profile -------- */
+    .st-key-pd_search { max-width: 860px; margin: 0 auto; }
+    .pd { max-width: 860px; margin: 0.6rem auto 0; }
+    /* Identity header: headshot + name, full team - # - position, availability + owner. */
+    .pd-head { display: flex; align-items: center; gap: 1.3rem; margin-bottom: 0.9rem; }
+    .pd-head .pv-shot { flex: 0 0 auto; width: 100px; height: 100px; }
+    .pd-id { min-width: 0; }
+    .pd-name { font-family: system-ui, 'Segoe UI', sans-serif; font-weight: 800; font-size: 1.7rem; color: var(--ink); line-height: 1.1; overflow-wrap: anywhere; }
+    .pd-team { font-family: system-ui, sans-serif; font-size: 0.95rem; color: var(--ink-2); margin-top: 0.25rem; }
+    .pd-status {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+        font-family: system-ui, sans-serif; font-size: 0.8rem; color: var(--ink-2); margin-top: 0.35rem;
+    }
+    .pd-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 0.15rem; }
+    .pd-dot.ok { background: var(--good); } .pd-dot.out { background: var(--bad); } .pd-dot.day { background: var(--clay); }
+    .pd-owner { color: var(--ink-3); } .pd-owner b { color: var(--ink); }
+    /* Bio facts row (label over value), between hairlines. */
+    .pd-bio {
+        display: flex; flex-wrap: wrap; gap: 1.1rem 2.2rem; padding: 0.8rem 0.1rem; margin-bottom: 1.1rem;
+        border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    }
+    .pd-bio-f { display: flex; flex-direction: column; }
+    .pd-bl { font-family: system-ui, sans-serif; font-size: 0.58rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+    .pd-bv { font-family: system-ui, sans-serif; font-size: 0.9rem; font-weight: 600; color: var(--ink); margin-top: 0.15rem; }
+    /* Value tiles (kept). */
+    .pd-values { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; margin-bottom: 1.1rem; }
+    .pd-vtile {
+        display: flex; flex-direction: column; align-items: center; text-align: center;
+        background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.7rem 0.4rem;
+    }
+    .pd-vl { font-family: system-ui, sans-serif; font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+    .pd-vv { font-family: var(--mono); font-weight: 700; font-size: 1.5rem; margin: 0.1rem 0; }
+    .pd-vr { font-family: var(--mono); font-size: 0.66rem; color: var(--ink-3); }
+    /* Section header + clean two-column season-averages sheet (no tiles). */
+    .pd-sec { font-family: system-ui, sans-serif; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); margin: 0.2rem 0 0.4rem; }
+    .pd-sec span { color: var(--ink-3); font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 0.72rem; }
+    .pd-stats { display: grid; grid-template-columns: 1fr 1fr; column-gap: 2.6rem; margin-bottom: 1.1rem; }
+    .pd-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.15rem; border-bottom: 1px solid var(--line-2); }
+    .pd-sl { font-family: system-ui, sans-serif; font-size: 0.82rem; color: var(--ink-2); }
+    .pd-sv { font-family: var(--mono); font-weight: 700; font-size: 0.98rem; color: var(--ink); }
+    @media (max-width: 767px) {
+        .pd-head { gap: 0.9rem; }
+        .pd-head .pv-shot { width: 78px; height: 78px; }
+        .pd-name { font-size: 1.3rem; }
+        .pd-vv { font-size: 1.3rem; }
+        .pd-stats { grid-template-columns: 1fr; column-gap: 0; }
+    }
+
     /* -------- Matchup header: team · Week/Round picker · team, always ONE line -------
        Streamlit's blanket mobile rule stacks stColumns to 100% width (one per row); this
        row is explicitly kept horizontal at every width, with each team name truncated by
@@ -988,15 +1425,35 @@ CUSTOM_CSS = """
         }
     }
     .ss-strip-item {
-        display: flex; align-items: center; justify-content: space-between;
+        display: flex; align-items: center; justify-content: space-between; gap: 0.4rem;
         padding: 0.55rem 0; border-bottom: 1px solid var(--line-2);
     }
     .ss-strip-item:nth-last-child(-n+2) { border-bottom: none; }
-    .ss-strip-label { color: var(--ink-2); font-size: 0.76rem; }
+    .ss-strip-label { color: var(--ink-2); font-size: 0.76rem; min-width: 0; }
     .ss-strip-value {
         font-family: var(--mono); font-variant-numeric: tabular-nums;
-        font-weight: 700; color: var(--ink); font-size: 0.9rem;
+        font-weight: 700; color: var(--ink); font-size: 0.9rem; white-space: nowrap;
     }
+    /* League-rank chip next to each season total (e.g. "#1"). */
+    .ss-strip-rank {
+        margin-left: 0.4rem; font-family: var(--mono); font-weight: 600;
+        font-size: 0.66rem; color: var(--ink-3);
+    }
+    /* Desktop totals cards show the league rank as the metric's (color-off) delta line.
+       Streamlit still draws an up/down arrow glyph there even for a plain rank string -
+       drop it, so "#10 of 10" doesn't read as "up". */
+    .st-key-ss_totals_desktop [data-testid="stMetricDelta"] svg { display: none; }
+    .st-key-ss_totals_desktop [data-testid="stMetricDelta"] { gap: 0; }
+
+    /* Top Contributors leader cards: a responsive grid - TWO per row on phones, four on
+       desktop - instead of Streamlit columns (which collapse to one-per-row on mobile).
+       Order: Points/FGM, Rebounds/Assists, Steals/Blocks, 3PM/DD. The `> div` rule zeroes
+       _leader_card's own inline margin-bottom so the grid `gap` is the only spacing. */
+    .leader-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem; margin-top: 0.2rem;
+    }
+    @media (min-width: 768px) { .leader-grid { grid-template-columns: repeat(4, 1fr); } }
+    .leader-grid > div { margin-bottom: 0 !important; height: 100%; }
 
     /* ========================================================================
        RESPONSIVE

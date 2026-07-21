@@ -817,6 +817,46 @@ def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
     return df
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_player_bio(player_id):
+    """
+    ESPN athlete bio for the Player Search header - team, jersey, position, height/weight,
+    age, experience, draft, birthplace, availability status. Uses ESPN's pre-formatted
+    display* fields. Cached a day; returns {} on any failure (the page degrades gracefully).
+    """
+    if not player_id:
+        return {}
+    try:
+        r = requests.get(
+            f"https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{int(player_id)}",
+            timeout=8,
+        )
+        if r.status_code != 200:
+            return {}
+        a = (r.json() or {}).get("athlete", {}) or {}
+        team = a.get("team") or {}
+        pos = a.get("position") or {}
+        status = a.get("status") or {}
+        college = a.get("college")
+        college_name = (college.get("name") if isinstance(college, dict)
+                        else college if isinstance(college, str) else "") or ""
+        return {
+            "team": team.get("displayName", "") or "",
+            "jersey": a.get("displayJersey") or (f"#{a['jersey']}" if a.get("jersey") else ""),
+            "position": pos.get("displayName", "") or "",
+            "height": a.get("displayHeight", "") or "",
+            "weight": a.get("displayWeight", "") or "",
+            "age": a.get("age"),
+            "experience": a.get("displayExperience", "") or "",
+            "college": college_name,
+            "draft": a.get("displayDraft", "") or "",
+            "birthplace": a.get("displayBirthPlace", "") or "",
+            "status": status.get("name", "") or "",
+        }
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=3600)
 def get_espn_injury_data():
     """Fetch NBA injuries from ESPN public API. Returns dict: player_name -> {description, return_date}."""

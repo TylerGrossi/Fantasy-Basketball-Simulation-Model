@@ -2,18 +2,43 @@
 Fantasy Basketball Simulator - Configuration and constants.
 """
 
+# Secrets (ESPN auth cookies + Gemini API key) live in config_secrets.py, which is NOT
+# committed to git (see .gitignore). Copy config_secrets.example.py to config_secrets.py
+# and fill in your own values.
+try:
+    from config_secrets import ESPN_S2, ESPN_SWID, GEMINI_API_KEY
+except ImportError as _e:  # pragma: no cover
+    raise RuntimeError(
+        "Missing config_secrets.py - copy config_secrets.example.py to config_secrets.py "
+        "and fill in your ESPN and Gemini credentials."
+    ) from _e
+
 # =============================================================================
-# ESPN connection - kept in code, not exposed in the app UI.
-# Edit these once here; the sidebar only asks which team to analyze.
+# ESPN connection - non-secret identifiers (the auth cookies are in config_secrets.py).
+# The sidebar only asks which team to analyze.
 # =============================================================================
 ESPN_LEAGUE_ID = 267469544
 ESPN_SEASON_YEAR = 2026
-ESPN_S2 = ("***REMOVED***"
-           "***REMOVED***"
-           "***REMOVED***"
-           "***REMOVED***"
-           "***REMOVED***")
-ESPN_SWID = "***REMOVED***"
+
+# =============================================================================
+# Gemini (Google AI Studio) - powers the free-tier AI Assistant page. The API key lives in
+# config_secrets.py; the model list below is not secret.
+# =============================================================================
+# Fallback chain: each Gemini model has its own free-tier daily/RPM quota. When one is
+# exhausted (HTTP 429) the assistant rotates to the next, so a heavy day doesn't take the
+# chatbot offline. Ordered quality-first, ending with the 500-req/day lite as a big safety
+# net (~560 free requests/day total across the chain). All IDs verified against the key.
+GEMINI_MODELS = [
+    "gemini-3.6-flash",        # primary: newest/best flash (~20/day)
+    "gemini-3.5-flash",        # (~20/day)
+    "gemini-3-flash-preview",  # (~20/day)
+    "gemini-2.5-flash",        # (~20/day)
+    "gemini-3.5-flash-lite",   # workhorse fallback, newest lite (~500/day)
+    "gemini-3.1-flash-lite",   # workhorse fallback (~500/day)
+    "gemini-2.5-flash-lite",   # extra safety net (~20/day)
+]  # ~1100 free requests/day total; each turn resets to the top (assistant.py), so a busy
+   # model is retried next turn and per-minute load is spread across the whole chain.
+GEMINI_MODEL = GEMINI_MODELS[0]  # kept for any single-model reference
 
 # Team analyzed by default (pre-selected in the sidebar dropdown).
 DEFAULT_TEAM_NAME = "VJ Maxx"

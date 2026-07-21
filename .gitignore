@@ -5,3 +5,6 @@ node_modules/
 .vercel
 __pycache__/
 *.pyc
+
+# Local secrets (ESPN cookies + Gemini API key) - never commit these
+config_secrets.py

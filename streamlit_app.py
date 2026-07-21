@@ -8,7 +8,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
+import random
 import threading
+import functools
 from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
 from datetime import datetime, date
@@ -17,7 +19,7 @@ from zoneinfo import ZoneInfo
 from config import (
     CATEGORIES, NUMERIC_COLS, STREAMER_RECORD_PLAYOFF_SIMS,
     ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID,
-    DEFAULT_TEAM_ID, DEFAULT_TEAM_NAME,
+    DEFAULT_TEAM_ID, DEFAULT_TEAM_NAME, INJURED_STATUSES,
 )
 from data import (
     connect_to_espn,
@@ -29,6 +31,7 @@ from data import (
     add_games_left_with_injury,
     flatten_stat_dict,
     get_espn_injury_data,
+    get_player_bio,
     build_injury_table,
     get_game_count_window,
     get_week_date_range,
@@ -56,6 +59,15 @@ from visualizations import (
 from styles import CUSTOM_CSS
 from assets.icon_font import ICON_FONT_CSS
 from assets.touch_icon import TOUCH_ICON_PNG_B64
+from assistant import (
+    build_system_instruction,
+    create_chat,
+    send_message as assistant_send,
+    stream_message as assistant_stream,
+    web_search,
+    AssistantBusy,
+    AssistantRateLimited,
+)
 
 # The background cache-warming threads (and pooled schedule prefetch) call
 # Streamlit-cached functions off the main thread, which logs a harmless
@@ -628,6 +640,68 @@ def get_team_season_stats(league_id, year, espn_s2, swid, team_id):
     return season_totals, player_season_stats, weekly_data
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_league_season_totals(league_id, year, espn_s2, swid):
+    """
+    Per-team season category totals (summed over the real matchup periods), used to rank a
+    team against the league on the Season Stats totals card. Reuses the per-week box-score
+    cache, so it's cheap once any other page (Season Stats, Schedule, Power Rankings) has
+    warmed those weeks. Returns {team_id: {cat: total, ...}}.
+    """
+    league = get_league_cached(league_id, year, espn_s2, swid)
+    matchup_ids = getattr(league, "matchup_ids", {}) or {}
+    try:
+        periods = sorted(int(k) for k in matchup_ids.keys())
+    except Exception:
+        periods = []
+    if not periods:
+        cw = int(getattr(league, "currentMatchupPeriod", 0) or 0)
+        periods = list(range(1, min(max(cw, 1), 30) + 1))
+
+    keys = ["FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST",
+            "STL", "BLK", "TO", "PTS", "DD", "TW"]
+    totals = {}
+    for week in periods:
+        try:
+            boxscores = get_week_box_scores(league_id, year, espn_s2, swid, week)
+        except Exception:
+            continue
+        for m in boxscores:
+            for team, stats in ((m.home_team, m.home_stats), (m.away_team, m.away_stats)):
+                fs = flatten_stat_dict(stats)
+                if float(fs.get("PTS", 0) or 0) <= 0:
+                    continue  # unplayed week for this team
+                d = totals.setdefault(team.team_id, {k: 0.0 for k in keys})
+                for k in keys:
+                    d[k] += float(fs.get(k, 0) or 0)
+    return totals
+
+
+def _season_total_value(d, stat):
+    """Derived value for a team's season totals dict (percentages from made/attempted)."""
+    if stat == "FG%":
+        return d.get("FGM", 0) / d["FGA"] if d.get("FGA") else 0.0
+    if stat == "FT%":
+        return d.get("FTM", 0) / d["FTA"] if d.get("FTA") else 0.0
+    if stat == "3P%":
+        return d.get("3PM", 0) / d["3PA"] if d.get("3PA") else 0.0
+    return d.get(stat, 0)
+
+
+def _league_rank(totals, team_id, stat):
+    """1-based rank of a team among the league for a season-total stat (higher is better,
+    except TO where lower is better). Returns None if the team isn't present."""
+    if not totals or team_id not in totals:
+        return None
+    mine = _season_total_value(totals[team_id], stat)
+    better = 0
+    for tid, d in totals.items():
+        v = _season_total_value(d, stat)
+        if (v < mine) if stat == "TO" else (v > mine):
+            better += 1
+    return better + 1
+
+
 def _category_record(a, b):
     """Category W-L-T for team a vs team b over the 15 scoring categories."""
     cats = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%", "REB",
@@ -776,9 +850,8 @@ def render_schedule(meta, team_name):
             label = period_to_view_label(periods[idx], build_week_views())
             if label:
                 st.session_state.week_sel = label
-                st.session_state.active_page = "Matchup"
                 st.session_state["_sched_nonce"] = nonce + 1
-                st.rerun()
+                _go_page("Matchup")
 
 
 # =============================================================================
@@ -966,10 +1039,14 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     """
     league = get_league_cached(league_id, year, espn_s2, swid)
     owner = {}
+    status = {}  # player -> raw ESPN injuryStatus (for the availability badge / filter)
+    pid = {}     # player -> ESPN playerId (for the headshot image on the mobile card)
     season_frames, last30_frames, last15_frames = [], [], []
     for t in league.teams:
         for p in t.roster:
             owner[p.name] = t.team_name
+            status[p.name] = getattr(p, "injuryStatus", "") or ""
+            pid[p.name] = getattr(p, "playerId", None)
         season_frames.append(build_stat_df(t.roster, f"{year}_total", "Season", t.team_name, year))
         last30_frames.append(build_stat_df(t.roster, f"{year}_last_30", "Last30", t.team_name, year))
         last15_frames.append(build_stat_df(t.roster, f"{year}_last_15", "Last15", t.team_name, year))
@@ -978,7 +1055,10 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     except Exception:
         fas = []
     for p in fas:
-        owner.setdefault(getattr(p, "name", ""), "FA")
+        nm = getattr(p, "name", "")
+        owner.setdefault(nm, "FA")
+        status.setdefault(nm, getattr(p, "injuryStatus", "") or "")
+        pid.setdefault(nm, getattr(p, "playerId", None))
     season_frames.append(build_stat_df(fas, f"{year}_total", "Season", "FA", year))
     last30_frames.append(build_stat_df(fas, f"{year}_last_30", "Last30", "FA", year))
     last15_frames.append(build_stat_df(fas, f"{year}_last_15", "Last15", "FA", year))
@@ -1017,9 +1097,15 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     season_df["Trend15"] = season_df["Recent15"] - season_df["Value"]
 
     season_df["Owner"] = season_df["Player"].map(owner).fillna("FA")
+    # Raw injuryStatus can be a list on some API responses - stringify so it stays cache-
+    # serializable; the display/severity mapping happens in the page via _player_status().
+    season_df["Status"] = season_df["Player"].map(status).fillna("")
+    season_df["Status"] = season_df["Status"].apply(
+        lambda s: ",".join(str(x) for x in s) if isinstance(s, (list, tuple)) else str(s or ""))
+    season_df["PlayerId"] = season_df["Player"].map(pid)
 
-    keep = (["Player", "NBA_Team", "Position", "Owner", "Value", "Recent", "Trend", "Recent15", "Trend15",
-             "FG%", "FT%", "3P%"] + _AGG_KEYS)
+    keep = (["Player", "NBA_Team", "Position", "Owner", "Status", "PlayerId", "Value", "Recent", "Trend",
+             "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD"] + _AGG_KEYS)
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))
     return season_df[keep].to_dict("records")
 
@@ -1063,32 +1149,324 @@ def _all_play_cats(you_agg, other_aggs):
     return w, l, t
 
 
-def _player_value_rows(sub, disp_cats, with_owner=False, rank_by_value=False):
+# Raw ESPN injuryStatus -> (short label, severity). severity: 'out' = unavailable,
+# 'day' = game-time decision, '' = active / none.
+_STATUS_LABELS = {
+    "OUT": ("OUT", "out"), "INJURY_RESERVE": ("IR", "out"), "SSPD": ("SUSP", "out"),
+    "DAY_TO_DAY": ("DTD", "day"), "DTD": ("DTD", "day"),
+    "QUESTIONABLE": ("Q", "day"), "Q": ("Q", "day"),
+    "DOUBTFUL": ("DTF", "day"), "D": ("DTF", "day"),
+}
+
+
+def _player_status(raw):
+    """(short_label, severity) from a raw ESPN injuryStatus (possibly a comma-joined list).
+    An out/IR/suspension anywhere wins; otherwise the first known game-time status."""
+    parts = [p.strip().upper() for p in str(raw or "").replace(",", " ").split() if p.strip()]
+    for p in parts:
+        if p in INJURED_STATUSES:
+            return _STATUS_LABELS.get(p, ("OUT", "out"))
+    for p in parts:
+        if p in _STATUS_LABELS:
+            return _STATUS_LABELS[p]
+    return ("", "")
+
+
+def _player_value_rows(sub, disp_cats, with_owner=False, rank_by_value=False, value_col="Value"):
     if rank_by_value:
-        sub = sub.sort_values("Value", ascending=False, kind="mergesort").reset_index(drop=True)
+        sub = sub.sort_values(value_col, ascending=False, kind="mergesort").reset_index(drop=True)
     out = []
     for i, (_, r) in enumerate(sub.iterrows(), start=1):
         row = {"Rank": i} if rank_by_value else {}
         row["Player"] = r["Player"]
         row["Pos"] = r.get("Position", "")
         row["NBA"] = r.get("NBA_Team", "")
+        row["Status"] = _player_status(r.get("Status", ""))[0]
         if with_owner:
             row["Owner"] = r.get("Owner", "")
-        row["Value"] = round(float(r["Value"]), 1)
+        # "Value" reflects the chosen basis (season / 30D / 15D).
+        row["Value"] = round(float(r.get(value_col, 0) or 0), 1)
         row["30D Trend"] = round(float(r.get("Trend", 0) or 0), 1)
         row["15D Trend"] = round(float(r.get("Trend15", 0) or 0), 1)
+        # STOCKS = steals + blocks (per the card layout); keep the rest as-is.
+        row["STOCKS"] = round(float(r.get("STL", 0) or 0) + float(r.get("BLK", 0) or 0), 1)
         for c in disp_cats:
             row[c] = round(float(r.get(c, 0) or 0), 1)
         row["FG%"] = f"{float(r.get('FG%', 0) or 0) * 100:.1f}%"
         row["FT%"] = f"{float(r.get('FT%', 0) or 0) * 100:.1f}%"
+        row["3P%"] = f"{float(r.get('3P%', 0) or 0) * 100:.1f}%"
         out.append(row)
     return pd.DataFrame(out)
 
 
+def _pv_trend_chip(v):
+    """Small colored trend marker from a 15-day trend z-delta (geometric arrow, no emoji)."""
+    if v > 0.5:
+        return '<span class="pv-trend up">&#9650;</span>'
+    if v < -0.5:
+        return '<span class="pv-trend down">&#9660;</span>'
+    return '<span class="pv-trend flat">&ndash;</span>'
+
+
+# Client-side lazy loader for the per-card "Last 10 games" logs. Injected once via
+# components.html; its script reaches window.parent.document (same trick as the footer /
+# apple-touch-icon injectors) to attach a one-time `toggle` handler to every .pv-gl card.
+# On first open it fetches ESPN's public game-log endpoint (CORS-enabled) for that
+# player's id, renders the most recent 10 regular-season games, and caches the HTML on the
+# parent window so re-opens (and re-renders after a Streamlit rerun) are instant. Doing it
+# client-side + on-demand keeps it off the server hot path (no 280 pre-fetches).
+_PV_GAMELOG_SCRIPT = """<script>
+(function(){
+  const doc = window.parent.document;
+  const cache = window.parent.__pvGlCache = window.parent.__pvGlCache || {};
+  function parse(data){
+    const labels = data.labels || []; const idx = {}; labels.forEach((l,i)=>idx[l]=i);
+    const meta = data.events || {}; const seen = {}; const rows = [];
+    // Collect real games from every season type EXCEPT preseason (regular + postseason),
+    // then sort by date so the "last 10" are genuinely the most recent games played -
+    // for a playoff team that's postseason, otherwise the end of the regular season.
+    for (const st of (data.seasonTypes || [])){
+      if (/Preseason/i.test(st.displayName || '')) continue;
+      for (const cat of (st.categories || [])){
+        for (const ev of (cat.events || [])){
+          if (seen[ev.eventId]) continue; seen[ev.eventId] = 1;
+          const m = meta[ev.eventId] || {};
+          rows.push({date:m.gameDate, atVs:(m.atVs||''), opp:((m.opponent||{}).abbreviation||''),
+                     res:(m.gameResult||''), stats:(ev.stats||[])});
+        }
+      }
+    }
+    rows.sort((a,b)=> new Date(b.date) - new Date(a.date));
+    return {games: rows.slice(0,10), idx};
+  }
+  function render(p){
+    const idx = p.idx; const v = (s,l)=> (idx[l]!=null ? (s[idx[l]] ?? '') : '');
+    const cols = ['MIN','PTS','REB','AST','STL','BLK','TO','FG','3PT'];
+    let h = '<table class="pv-gl-tbl"><thead><tr><th>Date</th><th>Opp</th>';
+    cols.forEach(c=> h += '<th>'+c+'</th>'); h += '</tr></thead><tbody>';
+    if (!p.games.length){ h += '<tr><td colspan="'+(cols.length+2)+'">No recent games.</td></tr>'; }
+    for (const g of p.games){
+      const d = g.date ? new Date(g.date) : null;
+      const ds = d ? ((d.getMonth()+1)+'/'+d.getDate()) : '';
+      const rc = g.res==='W' ? 'pv-gl-w' : (g.res==='L' ? 'pv-gl-l' : '');
+      h += '<tr><td>'+ds+'</td><td class="'+rc+'">'+(g.atVs||'')+g.opp+'</td>';
+      cols.forEach(c=> h += '<td>'+v(g.stats,c)+'</td>'); h += '</tr>';
+    }
+    return h + '</tbody></table>';
+  }
+  function attach(){
+    doc.querySelectorAll('.pv-gl[data-pid]').forEach(el=>{
+      if (el.__gl) return; el.__gl = 1;
+      el.addEventListener('toggle', ()=>{
+        if (!el.open || el.__done) return;
+        const body = el.querySelector('.pv-gl-body'); const pid = el.getAttribute('data-pid');
+        if (cache[pid]){ body.innerHTML = cache[pid]; el.__done = 1; return; }
+        body.textContent = 'Loading\\u2026';
+        fetch('https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/'+pid+'/gamelog')
+          .then(r=>r.json()).then(data=>{ const html = render(parse(data)); cache[pid] = html; body.innerHTML = html; el.__done = 1; })
+          .catch(()=>{ body.textContent = 'Game log unavailable.'; });
+      });
+    });
+  }
+  attach();
+  let t; new MutationObserver(()=>{ clearTimeout(t); t = setTimeout(attach, 300); })
+        .observe(doc.body, {childList:true, subtree:true});
+})();
+</script>"""
+
+
+def _render_pv_mobile_list(sub, maxabs, value_col="Value", trend_col="Trend15", show_fa_tag=False):
+    """
+    Compact one-line-per-player value list for phones. Each row is a native <details>
+    disclosure: the summary shows rank, name, a translucent value data-bar (cobalt for a
+    positive value, clay for negative, width proportional to the chosen value magnitude
+    across the pool), the value figure, and a trend chip. Tapping expands an ESPN-style
+    player card: headshot, team/position with inline OUT / FA badges, a 5-tile stat grid
+    (PTS, REB, AST, STOCKS = steals+blocks, 3PM), and a FG% / FT% / 3P% / TO line.
+
+    ``value_col`` selects which value drives the figure/bar/sort (season Value, 30-day
+    Recent, or 15-day Recent15); ``trend_col`` the matching trend for the chip.
+    ``show_fa_tag`` marks free agents with an "FA" chip (used in the "All" view).
+
+    Each row is built as a SINGLE-LINE f-string with no leading indentation on purpose:
+    concatenating many multi-line indented HTML fragments for st.markdown triggers the
+    CommonMark indented-code-block trap (rows after the first render as literal text) -
+    see AGENTS.md. Keep the per-row template on one line.
+    """
+    maxabs = maxabs or 1.0
+    sub = sub.sort_values(value_col, ascending=False, kind="mergesort").reset_index(drop=True)
+    rows = []
+    for i, (_, r) in enumerate(sub.iterrows(), start=1):
+        val = float(r.get(value_col, 0) or 0)
+        trend = float(r.get(trend_col, 0) or 0)
+        pct = min(100.0, abs(val) / maxabs * 100.0)
+        pos = val >= 0
+        barcol = "var(--cobalt)" if pos else "var(--clay)"
+        valcol = "var(--good)" if pos else "var(--bad)"
+        name = str(r["Player"])
+        posn = str(r.get("Position", "") or "")
+        nba = str(r.get("NBA_Team", "") or "")
+        owner = str(r.get("Owner", "") or "")
+        code, sev = _player_status(r.get("Status", ""))
+        badge = f'<span class="pv-badge {sev}">{code}</span>' if code else ""
+        is_fa = owner == "FA"
+        fa_tag = '<span class="pv-fa">FA</span>' if (show_fa_tag and is_fa) else ""
+
+        # ---- expanded ESPN-style player card ----
+        pid_raw = r.get("PlayerId")
+        pid = int(pid_raw) if pd.notna(pid_raw) else None
+        shot = (f'<div class="pv-shot" style="background-image:url('
+                f"'https://a.espncdn.com/i/headshots/nba/players/full/{pid}.png')\"></div>"
+                if pid else '<div class="pv-shot pv-shot-blank"></div>')
+        # OUT / FA badges sit inline on the team-position line, grouped so they can never
+        # overlap each other (their own nowrap flex, gapped) when the line wraps.
+        card_badges = badge + ('<span class="pv-fa">FA</span>' if is_fa else "")
+        badges_group = f'<span class="pv-badges">{card_badges}</span>' if card_badges else ""
+        sub_bits = " &middot; ".join(x for x in (nba, posn) if x)
+        stocks = float(r.get("STL", 0) or 0) + float(r.get("BLK", 0) or 0)
+        fg = float(r.get("FG%", 0) or 0) * 100
+        ft = float(r.get("FT%", 0) or 0) * 100
+        tp = float(r.get("3P%", 0) or 0) * 100
+        to = float(r.get("TO", 0) or 0)
+        # Every key stat is a tile now: counting stats (PTS, REB, AST, STOCKS) on the first
+        # row, rate stats (FG%, FT%, 3P%, TO) on the second. (3PM dropped per request.)
+        tiles = [
+            ("PTS", float(r.get("PTS", 0) or 0)), ("REB", float(r.get("REB", 0) or 0)),
+            ("AST", float(r.get("AST", 0) or 0)), ("STOCKS", stocks),
+            ("FG%", fg), ("FT%", ft), ("3P%", tp), ("TO", to),
+        ]
+        grid = "".join(
+            f'<div class="pv-stat"><span class="pv-stat-l">{lbl}</span>'
+            f'<span class="pv-stat-v">{v:.1f}</span></div>'
+            for lbl, v in tiles
+        )
+        # Lazy "Last 10 games" log - a nested disclosure filled client-side on first open
+        # (see _PV_GAMELOG_SCRIPT); only rendered when we have an ESPN playerId to fetch.
+        gamelog = (f'<details class="pv-gl" data-pid="{pid}"><summary class="pv-gl-sum">Last 10 games</summary>'
+                   f'<div class="pv-gl-body"></div></details>') if pid else ""
+        card = (
+            f'<div class="pv-card">{shot}'
+            f'<div class="pv-chead"><div class="pv-cname">{name}</div>'
+            f'<div class="pv-csub"><span class="pv-cmeta">{sub_bits}</span>{badges_group}</div></div></div>'
+            f'<div class="pv-statgrid">{grid}</div>{gamelog}'
+        )
+        rows.append(
+            f'<details class="pv-item"><summary class="pv-sum">'
+            f'<span class="pv-fill" style="width:{pct:.1f}%;background:{barcol}"></span>'
+            f'<span class="pv-rank">{i}</span>'
+            f'<span class="pv-name">{name}</span>{badge}{fa_tag}'
+            f'<span class="pv-meta">{posn}</span>'
+            f'<span class="pv-val" style="color:{valcol}">{val:+.1f}</span>'
+            f'{_pv_trend_chip(trend)}</summary>'
+            f'<div class="pv-detail">{card}</div></details>'
+        )
+    return '<div class="pv-list">' + "".join(rows) + "</div>"
+
+
+def _pv_headshot(r):
+    """Headshot div for a pool row (falls back to a blank circle when no playerId)."""
+    pid = r.get("PlayerId")
+    pid = int(pid) if pd.notna(pid) else None
+    if pid:
+        return (f'<div class="pv-shot" style="background-image:url('
+                f"'https://a.espncdn.com/i/headshots/nba/players/full/{pid}.png')\"></div>")
+    return '<div class="pv-shot pv-shot-blank"></div>'
+
+
+def _render_pv_compare(a, b):
+    """
+    Head-to-head comparison of two pool rows: headshots + names on top, a column of stat
+    rows (A value | label | B value) with the better side highlighted, and each player's
+    lazy "Last 10 games" log below (filled client-side by _PV_GAMELOG_SCRIPT). Higher is
+    better for every stat except TO. Built with single-line row fragments (CommonMark trap).
+    """
+    def v(r, key):
+        return float(r.get(key, 0) or 0)
+
+    def stocks(r):
+        return v(r, "STL") + v(r, "BLK")
+
+    def meta(r):
+        posn = str(r.get("Position", "") or ""); nba = str(r.get("NBA_Team", "") or "")
+        code, sev = _player_status(r.get("Status", ""))
+        badge = f'<span class="pv-badge {sev}">{code}</span>' if code else ""
+        fa = '<span class="pv-fa">FA</span>' if r.get("Owner") == "FA" else ""
+        bits = " &middot; ".join(x for x in (nba, posn) if x)
+        return f'<span class="pv-cmeta">{bits}</span><span class="pv-badges">{badge}{fa}</span>'
+
+    def pid_of(r):
+        p = r.get("PlayerId")
+        return int(p) if pd.notna(p) else None
+
+    # (label, a_value, b_value, higher_is_better, format)
+    specs = [
+        ("Value", v(a, "Value"), v(b, "Value"), True, "{:+.1f}"),
+        ("PTS", v(a, "PTS"), v(b, "PTS"), True, "{:.1f}"),
+        ("REB", v(a, "REB"), v(b, "REB"), True, "{:.1f}"),
+        ("AST", v(a, "AST"), v(b, "AST"), True, "{:.1f}"),
+        ("STOCKS", stocks(a), stocks(b), True, "{:.1f}"),
+        ("FG%", v(a, "FG%") * 100, v(b, "FG%") * 100, True, "{:.1f}"),
+        ("FT%", v(a, "FT%") * 100, v(b, "FT%") * 100, True, "{:.1f}"),
+        ("3P%", v(a, "3P%") * 100, v(b, "3P%") * 100, True, "{:.1f}"),
+        ("TO", v(a, "TO"), v(b, "TO"), False, "{:.1f}"),
+    ]
+    rows = []
+    for lbl, av, bv, hib, fmt in specs:
+        awin = (av > bv) if hib else (av < bv)
+        bwin = (bv > av) if hib else (bv < av)
+        ac = " pv-cmp-win" if awin else ""
+        bc = " pv-cmp-win" if bwin else ""
+        # Diverging bars from the center: the better value fills ~100%, the other in
+        # proportion. For higher-is-better shift by the lower bound so a negative Value
+        # still scales sanely; for TO (lower better) the smaller number fills more.
+        if hib:
+            lo = min(av, bv, 0.0)
+            a2, b2 = av - lo, bv - lo
+            m = max(a2, b2, 1e-9)
+            ba, bb = a2 / m * 100, b2 / m * 100
+        else:
+            mn = min(av, bv)
+            ba = (mn / av * 100) if av else 100.0
+            bb = (mn / bv * 100) if bv else 100.0
+        rows.append(
+            f'<div class="pv-cmp-row"><span class="pv-cmp-a{ac}">{fmt.format(av)}</span>'
+            f'<span class="pv-cmp-bar pv-cmp-bar-a"><span class="pv-cmp-fill" style="width:{ba:.0f}%"></span></span>'
+            f'<span class="pv-cmp-lbl">{lbl}</span>'
+            f'<span class="pv-cmp-bar pv-cmp-bar-b"><span class="pv-cmp-fill" style="width:{bb:.0f}%"></span></span>'
+            f'<span class="pv-cmp-b{bc}">{fmt.format(bv)}</span></div>'
+        )
+
+    def gl(r):
+        pid = pid_of(r)
+        return (f'<details class="pv-gl" data-pid="{pid}"><summary class="pv-gl-sum">Last 10 games</summary>'
+                f'<div class="pv-gl-body"></div></details>') if pid else ""
+
+    return (
+        '<div class="pv-cmp">'
+        '<div class="pv-cmp-head">'
+        f'<div class="pv-cmp-player">{_pv_headshot(a)}<div class="pv-cmp-name">{a["Player"]}</div>'
+        f'<div class="pv-csub pv-cmp-sub">{meta(a)}</div></div>'
+        f'<div class="pv-cmp-player">{_pv_headshot(b)}<div class="pv-cmp-name">{b["Player"]}</div>'
+        f'<div class="pv-csub pv-cmp-sub">{meta(b)}</div></div>'
+        '</div>'
+        f'<div class="pv-cmp-rows">{"".join(rows)}</div>'
+        f'<div class="pv-cmp-logs"><div>{gl(a)}</div><div>{gl(b)}</div></div>'
+        '</div>'
+    )
+
+
 def render_player_value(meta, team_name):
-    """Every rostered player + top free agents: 9-cat Value/Trend, filterable by
-    player name, position, NBA team, and fantasy owner."""
-    st.markdown('<h2><i class="bi bi-person-badge" style="color: var(--cobalt);"></i> Player Value</h2>', unsafe_allow_html=True)
+    """
+    Every rostered player + top free agents: 9-cat Value/Trend.
+
+    Desktop and mobile are deliberately different (a wide sortable grid is unusable on a
+    phone): both are rendered, CSS shows the one matching the breakpoint (`.st-key-pv_desktop`
+    / `.st-key-pv_mobile`). Desktop keeps the filterable, header-sortable table; mobile is a
+    compact value list segmented by owner (My Team / Free Agents / All), sorted by Value, one
+    tappable row per player.
+    """
+    # No page heading - the nav already marks "Player Value" active, so the page goes
+    # straight to the controls (owner should not have to scroll past a title on a phone).
     try:
         pool = get_player_pool(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
     except Exception:
@@ -1098,6 +1476,104 @@ def render_player_value(meta, team_name):
         return
 
     df = pd.DataFrame(pool)
+
+    # Resolve this session's team name so the "My Team" view can match the Owner column
+    # (owners in the pool are stored as team names, free agents as "FA"). League is cached.
+    resolved = team_name
+    try:
+        league = get_league_cached(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+        _, resolved = resolve_team_id(league, team_name, DEFAULT_TEAM_ID)
+    except Exception:
+        pass
+
+    # Availability severity per player (drives the mobile status badge + injury toggle).
+    df["_sev"] = df["Status"].apply(lambda s: _player_status(s)[1]) if "Status" in df.columns else ""
+
+    # Value basis -> which value column ranks/shows: season, last-30 (30D), last-15 (15D).
+    VMAP = {"Regular": "Value", "30D": "Recent", "15D": "Recent15"}
+    TMAP = {"Regular": "Trend15", "30D": "Trend", "15D": "Trend15"}
+
+    # -------- Desktop: value-basis dropdown + name/position/team/owner filters + injury
+    # toggle, then the same player cards as mobile in a multi-column grid. --------
+    with st.container(key="pv_desktop"):
+        # One row: Player name, Position, NBA Team, Fantasy Owner, Value basis, then the
+        # injury toggle on the right (bottom-aligned so it lines up with the input boxes).
+        # Fantasy Owner is wider (long team names in its menu); Position / NBA Team are
+        # narrower (their options are short - "PG", "BOS").
+        f_name, f_pos, f_team, f_owner, f_val, f_tog = st.columns(
+            [1.3, 0.8, 0.85, 1.8, 1, 1.5], gap="medium", vertical_alignment="bottom")
+        with f_name:
+            name_filter = st.text_input("Player name", key="pv_name", placeholder="Search...")
+        with f_pos:
+            positions = sorted(p for p in df["Position"].dropna().unique().tolist() if p)
+            pos_filter = st.multiselect("Position", positions, key="pv_pos", placeholder="Any")
+        with f_team:
+            teams = sorted(t for t in df["NBA_Team"].dropna().unique().tolist() if t)
+            team_filter = st.multiselect("NBA Team", teams, key="pv_team", placeholder="Any")
+        with f_owner:
+            owners = sorted(o for o in df["Owner"].dropna().unique().tolist() if o)
+            owner_filter = st.multiselect("Fantasy Owner", owners, key="pv_owner", placeholder="Any")
+        with f_val:
+            vm_d = st.selectbox("Value basis", ["Regular", "30D", "15D"], key="pv_valuemode_d")
+        with f_tog:
+            show_injured_d = st.toggle("Show injured players", value=True, key="pv_show_injured_d")
+
+        value_col_d, trend_col_d = VMAP[vm_d], TMAP[vm_d]
+        maxabs_d = float(df[value_col_d].abs().max() or 1.0)
+        filtered = df
+        if name_filter:
+            filtered = filtered[filtered["Player"].str.contains(name_filter, case=False, na=False)]
+        if pos_filter:
+            filtered = filtered[filtered["Position"].isin(pos_filter)]
+        if team_filter:
+            filtered = filtered[filtered["NBA_Team"].isin(team_filter)]
+        if owner_filter:
+            filtered = filtered[filtered["Owner"].isin(owner_filter)]
+        if not show_injured_d and "_sev" in filtered.columns:
+            filtered = filtered[filtered["_sev"] != "out"]
+
+        if filtered.empty:
+            st.info("No players match these filters.")
+        else:
+            st.markdown(
+                _render_pv_mobile_list(filtered, maxabs_d, value_col=value_col_d, trend_col=trend_col_d,
+                                       show_fa_tag=True),
+                unsafe_allow_html=True,
+            )
+
+    # -------- Mobile: two dropdowns (value basis + owner) and the injury toggle on ONE row,
+    # then the compact card list. --------
+    with st.container(key="pv_mobile"):
+        with st.container(key="pv_ctrl"):
+            vm = st.selectbox("Value basis", ["Regular", "30D", "15D"], key="pv_valuemode",
+                              label_visibility="collapsed")
+            seg = st.selectbox("Owner", ["My Team", "Free Agents", "All"], index=1,
+                               key="pv_seg", label_visibility="collapsed")
+            show_injured = st.toggle(
+                "Injured", value=True, key="pv_show_injured",
+                help="Turn off to hide players who are OUT, on IR, or suspended.",
+            )
+        value_col, trend_col = VMAP[vm], TMAP[vm]
+        maxabs = float(df[value_col].abs().max() or 1.0)
+        base = df if (show_injured or "_sev" not in df.columns) else df[df["_sev"] != "out"]
+        if seg == "My Team":
+            sub = base[base["Owner"] == resolved]
+        elif seg == "All":
+            sub = base
+        else:
+            sub = base[base["Owner"] == "FA"]
+        if sub.empty:
+            st.info("No players in this view.")
+        else:
+            # In "All", tag free agents so available players are easy to spot.
+            st.markdown(
+                _render_pv_mobile_list(sub, maxabs, value_col=value_col, trend_col=trend_col,
+                                       show_fa_tag=(seg == "All")),
+                unsafe_allow_html=True,
+            )
+
+    # Legend at the bottom of the page (both layouts) - it's a footnote, not something that
+    # needs to sit above the data.
     st.caption(
         "**Value** is a 9-category z-score (points above/below an average leaguer, turnovers "
         "and percentages included). **30D/15D Trend** compare the last 30 or 15 days to the "
@@ -1105,37 +1581,188 @@ def render_player_value(meta, team_name):
         "the top free agents."
     )
 
-    disp_cats = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO"]
+    # Lazy client-side loader for the per-card "Last 10 games" logs (fills them on open).
+    with st.container(key="pv_gl_injector"):
+        components.html(_PV_GAMELOG_SCRIPT, height=0)
 
-    f1, f2, f3, f4 = st.columns([1, 1, 1, 1], gap="medium")
-    with f1:
-        name_filter = st.text_input("Player name", key="pv_name", placeholder="Search...")
-    with f2:
-        positions = sorted(p for p in df["Position"].dropna().unique().tolist() if p)
-        pos_filter = st.multiselect("Position", positions, key="pv_pos")
-    with f3:
-        teams = sorted(t for t in df["NBA_Team"].dropna().unique().tolist() if t)
-        team_filter = st.multiselect("NBA Team", teams, key="pv_team")
-    with f4:
-        owners = sorted(o for o in df["Owner"].dropna().unique().tolist() if o)
-        owner_filter = st.multiselect("Fantasy Owner", owners, key="pv_owner")
 
-    filtered = df
-    if name_filter:
-        filtered = filtered[filtered["Player"].str.contains(name_filter, case=False, na=False)]
-    if pos_filter:
-        filtered = filtered[filtered["Position"].isin(pos_filter)]
-    if team_filter:
-        filtered = filtered[filtered["NBA_Team"].isin(team_filter)]
-    if owner_filter:
-        filtered = filtered[filtered["Owner"].isin(owner_filter)]
-
-    if filtered.empty:
-        st.info("No players match these filters.")
+def render_player_compare(meta, team_name):
+    """
+    Head-to-head of any two players (its own Tools page): two pickers, then a comparison of
+    season Value + per-game categories with the better side highlighted, and each player's
+    lazy "Last 10 games" log (filled client-side by _PV_GAMELOG_SCRIPT).
+    """
+    # Heading is hidden on mobile (the "Compare" nav tab already labels the page).
+    with st.container(key="pv_cmp_title"):
+        st.markdown('<h2><i class="bi bi-people-fill" style="color: var(--cobalt);"></i> Compare Players</h2>', unsafe_allow_html=True)
+    try:
+        pool = get_player_pool(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+    except Exception:
+        pool = []
+    if not pool:
+        st.info("Player values unavailable.")
         return
 
-    render_sortable_table(_player_value_rows(filtered, disp_cats, with_owner=True, rank_by_value=True),
-                           "pv_all", default_col="Value", max_height=1200)
+    df = pd.DataFrame(pool)
+    names = sorted(df["Player"].tolist())
+    by_value = df.sort_values("Value", ascending=False)["Player"].tolist()
+    ia = names.index(by_value[0]) if by_value else 0
+    ib = names.index(by_value[1]) if len(by_value) > 1 else min(1, len(names) - 1)
+
+    with st.container(key="pv_cmp_pickers"):
+        ca, cb = st.columns(2, gap="medium")
+        with ca:
+            pa = st.selectbox("Player A", names, index=ia, key="pv_cmp_a")
+        with cb:
+            pb = st.selectbox("Player B", names, index=ib, key="pv_cmp_b")
+
+    if pa == pb:
+        st.info("Pick two different players.")
+    else:
+        rowA = df[df["Player"] == pa].iloc[0]
+        rowB = df[df["Player"] == pb].iloc[0]
+        st.markdown(_render_pv_compare(rowA, rowB), unsafe_allow_html=True)
+        st.caption("Season per-game averages and 9-cat Value; the better side of each row is "
+                   "green (fewer turnovers wins TO). Open a player's **Last 10 games** for their recent log.")
+
+    # Lazy client-side loader for the two "Last 10 games" logs.
+    with st.container(key="pv_gl_injector"):
+        components.html(_PV_GAMELOG_SCRIPT, height=0)
+
+
+def _render_player_detail(r, df, bio):
+    """Full profile for one pool row: a rich bio header (team/#, HT-WT, age, experience,
+    draft, birthplace, availability from ESPN), the season / 30D / 15D value tiles (with
+    league value rank), a clean two-column season-averages stat sheet, and the last-10 log."""
+    name = str(r["Player"])
+    posn = str(r.get("Position", "") or ""); nba = str(r.get("NBA_Team", "") or "")
+    owner = str(r.get("Owner", "") or "")
+    code, sev = _player_status(r.get("Status", ""))
+    # Fantasy-team label; free agents read "Free Agent" once (no separate FA chip).
+    fantasy_team = "Free Agent" if owner == "FA" else owner
+    bio = bio or {}
+
+    # Identity line: full team name (falls back to the roster abbrev), jersey, position.
+    team = bio.get("team") or nba
+    jersey = bio.get("jersey") or ""
+    pos_full = bio.get("position") or posn
+    ident = " &middot; ".join(x for x in (team, jersey, pos_full) if x)
+
+    # Availability dot + label (from the roster injuryStatus, consistent with the rest of the app).
+    if sev == "out":
+        status_html = f'<span class="pd-dot out"></span>{code or "Out"}'
+    elif sev == "day":
+        status_html = f'<span class="pd-dot day"></span>{code}'
+    else:
+        status_html = '<span class="pd-dot ok"></span>Active'
+
+    # Bio facts (only those ESPN returned).
+    ht_wt = ", ".join(x for x in (bio.get("height"), bio.get("weight")) if x)
+    facts = [("HT/WT", ht_wt), ("Age", bio.get("age")), ("Experience", bio.get("experience")),
+             ("College", bio.get("college")), ("Draft", bio.get("draft")), ("Born", bio.get("birthplace"))]
+    bio_html = "".join(
+        f'<div class="pd-bio-f"><span class="pd-bl">{lbl}</span><span class="pd-bv">{v}</span></div>'
+        for lbl, v in facts if v not in (None, "")
+    )
+
+    ranked = df.sort_values("Value", ascending=False).reset_index(drop=True)
+    try:
+        rank = int(ranked.index[ranked["Player"] == name][0]) + 1
+    except Exception:
+        rank = 0
+    total = len(ranked)
+
+    val = float(r.get("Value", 0) or 0)
+    rec, rec15 = float(r.get("Recent", 0) or 0), float(r.get("Recent15", 0) or 0)
+    t30, t15 = float(r.get("Trend", 0) or 0), float(r.get("Trend15", 0) or 0)
+
+    def col(v):
+        return "var(--good)" if v > 0 else "var(--bad)" if v < 0 else "var(--ink)"
+
+    vtiles = (
+        f'<div class="pd-vtile"><span class="pd-vl">Value</span><span class="pd-vv">{val:+.1f}</span>'
+        f'<span class="pd-vr">#{rank} of {total}</span></div>'
+        f'<div class="pd-vtile"><span class="pd-vl">30D</span>'
+        f'<span class="pd-vv" style="color:{col(rec)}">{rec:+.1f}</span>'
+        f'<span class="pd-vr" style="color:{col(t30)}">{t30:+.1f} vs season</span></div>'
+        f'<div class="pd-vtile"><span class="pd-vl">15D</span>'
+        f'<span class="pd-vv" style="color:{col(rec15)}">{rec15:+.1f}</span>'
+        f'<span class="pd-vr" style="color:{col(t15)}">{t15:+.1f} vs season</span></div>'
+    )
+
+    # Clean two-column season-averages sheet (no tile grid).
+    stocks = float(r.get("STL", 0) or 0) + float(r.get("BLK", 0) or 0)
+    stats = [
+        ("Points", f'{float(r.get("PTS", 0) or 0):.1f}'), ("Field Goal %", f'{float(r.get("FG%", 0) or 0) * 100:.1f}'),
+        ("Rebounds", f'{float(r.get("REB", 0) or 0):.1f}'), ("Free Throw %", f'{float(r.get("FT%", 0) or 0) * 100:.1f}'),
+        ("Assists", f'{float(r.get("AST", 0) or 0):.1f}'), ("3-Point %", f'{float(r.get("3P%", 0) or 0) * 100:.1f}'),
+        ("Steals", f'{float(r.get("STL", 0) or 0):.1f}'), ("3-Pointers", f'{float(r.get("3PM", 0) or 0):.1f}'),
+        ("Blocks", f'{float(r.get("BLK", 0) or 0):.1f}'), ("Turnovers", f'{float(r.get("TO", 0) or 0):.1f}'),
+        ("Stocks (stl+blk)", f'{stocks:.1f}'), ("Double-Doubles", f'{float(r.get("DD", 0) or 0):.1f}'),
+    ]
+    sheet = "".join(f'<div class="pd-stat"><span class="pd-sl">{l}</span>'
+                    f'<span class="pd-sv">{v}</span></div>' for l, v in stats)
+
+    pid = r.get("PlayerId")
+    pid = int(pid) if pd.notna(pid) else None
+    gl = (f'<details class="pv-gl" data-pid="{pid}"><summary class="pv-gl-sum">Last 10 games</summary>'
+          f'<div class="pv-gl-body"></div></details>') if pid else ""
+
+    return (
+        '<div class="pd">'
+        f'<div class="pd-head">{_pv_headshot(r)}'
+        f'<div class="pd-id"><div class="pd-name">{name}</div>'
+        f'<div class="pd-team">{ident}</div>'
+        f'<div class="pd-status">{status_html}<span class="pd-owner">Fantasy Team: <b>{fantasy_team}</b></span></div>'
+        f'</div></div>'
+        f'<div class="pd-bio">{bio_html}</div>'
+        f'<div class="pd-values">{vtiles}</div>'
+        '<div class="pd-sec">Season averages <span>per game</span></div>'
+        f'<div class="pd-stats">{sheet}</div>'
+        f'<div class="pd-log">{gl}</div>'
+        '</div>'
+    )
+
+
+def render_player_search(meta, team_name):
+    """Global player search: pick any player and see their full profile (its own page,
+    reached from the header search icon)."""
+    st.markdown('<h2><i class="bi bi-search" style="color: var(--cobalt);"></i> Player Search</h2>', unsafe_allow_html=True)
+    try:
+        pool = get_player_pool(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+    except Exception:
+        pool = []
+    if not pool:
+        st.info("Player data unavailable.")
+        return
+
+    df = pd.DataFrame(pool)
+    names = sorted(df["Player"].tolist())
+    by_value = df.sort_values("Value", ascending=False)["Player"].tolist()
+    # Seed the selection (default = the top player by value) so the picker is controllable
+    # by the Random button's callback without fighting a widget `index`.
+    if st.session_state.get("player_search_sel") not in names:
+        st.session_state.player_search_sel = by_value[0] if by_value else (names[0] if names else "")
+
+    def _random_player():
+        st.session_state.player_search_sel = random.choice(names)
+
+    with st.container(key="pd_search"):
+        cs, cr = st.columns([5, 1], vertical_alignment="bottom")
+        with cs:
+            sel = st.selectbox("Search for a player", names, key="player_search_sel",
+                               placeholder="Type a name…")
+        with cr:
+            st.button("Random", key="pd_random", on_click=_random_player,
+                      width='stretch', help="Show a random player.")
+
+    row = df[df["Player"] == sel].iloc[0]
+    pid = row.get("PlayerId")
+    bio = get_player_bio(int(pid)) if pd.notna(pid) else {}
+    st.markdown(_render_player_detail(row, df, bio), unsafe_allow_html=True)
+
+    with st.container(key="pv_gl_injector"):
+        components.html(_PV_GAMELOG_SCRIPT, height=0)
 
 
 def render_trade_simulator(meta, team_name):
@@ -1189,7 +1816,7 @@ def render_trade_simulator(meta, team_name):
                     f"<div style='padding:0.5rem 0; border-bottom:1px solid var(--line-2);'>"
                     f"<strong style='color:var(--ink);'>{r['Player']}</strong> "
                     f"<span style='color:var(--bad); font-family:ui-monospace,Consolas,monospace;'>{r['Trend']:.1f}</span> "
-                    f"<span style='color:var(--ink-2);'>trend, value {r['Value']:.1f} ({r['Owner']})</span></div>",
+                    f"<span style='color:var(--ink-2);'>trend, value {r['Value']:.1f}</span></div>",
                     unsafe_allow_html=True,
                 )
 
@@ -1295,6 +1922,415 @@ def render_trade_simulator(meta, team_name):
         st.markdown('<p style="color: var(--ink-2);">Select at least one player to simulate a trade.</p>', unsafe_allow_html=True)
 
 
+# =============================================================================
+# AI Assistant (Gemini, free tier) — tools + chat page.
+#
+# The functions below are the "tools" the model can call. They are plain module-level
+# functions with type hints + docstrings so the Gemini SDK can build the tool schema and
+# execute them automatically during a turn. Each one wraps our already-cached data
+# functions and returns a compact text summary — the LLM narrates; these do the lookups.
+# =============================================================================
+
+def _assistant_pool_df():
+    """The full player pool as a DataFrame (rostered + top FAs), or empty on failure."""
+    try:
+        return pd.DataFrame(get_player_pool(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID))
+    except Exception:
+        return pd.DataFrame()
+
+
+def _assistant_my_team():
+    """The team name the app is currently analyzing (the user's team)."""
+    return st.session_state.get("cfg_team", DEFAULT_TEAM_NAME)
+
+
+def _fuzzy_row(df, name):
+    """Best-effort player match: exact (case-insensitive), then substring, then last name."""
+    if df.empty or not name:
+        return None
+    n = name.strip().lower()
+    exact = df[df["Player"].str.lower() == n]
+    if not exact.empty:
+        return exact.iloc[0]
+    contains = df[df["Player"].str.lower().str.contains(n, regex=False)]
+    if not contains.empty:
+        return contains.sort_values("Value", ascending=False).iloc[0]
+    last = df[df["Player"].str.lower().str.split().str[-1] == n]
+    if not last.empty:
+        return last.sort_values("Value", ascending=False).iloc[0]
+    return None
+
+
+def _fmt_pct(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "-"
+    if v <= 1.0:
+        v *= 100.0
+    return f"{v:.1f}%"
+
+
+def _fmt_owner(owner):
+    return "Free Agent" if str(owner) == "FA" else str(owner)
+
+
+def _player_line(r):
+    """One-line stat summary for a player row (per-game)."""
+    return (
+        f"{r['Player']} ({r.get('NBA_Team', '?')}, {r.get('Position', '?')}) - "
+        f"owner: {_fmt_owner(r.get('Owner'))}; "
+        f"value {float(r.get('Value', 0)):+.1f}, 15-day trend {float(r.get('Trend15', 0)):+.1f}, "
+        f"30-day trend {float(r.get('Trend', 0)):+.1f}; "
+        f"{float(r.get('PTS', 0)):.1f} PTS, {float(r.get('REB', 0)):.1f} REB, "
+        f"{float(r.get('AST', 0)):.1f} AST, {float(r.get('STL', 0)):.1f} STL, "
+        f"{float(r.get('BLK', 0)):.1f} BLK, {float(r.get('3PM', 0)):.1f} 3PM, "
+        f"{float(r.get('TO', 0)):.1f} TO, {float(r.get('DD', 0)):.1f} DD/g; "
+        f"FG {_fmt_pct(r.get('FG%'))}, FT {_fmt_pct(r.get('FT%'))}, 3P {_fmt_pct(r.get('3P%'))}; "
+        f"status: {r.get('Status') or 'active'}"
+    )
+
+
+def lookup_player(name: str) -> str:
+    """Look up one NBA player's full fantasy profile: 9-category value, 15-day and 30-day
+    trend, per-game stats (points, rebounds, assists, steals, blocks, threes, turnovers,
+    double-doubles, shooting %), NBA team, position, fantasy owner, and injury status.
+
+    Args:
+        name: The player's name (full or partial, e.g. "Jokic" or "Nikola Jokic").
+    """
+    df = _assistant_pool_df()
+    r = _fuzzy_row(df, name)
+    if r is None:
+        return f'No player matching "{name}" was found in this league\'s player pool.'
+    return _player_line(r)
+
+
+def list_players(scope: str = "all", sort_by: str = "value", limit: int = 10) -> str:
+    """List the top players in the league, ranked. Use this for "best available free
+    agents", "who is trending up", "my best players", or leaders in a category.
+
+    Args:
+        scope: Which players to include - one of "all", "free_agents" (unowned/waiver
+            pickups), or "my_team" (the user's roster).
+        sort_by: How to rank - one of "value" (overall 9-cat value), "trend_15day"
+            (hottest over 15 days), "trend_30day", "points", "rebounds", "assists",
+            "steals", "blocks", "threes", "fg_pct", "ft_pct".
+        limit: How many players to return (1-25).
+    """
+    df = _assistant_pool_df()
+    if df.empty:
+        return "Player data is unavailable right now."
+    scope = (scope or "all").lower()
+    if scope == "free_agents":
+        df = df[df["Owner"] == "FA"]
+    elif scope == "my_team":
+        df = df[df["Owner"] == _assistant_my_team()]
+    if df.empty:
+        return f'No players found for scope "{scope}".'
+    colmap = {
+        "value": "Value", "trend_15day": "Trend15", "trend_30day": "Trend",
+        "points": "PTS", "rebounds": "REB", "assists": "AST", "steals": "STL",
+        "blocks": "BLK", "threes": "3PM", "fg_pct": "FG%", "ft_pct": "FT%",
+    }
+    col = colmap.get((sort_by or "value").lower(), "Value")
+    if col not in df.columns:
+        col = "Value"
+    limit = max(1, min(int(limit or 10), 25))
+    top = df.sort_values(col, ascending=False).head(limit)
+    lines = [f"Top {len(top)} by {sort_by} (scope: {scope}):"]
+    lines += [f"{i}. {_player_line(r)}" for i, (_, r) in enumerate(top.iterrows(), start=1)]
+    return "\n".join(lines)
+
+
+def compare_players(name_a: str, name_b: str) -> str:
+    """Compare two players head-to-head across value, trends, and per-game categories.
+
+    Args:
+        name_a: First player's name.
+        name_b: Second player's name.
+    """
+    df = _assistant_pool_df()
+    ra, rb = _fuzzy_row(df, name_a), _fuzzy_row(df, name_b)
+    if ra is None:
+        return f'No player matching "{name_a}" was found.'
+    if rb is None:
+        return f'No player matching "{name_b}" was found.'
+    return "Player A: " + _player_line(ra) + "\nPlayer B: " + _player_line(rb)
+
+
+def team_category_ranks(team: str = "") -> str:
+    """Rank a fantasy team against the rest of the league in each scoring category
+    (season totals). Use this for "my weakest/strongest categories" or scouting an
+    opponent. Returns a 1-based rank per category (1 = best in the league; for turnovers
+    lower totals rank better).
+
+    Args:
+        team: The fantasy team name. Leave blank to use the user's own team.
+    """
+    league_id, year, s2, swid = ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID
+    team = team.strip() if team else _assistant_my_team()
+    try:
+        league = get_league_cached(league_id, year, s2, swid)
+        team_id, resolved = resolve_team_id(league, team, DEFAULT_TEAM_ID)
+        totals = get_league_season_totals(league_id, year, s2, swid)
+    except Exception:
+        return "Standings data is unavailable right now."
+    if not totals or team_id not in totals:
+        return f'No season totals found for team "{team}".'
+    n = len(totals)
+    cats = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FG%", "FT%", "3P%", "DD"]
+    parts = []
+    for c in cats:
+        rk = _league_rank(totals, team_id, c)
+        if rk is not None:
+            parts.append(f"{c}: {_ordinal(rk)} of {n}")
+    return f"Category ranks for {resolved} (1 = best; TO ranked so fewer is better):\n" + \
+        "; ".join(parts)
+
+
+def _match_team_name(df, name):
+    """Best-effort fantasy team match against the Owner column: exact, then substring
+    either way (so "hustle" finds "Hustle and Hart"), then word overlap ("hustle or hart"
+    -> "Hustle and Hart"). Returns the matched Owner string or None."""
+    teams = [t for t in df["Owner"].unique() if t and t != "FA"]
+    if not name or not teams:
+        return None
+    n = name.strip().lower()
+    for t in teams:
+        if t.lower() == n:
+            return t
+    subs = [t for t in teams if n in t.lower() or t.lower() in n]
+    if subs:
+        return max(subs, key=len)  # prefer the more specific match
+    stop = {"and", "or", "the", "of", "&", "a"}
+    nwords = {w for w in n.replace("&", " ").split() if w and w not in stop}
+    best, best_score = None, 0
+    for t in teams:
+        twords = {w for w in t.lower().replace("&", " ").split() if w and w not in stop}
+        score = len(nwords & twords)
+        if score > best_score:
+            best, best_score = t, score
+    return best if best_score > 0 else None
+
+
+def list_teams() -> str:
+    """List every fantasy team in the league (their names)."""
+    df = _assistant_pool_df()
+    if df.empty:
+        return "League data is unavailable right now."
+    teams = sorted(t for t in df["Owner"].unique() if t and t != "FA")
+    mine = _assistant_my_team()
+    return "Fantasy teams: " + ", ".join(f"{t} (the user's team)" if t == mine else t for t in teams)
+
+
+def team_roster(team: str = "") -> str:
+    """List a fantasy team's roster with each player's value and 15-day trend, best first.
+
+    Args:
+        team: The fantasy team name. Leave blank for the user's own team.
+    """
+    df = _assistant_pool_df()
+    if df.empty:
+        return "League data is unavailable right now."
+    team_in = team.strip() if team else _assistant_my_team()
+    matched = _match_team_name(df, team_in)
+    if matched is None:
+        names = ", ".join(sorted(t for t in df["Owner"].unique() if t and t != "FA"))
+        return f'No roster found for "{team_in}". Known teams: {names}.'
+    sub = df[df["Owner"] == matched].sort_values("Value", ascending=False)
+    lines = [f"{sub.iloc[0]['Owner']} roster ({len(sub)} players):"]
+    lines += [f"{i}. {_player_line(r)}" for i, (_, r) in enumerate(sub.iterrows(), start=1)]
+    return "\n".join(lines)
+
+
+def power_rankings() -> str:
+    """League power rankings: each team's rank, cumulative all-play win %, record, recent
+    form (Hot/Cold/Steady), and strength of schedule. Use for "who is the best team",
+    standings, or scouting the league."""
+    try:
+        data = get_power_rankings(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+    except Exception:
+        return "Power-ranking data is unavailable right now."
+    teams = (data or {}).get("teams") or []
+    if not teams:
+        return "Power-ranking data is unavailable right now."
+    mine = _assistant_my_team()
+    lines = ["League power rankings (by cumulative all-play):"]
+    for t in teams:
+        w, l, tie = t.get("record", (0, 0, 0))
+        tag = " <- user's team" if t.get("team_name") == mine else ""
+        lines.append(
+            f"{t.get('rank')}. {t.get('team_name')}{tag} - all-play {t.get('power_pct', 0) * 100:.0f}%, "
+            f"record {w}-{l}-{tie}, form {t.get('form', '?')}, "
+            f"SoS {t.get('sos', 0) * 100:.0f}%")
+    return "\n".join(lines)
+
+
+_ASSISTANT_TOOLS = [
+    lookup_player, list_players, compare_players, team_category_ranks,
+    team_roster, list_teams, power_rankings, web_search,
+]
+
+_ASSISTANT_SUGGESTIONS = [
+    ("My weak categories", "What are my team's weakest categories this season, and which ones should I target on the waiver wire?"),
+    ("Best free agents", "Who are the best available free agents right now by overall value?"),
+    ("Trending up", "Which players are trending up the most over the last 15 days?"),
+    ("Latest NBA news", "What's the latest NBA news and any notable injuries or trades right now?"),
+]
+
+
+def _agent_greeting():
+    """Time-of-day greeting word (ET), like the Claude/Gemini home screens."""
+    h = datetime.now(ZoneInfo("America/New_York")).hour
+    return "Morning" if h < 12 else "Afternoon" if h < 18 else "Evening"
+
+
+_AGENT_ENTER_JS = """<script>
+(function(){
+  const doc = window.parent.document;
+  function wire(){
+    const wrap = doc.querySelector('[class*="st-key-agent_composer"]');
+    if(!wrap) return;
+    const ta = wrap.querySelector('textarea');
+    const btn = wrap.querySelector('[data-testid="stFormSubmitButton"] button');
+    if(!ta || !btn || ta.dataset.enterWired) return;
+    ta.dataset.enterWired = '1';
+    ta.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+        e.preventDefault();
+        btn.click();
+      }
+    });
+  }
+  wire();
+  new MutationObserver(wire).observe(doc.body, {childList:true, subtree:true});
+})();
+</script>"""
+
+
+def _agent_composer():
+    """Inline chat composer (a form). A multi-line, wrapping text area in a sans font; a
+    small JS shim makes Enter submit and Shift+Enter add a newline (Claude behavior).
+    Returns the submitted text or None."""
+    with st.container(key="agent_composer"):
+        with st.form("agent_form", clear_on_submit=True, border=True):
+            c = st.columns([9, 1.3], vertical_alignment="bottom")
+            txt = c[0].text_area(
+                "message", placeholder="Ask anything about your team or the NBA…",
+                label_visibility="collapsed", height=68)
+            sent = c[1].form_submit_button("Send", width='stretch')
+    with st.container(key="agent_enter_js"):
+        components.html(_AGENT_ENTER_JS, height=0)
+    return txt.strip() if (sent and txt and txt.strip()) else None
+
+
+def _assistant_reset(team_name):
+    """Start a brand-new conversation (Clear button)."""
+    st.session_state.assistant_msgs = []
+    st.session_state.assistant_chat = create_chat(
+        _ASSISTANT_TOOLS, build_system_instruction(team_name))
+
+
+def render_assistant(meta, team_name):
+    """Full-feel chat assistant (Gemini, free tier): streaming replies, league-data tools
+    + live web search. The model picks tools; our Python returns the numbers, so answers
+    stay grounded. Reached from the header chatbot icon."""
+    if "assistant_msgs" not in st.session_state:
+        st.session_state.assistant_msgs = []
+
+    # (Re)create the chat when missing, or when the analyzed team changed (new context).
+    if (st.session_state.get("assistant_chat") is None
+            or st.session_state.get("assistant_team") != team_name):
+        try:
+            st.session_state.assistant_chat = create_chat(
+                _ASSISTANT_TOOLS, build_system_instruction(team_name))
+            if st.session_state.get("assistant_team") not in (None, team_name):
+                st.session_state.assistant_msgs = []  # team switched -> fresh conversation
+            st.session_state.assistant_team = team_name
+        except Exception:
+            st.error("Could not start the assistant. Check GEMINI_API_KEY in config.py.")
+            return
+
+    msgs = st.session_state.assistant_msgs
+    pending = None
+    typed = None
+    with st.container(key="assistant_page"):
+        if not msgs:
+            # Greeting / empty state — opening a fresh chatbot.
+            st.markdown(
+                "<div class='asst-hero'>"
+                "<div class='asst-hero-badge'><svg width='30' height='30' viewBox='0 0 16 16' "
+                "fill='#fff' xmlns='http://www.w3.org/2000/svg'><path d='M6 12.5a.5.5 0 0 1 "
+                ".5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5M3 8.062C3 6.76 4.235 5.765 5.53 "
+                "5.886a26.6 26.6 0 0 0 4.94 0C11.765 5.765 13 6.76 13 8.062v1.157a.93.93 0 0 "
+                "1-.765.935c-.845.147-2.34.346-4.235.346s-3.39-.2-4.235-.346A.93.93 0 0 1 3 "
+                "9.219zm4.542-.827a.25.25 0 0 0-.217.068l-.92.9a25 25 0 0 1-1.871-.183.25.25 "
+                "0 0 0-.068.495c.55.076 1.232.149 2.02.193a.25.25 0 0 0 .189-.071l.754-.736.847 "
+                "1.71a.25.25 0 0 0 .404.062l.932-.97a25 25 0 0 0 1.922-.188.25.25 0 0 "
+                "0-.068-.495c-.538.074-1.207.145-1.98.189a.25.25 0 0 0-.166.076l-.754.785-.842-1.7a.25.25 "
+                "0 0 0-.182-.135Z'/><path d='M8.5 1.866a1 1 0 1 0-1 0V3h-2A4.5 4.5 0 0 0 1 "
+                "7.5V8a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1a1 1 0 "
+                "0 0 1-1V9a1 1 0 0 0-1-1v-.5A4.5 4.5 0 0 0 10.5 3h-2zM14 7.5V13a1 1 0 0 1-1 "
+                "1H3a1 1 0 0 1-1-1V7.5A3.5 3.5 0 0 1 5.5 4h5A3.5 3.5 0 0 1 14 7.5'/></svg></div>"
+                f"<h1>{_agent_greeting()}, {team_name}</h1>"
+                "<p>Your fantasy basketball assistant. Ask about player values, waiver "
+                "pickups, trades, or category strengths &mdash; I read your league's real "
+                "data and can search the web for live NBA news.</p></div>",
+                unsafe_allow_html=True,
+            )
+            typed = _agent_composer()
+            scols = st.columns(len(_ASSISTANT_SUGGESTIONS))
+            for i, (label, promptext) in enumerate(_ASSISTANT_SUGGESTIONS):
+                if scols[i].button(label, key=f"asg_{i}", width='stretch'):
+                    pending = promptext
+        else:
+            hdr = st.columns([6, 1], vertical_alignment="center")
+            hdr[1].button("Clear", key="assistant_clear", width='stretch',
+                          on_click=_assistant_reset, args=(team_name,))
+            for m in msgs:
+                with st.chat_message(m["role"]):
+                    st.markdown(m["content"])
+            # If the last turn is the user's (we appended it then reran), stream the reply
+            # in place now — so the greeting/chips are already gone and the answer types out
+            # right under the question, like a normal chatbot.
+            if msgs and msgs[-1]["role"] == "user":
+                with st.chat_message("assistant"):
+                    try:
+                        reply = st.write_stream(
+                            assistant_stream(st.session_state.assistant_chat,
+                                             msgs[-1]["content"]))
+                    except AssistantRateLimited:
+                        reply = ("I've hit Gemini's free-tier rate limit for the moment. "
+                                 "Give it a minute and try again.")
+                        st.markdown(reply)
+                    except AssistantBusy:
+                        reply = ("Gemini is briefly overloaded — please try that again in a "
+                                 "few seconds.")
+                        st.markdown(reply)
+                    except Exception:
+                        reply = ("Something went wrong reaching the assistant. Try again, or "
+                                 "check the Gemini key in config.py.")
+                        st.markdown(reply)
+                if isinstance(reply, list):  # write_stream returns a list if chunks vary
+                    reply = "".join(str(x) for x in reply)
+                if not (reply or "").strip():  # never render/persist a blank reply
+                    reply = ("I couldn't generate a response for that one. Please try again "
+                             "or rephrase it.")
+                    st.markdown(reply)
+                msgs.append({"role": "assistant", "content": reply})
+            typed = _agent_composer()
+
+    # On submit (typed or a suggestion chip) we record the user's turn and rerun; the reply
+    # is streamed on that next run (above). Ignore a submit while a previous question is
+    # still unanswered (msgs ends with a user turn) - that only happens on an impatient
+    # double-submit during a slow reply, and would otherwise queue the message twice.
+    user_msg = pending or typed
+    if user_msg and not (msgs and msgs[-1]["role"] == "user"):
+        msgs.append({"role": "user", "content": user_msg})
+        st.rerun()
+
+
 def warm_caches(sim_count, blend_weight, team_name):
     """
     Kick off the heavy computations in a background thread on app load, so League
@@ -1330,13 +2366,31 @@ def warm_caches(sim_count, blend_weight, team_name):
     threading.Thread(target=_warm, daemon=True).start()
 
 
+def _warm_matchup_projection(your_roster, opp_roster):
+    """
+    Background-warm the data the Projections (full-sim) page needs, so navigating there
+    from the Scoreboard is quick. Only the NBA-schedule prefetch and the injury feed are
+    cacheable/shared - the Monte Carlo itself runs on the page - so this warms exactly
+    those. Called from the Scoreboard page for live weeks (a completed week has no games
+    left, hence nothing to prefetch).
+    """
+    def _warm():
+        try:
+            get_injury_cached()
+            prefetch_team_schedules_for_rosters(your_roster, opp_roster)
+        except Exception:
+            pass
+
+    threading.Thread(target=_warm, daemon=True).start()
+
+
 WEEK_PAGES = ("Matchup", "Scoreboard", "Streamers", "Bench", "Roster")
 # Mobile section grouping (bottom icon bar + sub-row). Note this differs slightly from the
 # desktop dropdowns by request: Schedule lives under Season, Playoff Odds under Tools.
 # Season Summary is intentionally NOT in any nav section — it's reachable only from the
 # Home page tiles (owner request).
 SEASON_PAGES = ("Season Stats", "League Stats", "Schedule")
-TOOLS_PAGES = ("Power Rankings", "Playoff Odds", "Player Value", "Trade Simulator")
+TOOLS_PAGES = ("Player Value", "Compare", "Power Rankings", "Playoff Odds", "Trade Simulator", "Agent")
 
 # Section-based navigation. Each section groups related pages. The top bar (desktop)
 # and the fixed bottom icon bar (mobile) show one control per section; a labeled
@@ -1348,8 +2402,63 @@ NAV_SECTIONS = (
     ("week",     "This Week", WEEK_PAGES),
     ("season",   "Season",    SEASON_PAGES),
     ("tools",    "Tools",     TOOLS_PAGES),
+    ("search",   "Search",    ("Player",)),
     ("settings", "Settings",  ("Settings",)),
 )
+
+# Every valid page name (for validating a ?page=... deep link). "Player" is the global
+# player-search / detail page reached from the header search icon. "Agent" (the AI chat
+# page) is a top-level header tab on desktop and lives under Tools on mobile.
+ALL_PAGES = (set(WEEK_PAGES) | set(SEASON_PAGES) | set(TOOLS_PAGES)
+             | {"Home", "Season Summary", "Settings", "Player"})
+
+
+# =============================================================================
+# Clean path URLs (/agent, /season-stats, ...) instead of ?page=... query params.
+#
+# st.navigation + st.Page(url_path=...) owns URL <-> page resolution. Our own
+# st.session_state.active_page (read by every render_* function below, unchanged) is kept
+# in sync by the tiny router function each st.Page points to (_route_to). Programmatic
+# navigation from any nav control calls _go_page(name), which calls st.switch_page - the
+# ONLY thing that actually changes the browser URL. Both a plain session_state assignment
+# and st.rerun()/st.switch_page called from inside an on_click callback do NOT update the
+# URL (verified empirically), so every nav button below is wired inline
+# (`if st.button(...): _go_page(...)`), not via on_click.
+# =============================================================================
+
+def _slugify(name):
+    return name.lower().replace(" ", "-")
+
+
+PAGE_URL_SLUGS = {name: ("" if name == "Home" else _slugify(name)) for name in ALL_PAGES}
+
+_PAGE_OBJS = {}  # name -> st.Page; (re)built once per script run by _build_pages()
+
+
+def _route_to(name):
+    """Bound to each st.Page. Runs when Streamlit resolves the current URL to that page."""
+    st.session_state.active_page = name
+
+
+def _build_pages():
+    """This run's st.Page objects. Streamlit expects a fresh list built each script run."""
+    global _PAGE_OBJS
+    _PAGE_OBJS = {
+        name: st.Page(functools.partial(_route_to, name), title=name,
+                       url_path=slug, default=(name == "Home"))
+        for name, slug in PAGE_URL_SLUGS.items()
+    }
+    return list(_PAGE_OBJS.values())
+
+
+def _go_page(name):
+    """Navigate to a page by name, updating the URL. The only correct way to change pages
+    from a button - see the module note above."""
+    target = _PAGE_OBJS.get(name)
+    if target is not None:
+        st.switch_page(target)
+    else:
+        st.session_state.active_page = name  # fallback; shouldn't happen for a valid name
 
 
 def _section_for_page(page):
@@ -1362,6 +2471,12 @@ def _section_for_page(page):
 
 def _section_landing(key, pages, season_over):
     """The page a section opens to."""
+    if key == "week":
+        # Open This Week on the Scoreboard - the fast "current matchup" numbers view.
+        # It renders straight from the live category totals, so the numbers appear right
+        # away instead of waiting on the heavier Projections simulation (warmed in the
+        # background). The Week/Round picker lives at the top of this page.
+        return "Scoreboard"
     return pages[0]
 
 
@@ -1481,9 +2596,6 @@ def render_home(meta, team_name):
     today = datetime.now(ZoneInfo("America/New_York")).date()
     status = "Season complete" if today > SEASON_END_DATE else "Season in progress"
 
-    def _go(page):
-        st.session_state.active_page = page
-
     # -------- Desktop: original hero + 4-card layout --------
     with st.container(key="home_desktop"):
         st.markdown(
@@ -1522,8 +2634,8 @@ def render_home(meta, team_name):
                         """,
                         unsafe_allow_html=True,
                     )
-                    st.button("Open", key=f"home_{target}", on_click=_go, args=(target,),
-                              width='stretch')
+                    if st.button("Open", key=f"home_{target}", width='stretch'):
+                        _go_page(target)
 
     # -------- Mobile: compact hero + 2-up tile grid --------
     with st.container(key="home_mobile"):
@@ -1552,7 +2664,8 @@ def render_home(meta, team_name):
         ]
         with st.container(key="home_tiles"):
             for label, page, slug in tiles:
-                st.button(label, key=f"hometile_{slug}", on_click=_go, args=(page,), width='stretch')
+                if st.button(label, key=f"hometile_{slug}", width='stretch'):
+                    _go_page(page)
 
 
 # Desktop header items. Each is either a plain page link or a dropdown menu:
@@ -1564,13 +2677,15 @@ def render_home(meta, team_name):
 # reachable via the Home tiles instead (owner request).
 FLAT_NAV = (
     ("link", "Season Summary", "Season Summary"),
-    ("link", "Current Matchup", "Matchup"),
+    ("link", "Current Matchup", "Scoreboard"),
     ("link", "Schedule", "Schedule"),
     ("menu", "Stats", (("Season", "Season Stats"), ("League", "League Stats"))),
-    ("menu", "Tools", (("Power Rankings", "Power Rankings"),
+    ("menu", "Tools", (("Player Value", "Player Value"),
+                       ("Compare", "Compare"),
+                       ("Power Rankings", "Power Rankings"),
                        ("Playoff Odds", "Playoff Odds"),
-                       ("Player Value", "Player Value"),
                        ("Trade Simulator", "Trade Simulator"))),
+    ("link", "Agent", "Agent"),
 )
 
 
@@ -1589,12 +2704,17 @@ def render_top_nav(meta, team_name):
     view_map = build_week_views()
     week_labels = [l for l in view_map if l != SEASON_SUMMARY_VIEW]
 
-    if "active_page" not in st.session_state:
-        st.session_state.active_page = "Home"
+    # active_page is set by _route_to() during st.navigation's nav.run() (called before
+    # render_top_nav, see main()) — it reflects the current URL path, so no deep-link
+    # reading is needed here.
     # Keep the week choice alive even when the picker (a rail widget) isn't rendered.
     if "week_sel" not in st.session_state:
-        dl = period_to_view_label(meta["current_period"], view_map) if meta else None
-        st.session_state.week_sel = dl if dl in week_labels else week_labels[-1]
+        qp_week = st.query_params.get("week")
+        if qp_week in week_labels:
+            st.session_state.week_sel = qp_week
+        else:
+            dl = period_to_view_label(meta["current_period"], view_map) if meta else None
+            st.session_state.week_sel = dl if dl in week_labels else week_labels[-1]
     else:
         st.session_state.week_sel = st.session_state.week_sel
 
@@ -1602,32 +2722,33 @@ def render_top_nav(meta, team_name):
     season_over = datetime.now(ZoneInfo("America/New_York")).date() > SEASON_END_DATE
     active_section = _section_for_page(active)
 
-    def _go(page):
-        st.session_state.active_page = page
-
     items = [it for it in FLAT_NAV if it[1] != "Season Summary" or season_over]
 
     # -------- Desktop header: brand(Home) | page links + dropdowns | Settings gear ----
     # Centered cluster (no growing spacer) so the nav doesn't stretch across the whole bar.
     with st.container(key="nav_top"):
-        # a menu label needs a touch more room for its dropdown caret
-        ratios = ([2.2]
+        # brand | search icon (left) | nav items (incl. the "Agent" tab) | Settings gear
+        ratios = ([2.2, 0.55]
                   + [round(0.55 + 0.072 * (len(it[1]) + (2 if it[0] == "menu" else 0)), 2)
                      for it in items]
-                  + [0.55])
+                  + [0.55])  # trailing: Settings gear
         cols = st.columns(ratios, gap="small", vertical_alignment="center")
-        cols[0].button("Fantasy Basketball", key="nav_brand", width='stretch',
-                       on_click=_go, args=("Home",),
-                       type="primary" if active == "Home" else "secondary")
+        if cols[0].button("Fantasy Basketball", key="nav_brand", width='stretch',
+                          type="primary" if active == "Home" else "secondary"):
+            _go_page("Home")
+        if cols[1].button("Search players", key="navp_search", width='stretch',
+                          type="primary" if active == "Player" else "secondary"):
+            _go_page("Player")
         for i, item in enumerate(items):
-            col = cols[i + 1]
+            col = cols[i + 2]
             if item[0] == "link":
                 lab, pg = item[1], item[2]
-                # "Current Matchup" stays highlighted for any This Week page.
-                is_active = (active in WEEK_PAGES) if pg == "Matchup" else (active == pg)
-                col.button(lab, key=f"navf_{i}", width='stretch',
-                           on_click=_go, args=(pg,),
-                           type="primary" if is_active else "secondary")
+                # "Current Matchup" (targets a This Week page) stays highlighted for ANY
+                # This Week page, not just the one it lands on.
+                is_active = (active in WEEK_PAGES) if pg in WEEK_PAGES else (active == pg)
+                if col.button(lab, key=f"navf_{i}", width='stretch',
+                             type="primary" if is_active else "secondary"):
+                    _go_page(pg)
             else:  # dropdown menu (st.popover)
                 lab, subs = item[1], item[2]
                 sub_pages = [p for _, p in subs]
@@ -1637,13 +2758,17 @@ def render_top_nav(meta, team_name):
                 with col:
                     with st.container(key=f"navmenu_{slug}" + ("_active" if on else "")):
                         with st.popover(lab, use_container_width=True):
+                            # page_link (not a button): a button inside a popover can fail to
+                            # register its click because the popover closes on interaction, so
+                            # the inline `if st.button()` never re-renders to return True.
+                            # page_link is a real navigation link and always updates the URL.
                             for sl, sp in subs:
-                                st.button(sl, key=f"navm_{sp.replace(' ', '_')}", width='stretch',
-                                          on_click=_go, args=(sp,),
-                                          type="primary" if active == sp else "secondary")
-        cols[-1].button("Settings", key="navp_settings", width='stretch',
-                        on_click=_go, args=("Settings",),
-                        type="primary" if active == "Settings" else "secondary")
+                                pobj = _PAGE_OBJS.get(sp)
+                                if pobj is not None:
+                                    st.page_link(pobj, label=sl, use_container_width=True)
+        if cols[-1].button("Settings", key="navp_settings", width='stretch',
+                           type="primary" if active == "Settings" else "secondary"):
+            _go_page("Settings")
 
     # -------- "This Week" side rail: only on This Week pages (left rail / mobile sub-bar) --
     # The Week/Round picker itself lives in the matchup header row (main()), not here — it
@@ -1653,17 +2778,17 @@ def render_top_nav(meta, team_name):
         with st.sidebar:
             st.markdown("<div class='nav-scope-label'>This Week</div>", unsafe_allow_html=True)
             for i, pg in enumerate(WEEK_PAGES):
-                st.button(pg, key=f"navw_{i}", width='stretch',
-                          on_click=_go, args=(pg,),
-                          type="primary" if active == pg else "secondary")
+                if st.button(pg, key=f"navw_{i}", width='stretch',
+                             type="primary" if active == pg else "secondary"):
+                    _go_page(pg)
 
     # -------- Mobile bottom bar: one icon per section (CSS hides it on desktop) --------
     with st.container(key="nav_bottom"):
         bcols = st.columns(len(NAV_SECTIONS), gap="small")
         for i, (key, label, pages) in enumerate(NAV_SECTIONS):
-            bcols[i].button(label, key=f"navb_{key}", width='stretch',
-                            on_click=_go, args=(_section_landing(key, pages, season_over),),
-                            type="primary" if active_section == key else "secondary")
+            if bcols[i].button(label, key=f"navb_{key}", width='stretch',
+                               type="primary" if active_section == key else "secondary"):
+                _go_page(_section_landing(key, pages, season_over))
 
     # -------- Mobile sub-row: Season/Tools sub-pages (This Week uses the rail above) -----
     # No section-name label — the sub-row already only appears under its own section.
@@ -1677,14 +2802,24 @@ def render_top_nav(meta, team_name):
         with st.container(key="nav_sub"):
             cols = st.columns(len(sub_pages), gap="small", vertical_alignment="center")
             for i, pg in enumerate(sub_pages):
-                cols[i].button(pg, key=f"navsub_{i}", width='stretch',
-                                on_click=_go, args=(pg,),
-                                type="primary" if active == pg else "secondary")
+                if cols[i].button(pg, key=f"navsub_{i}", width='stretch',
+                                  type="primary" if active == pg else "secondary"):
+                    _go_page(pg)
+
+    # Deep link: mirror the current week into the URL (on This Week pages) so it can be
+    # bookmarked / shared. The page itself is already the URL path, via st.navigation.
+    cur = st.session_state.active_page
+    if cur in WEEK_PAGES:
+        wk = st.session_state.get("week_sel")
+        if wk and st.query_params.get("week") != wk:
+            st.query_params["week"] = wk
+    elif "week" in st.query_params:
+        del st.query_params["week"]
 
     return st.session_state.active_page, st.session_state.week_sel, view_map[st.session_state.week_sel]
 
 
-def main():
+def _app_body():
     # Settings live on their own nav page; values persist in session_state.
     init_settings()
 
@@ -1733,6 +2868,19 @@ def main():
         render_player_value(league_meta, team_name)
         render_footer()
         return
+    if active_page == "Compare":
+        render_player_compare(league_meta, team_name)
+        render_footer()
+        return
+    if active_page == "Agent":
+        # No footer on the chat page — the fixed input bar is the bottom element, and the
+        # sticky "Data via ESPN" footer would otherwise strand it at the very bottom.
+        render_assistant(league_meta, team_name)
+        return
+    if active_page == "Player":
+        render_player_search(league_meta, team_name)
+        render_footer()
+        return
     if active_page == "Trade Simulator":
         render_trade_simulator(league_meta, team_name)
         render_footer()
@@ -1743,15 +2891,15 @@ def main():
         return
 
     if active_page:
-        # These loading indicators (2 spinners + the progress bar below) are genuinely
-        # useful feedback only on the Matchup page (the one page that shows the picker
-        # header and visibly waits on the live simulation). Even after a spinner/`.empty()`
-        # finishes, Streamlit leaves a zero-height placeholder that still counts toward the
-        # page's flex `gap` - on every other page (Season Stats/League Stats, and now also
-        # Scoreboard/Streamers/Bench/Roster, which dropped their own redundant header) that
-        # was leaving a visible empty band at the top. Collapse it out of flow everywhere
-        # except Matchup.
-        _hide_progress = active_page != "Matchup"
+        # These loading indicators (2 spinners + the progress bar below) leave a zero-height
+        # placeholder even after `.empty()` that still counts toward the page's flex `gap`,
+        # showing as an empty band at the top. Collapse them out of flow on EVERY page (the
+        # collapse key `mp_hide_*` is matched by the always-collapse rule in styles.py). The
+        # Scoreboard ("current matchup" numbers) is now the fast landing view, so the
+        # Projections/Matchup page no longer needs the prominent loading chrome that used to
+        # justify keeping these in-flow - dropping it removes the extra top whitespace there.
+        # The simulation still runs; Streamlit's own top-right "Running" indicator covers it.
+        _hide_progress = True
         def _pkey(i):
             return f"mp_hide_{i}" if _hide_progress else f"mp_live_{i}"
 
@@ -1782,6 +2930,27 @@ def main():
                 opp_team_name = opp_team_obj.team_name
                 current_you, current_opp = get_current_totals(matchup, team_id)
 
+            # ---- Scoreboard = the fast "current matchup" numbers view ----
+            # It needs only the live category totals fetched just above, NOT the full
+            # stat-build + Monte Carlo pipeline below. Short-circuit here so the numbers
+            # render immediately when the page opens instead of waiting on the projection
+            # simulation; the heavier Projections (old Matchup) page is warmed in the
+            # background so it's ready when tapped. The Week/Round picker lives at the top
+            # of THIS page now (moved off the Projections page).
+            if active_page == "Scoreboard":
+                week_choices = [l for l in build_week_views() if l != SEASON_SUMMARY_VIEW]
+                with st.container(key="matchup_header"):
+                    st.selectbox("Week / Round", week_choices, key="week_sel",
+                                 label_visibility="collapsed")
+                st.markdown(
+                    create_scoreboard_vertical(current_you, current_opp, your_team_name, opp_team_name),
+                    unsafe_allow_html=True,
+                )
+                if is_live_view:
+                    _warm_matchup_projection(your_team_obj.roster, opp_team_obj.roster)
+                render_footer()
+                return
+
             playoff_round = None
             week_in_round = None
             if is_live_view:
@@ -1810,14 +2979,11 @@ def main():
             # other This Week pages (Scoreboard, Streamers, Bench, Roster) each start
             # straight into their own content instead of repeating it (owner request).
             if active_page == "Matchup":
-                # Matchup header, two rows: the Week/Round picker gets a full-width row to
-                # itself (its text, e.g. "Playoffs - Round 2", doesn't truncate, so it needs
-                # room free of any neighbor); team names get their own row below with far
-                # more space each than when they had to share the row with the picker.
-                week_choices = [l for l in build_week_views() if l != SEASON_SUMMARY_VIEW]
+                # Matchup (Projections) header: just the two team names. The Week/Round
+                # picker moved to the top of the Scoreboard page (the "current matchup"
+                # numbers view) - the chosen week still flows here via st.session_state,
+                # kept alive by render_top_nav's self-assign.
                 with st.container(key="matchup_header"):
-                    st.selectbox("Week / Round", week_choices, key="week_sel",
-                                 label_visibility="collapsed")
                     col1, col3 = st.columns([1, 1], vertical_alignment="center")
                     with col1:
                         st.markdown(f'<h3 class="mh-name"><i class="bi bi-house-fill" style="color: var(--cobalt);"></i> {your_team_name}</h3>', unsafe_allow_html=True)
@@ -1923,12 +3089,8 @@ def main():
             
             # Pages are chosen by the top nav (active_page).
             
-            # ==================== SCOREBOARD (its own page — see WEEK_PAGES) ====================
-            # No heading here - the "Scoreboard" nav tab already says what this page is,
-            # and create_scoreboard_vertical's own hero row (team names + W-L-T) repeats
-            # it again right below.
-            if active_page == "Scoreboard":
-                st.markdown(create_scoreboard_vertical(current_you, current_opp, your_team_name, opp_team_name), unsafe_allow_html=True)
+            # (Scoreboard is rendered earlier via a short-circuit - it doesn't need the
+            # simulation pipeline above, so it returns before reaching this point.)
 
             # ==================== TAB 1: MATCHUP ANALYSIS ====================
             if active_page == "Matchup":
@@ -2146,35 +3308,57 @@ def main():
                 season_ft_pct = season_totals["FTM"] / season_totals["FTA"] if season_totals["FTA"] > 0 else 0
                 season_3p_pct = season_totals["3PM"] / season_totals["3PA"] if season_totals["3PA"] > 0 else 0
                 
-                # Season Totals Summary Card
+                # League-wide season totals -> this team's RANK per category (and DD, which
+                # the per-team totals above don't track). Cheap: reuses the per-week box-score
+                # cache the player tables already warmed.
+                try:
+                    league_totals = get_league_season_totals(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+                except Exception:
+                    league_totals = {}
+                mine_tot = league_totals.get(team_id, {})
+                n_teams = len(league_totals)
+                dd_total = int(mine_tot.get("DD", sum(int(ps.get("DD", 0)) for ps in player_season_stats.values())))
+
+                def _rk(stat):
+                    return _league_rank(league_totals, team_id, stat)
+
+                def _rank_str(rank):
+                    if not rank:
+                        return None
+                    return f"#{rank} of {n_teams}" if n_teams else f"#{rank}"
+
+                # Season Totals Summary Card. Each item: (label, value, league-rank).
                 st.markdown('<h3><i class="bi bi-bar-chart-line-fill" style="color: var(--good);"></i> Team Season Totals</h3>', unsafe_allow_html=True)
 
                 season_stat_items = [
-                    ("Total Points", f"{int(season_totals['PTS']):,}"),
-                    ("Total Rebounds", f"{int(season_totals['REB']):,}"),
-                    ("Total Assists", f"{int(season_totals['AST']):,}"),
-                    ("Total Steals", f"{int(season_totals['STL']):,}"),
-                    ("Total Blocks", f"{int(season_totals['BLK']):,}"),
-                    ("Total 3PM", f"{int(season_totals['3PM']):,}"),
-                    ("FG%", f"{season_fg_pct:.3f}"),
-                    ("FT%", f"{season_ft_pct:.3f}"),
+                    ("Total Points", f"{int(season_totals['PTS']):,}", _rk("PTS")),
+                    ("Total Rebounds", f"{int(season_totals['REB']):,}", _rk("REB")),
+                    ("Total Assists", f"{int(season_totals['AST']):,}", _rk("AST")),
+                    ("Total Steals", f"{int(season_totals['STL']):,}", _rk("STL")),
+                    ("Total Blocks", f"{int(season_totals['BLK']):,}", _rk("BLK")),
+                    ("Total DD", f"{dd_total:,}", _rk("DD")),
+                    ("FG%", f"{season_fg_pct:.3f}", _rk("FG%")),
+                    ("3P%", f"{season_3p_pct:.3f}", _rk("3P%")),
                 ]
-                # Desktop: original 4x2 st.metric card grid. Mobile: a compact strip (same
-                # numbers, a fraction of the height) - 8 full bordered cards each ~116px
-                # tall pushed the real content (the player tables) well below the fold.
+                # Desktop: original 4x2 st.metric card grid, league rank shown as the metric's
+                # (color-off) delta line. Mobile: a compact strip (same numbers + a rank chip,
+                # a fraction of the height) - 8 full bordered cards pushed the player tables
+                # well below the fold.
                 with st.container(key="ss_totals_desktop"):
                     cols = st.columns(4)
-                    for col, (label, val) in zip(cols, season_stat_items[:4]):
-                        col.metric(label, val)
+                    for col, (label, val, rank) in zip(cols, season_stat_items[:4]):
+                        col.metric(label, val, delta=_rank_str(rank), delta_color="off")
                     cols2 = st.columns(4)
-                    for col, (label, val) in zip(cols2, season_stat_items[4:]):
-                        col.metric(label, val)
+                    for col, (label, val, rank) in zip(cols2, season_stat_items[4:]):
+                        col.metric(label, val, delta=_rank_str(rank), delta_color="off")
                 with st.container(key="ss_totals_mobile"):
-                    strip = "".join(
-                        f'<div class="ss-strip-item"><span class="ss-strip-label">{label}</span>'
-                        f'<span class="ss-strip-value">{val}</span></div>'
-                        for label, val in season_stat_items
-                    )
+                    def _ss_item(label, val, rank):
+                        # Short "#N" chip on the narrow mobile strip (the "of N" that the
+                        # desktop delta shows would wrap the 2-column row).
+                        chip = f'<span class="ss-strip-rank">#{rank}</span>' if rank else ""
+                        return (f'<div class="ss-strip-item"><span class="ss-strip-label">{label}</span>'
+                                f'<span class="ss-strip-value">{val}{chip}</span></div>')
+                    strip = "".join(_ss_item(l, v, r) for l, v, r in season_stat_items)
                     st.markdown(f'<div class="ss-strip">{strip}</div>', unsafe_allow_html=True)
 
                 # Player Stats Table - TOTALS
@@ -2301,37 +3485,39 @@ def main():
                     # Top contributors summary - use total data for leaders
                     st.markdown('<h3><i class="bi bi-award-fill" style="color: var(--clay);"></i> Top Contributors</h3>', unsafe_allow_html=True)
                     
-                    # Find leaders in each category from raw stats
+                    # Find leaders in each category from raw stats, laid out two-per-row in the
+                    # order Points/FGM, Rebounds/Assists, Steals/Blocks, 3PM/DD (a responsive
+                    # grid, not st.columns - Streamlit columns stack to one-per-row on phones).
                     if player_season_stats:
-                        # Get leaders from raw stats
-                        pts_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["PTS"])
-                        reb_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["REB"])
-                        ast_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["AST"])
-                        stl_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["STL"])
-                        blk_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["BLK"])
-                        tpm_leader_name = max(player_season_stats.keys(), key=lambda x: player_season_stats[x]["3PM"])
-                        
-                        pts_val = int(player_season_stats[pts_leader_name]["PTS"])
-                        pts_pct = (pts_val / season_totals["PTS"] * 100) if season_totals["PTS"] > 0 else 0
-                        reb_val = int(player_season_stats[reb_leader_name]["REB"])
-                        reb_pct = (reb_val / season_totals["REB"] * 100) if season_totals["REB"] > 0 else 0
-                        ast_val = int(player_season_stats[ast_leader_name]["AST"])
-                        ast_pct = (ast_val / season_totals["AST"] * 100) if season_totals["AST"] > 0 else 0
-                        stl_val = int(player_season_stats[stl_leader_name]["STL"])
-                        blk_val = int(player_season_stats[blk_leader_name]["BLK"])
-                        tpm_val = int(player_season_stats[tpm_leader_name]["3PM"])
-                        tpm_pct = (tpm_val / season_totals["3PM"] * 100) if season_totals["3PM"] > 0 else 0
+                        def _leader(stat):
+                            nm = max(player_season_stats.keys(),
+                                     key=lambda x: player_season_stats[x].get(stat, 0))
+                            return nm, int(player_season_stats[nm].get(stat, 0))
 
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.markdown(_leader_card("Points Leader", pts_leader_name, f"{pts_val:,} pts ({pts_pct:.1f}%)"), unsafe_allow_html=True)
-                            st.markdown(_leader_card("Steals Leader", stl_leader_name, f"{stl_val:,} stl"), unsafe_allow_html=True)
-                        with col2:
-                            st.markdown(_leader_card("Rebounds Leader", reb_leader_name, f"{reb_val:,} reb ({reb_pct:.1f}%)"), unsafe_allow_html=True)
-                            st.markdown(_leader_card("Blocks Leader", blk_leader_name, f"{blk_val:,} blk"), unsafe_allow_html=True)
-                        with col3:
-                            st.markdown(_leader_card("Assists Leader", ast_leader_name, f"{ast_val:,} ast ({ast_pct:.1f}%)"), unsafe_allow_html=True)
-                            st.markdown(_leader_card("3PM Leader", tpm_leader_name, f"{tpm_val:,} 3pm ({tpm_pct:.1f}%)"), unsafe_allow_html=True)
+                        def _share(val, denom):
+                            return f" ({val / denom * 100:.1f}%)" if denom else ""
+
+                        pts_nm, pts_v = _leader("PTS")
+                        fgm_nm, fgm_v = _leader("FGM")
+                        reb_nm, reb_v = _leader("REB")
+                        ast_nm, ast_v = _leader("AST")
+                        stl_nm, stl_v = _leader("STL")
+                        blk_nm, blk_v = _leader("BLK")
+                        tpm_nm, tpm_v = _leader("3PM")
+                        dd_nm, dd_v = _leader("DD")
+
+                        leaders = [
+                            ("Points Leader", pts_nm, f"{pts_v:,} pts{_share(pts_v, season_totals['PTS'])}"),
+                            ("FGM Leader", fgm_nm, f"{fgm_v:,} fgm{_share(fgm_v, season_totals['FGM'])}"),
+                            ("Rebounds Leader", reb_nm, f"{reb_v:,} reb{_share(reb_v, season_totals['REB'])}"),
+                            ("Assists Leader", ast_nm, f"{ast_v:,} ast{_share(ast_v, season_totals['AST'])}"),
+                            ("Steals Leader", stl_nm, f"{stl_v:,} stl{_share(stl_v, season_totals['STL'])}"),
+                            ("Blocks Leader", blk_nm, f"{blk_v:,} blk{_share(blk_v, season_totals['BLK'])}"),
+                            ("3PM Leader", tpm_nm, f"{tpm_v:,} 3pm{_share(tpm_v, season_totals['3PM'])}"),
+                            ("DD Leader", dd_nm, f"{dd_v:,} dd{_share(dd_v, dd_total)}"),
+                        ]
+                        cards = "".join(_leader_card(lbl, nm, det) for lbl, nm, det in leaders)
+                        st.markdown(f'<div class="leader-grid">{cards}</div>', unsafe_allow_html=True)
                 else:
                     st.warning("No player data available. Player-level stats may not be accessible through the ESPN API for your league.")
                     
@@ -2344,42 +3530,38 @@ def main():
             # ==================== TAB 4: LEAGUE STATS ====================
             if active_page == "League Stats":
                 st.markdown('<h2><i class="bi bi-trophy-fill" style="color: var(--cobalt);"></i> League Statistics</h2>', unsafe_allow_html=True)
-                st.markdown('<p style="color: var(--ink-2);">League standings, all-play records (your record if you played everyone every week), and luck factor analysis.</p>', unsafe_allow_html=True)
-                
+
                 your_team_stats = next((t for t in league_stats if t["team_id"] == team_id), None)
-                
+
                 if your_team_stats:
                     luck_color = "var(--good)" if your_team_stats["luck"] > 0 else "var(--bad)" if your_team_stats["luck"] < 0 else "var(--ink-2)"
                     luck_text = "Lucky" if your_team_stats["luck"] > 2 else "Unlucky" if your_team_stats["luck"] < -2 else "Average"
-                    
+
                     st.markdown(f"""
-                    <div style="background: linear-gradient(145deg, var(--surface-2), var(--card)); 
-                                border-radius: 16px; padding: 1.5rem; 
-                                border: 2px solid var(--cobalt); margin-bottom: 1.5rem;">
-                        <h3 style="margin: 0 0 1rem 0; color: var(--cobalt); font-family: ui-monospace, Consolas, monospace;">
-                            <i class="bi bi-person-circle"></i> {your_team_stats["team_name"]} - #{your_team_stats["standing"]}
-                        </h3>
-                        <div style="display: flex; flex-wrap: wrap; gap: 2rem;">
+                    <div style="background: var(--card); border-radius: 10px; padding: 0.8rem 1rem;
+                                border: 1px solid var(--cobalt); margin-bottom: 1rem;">
+                        <div style="color: var(--cobalt); font-family: ui-monospace, Consolas, monospace;
+                                    font-weight: 700; font-size: 0.95rem; margin-bottom: 0.6rem;">
+                            {your_team_stats["team_name"]} &middot; #{your_team_stats["standing"]}
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1.4rem;">
                             <div>
-                                <span style="color: var(--ink-2); font-size: 0.85rem;">ACTUAL RECORD</span><br/>
-                                <span style="color: var(--ink); font-size: 1.8rem; font-family: ui-monospace, Consolas, monospace;">
-                                    {your_team_stats["actual_wins"]}-{your_team_stats["actual_losses"]}-{your_team_stats["actual_ties"]}
-                                </span>
-                                <span style="color: var(--ink-2); font-size: 1rem;"> ({your_team_stats["actual_pct"]:.3f})</span>
+                                <span style="color: var(--ink-2); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;">Actual Record</span><br/>
+                                <span style="color: var(--ink); font-size: 1.15rem; font-family: ui-monospace, Consolas, monospace;">
+                                    {your_team_stats["actual_wins"]}-{your_team_stats["actual_losses"]}-{your_team_stats["actual_ties"]}</span>
+                                <span style="color: var(--ink-2); font-size: 0.8rem;"> ({your_team_stats["actual_pct"]:.3f})</span>
                             </div>
                             <div>
-                                <span style="color: var(--ink-2); font-size: 0.85rem;">ALL-PLAY RECORD</span><br/>
-                                <span style="color: var(--cobalt); font-size: 1.8rem; font-family: ui-monospace, Consolas, monospace;">
-                                    {your_team_stats["all_play_wins"]}-{your_team_stats["all_play_losses"]}-{your_team_stats["all_play_ties"]}
-                                </span>
-                                <span style="color: var(--ink-2); font-size: 1rem;"> ({your_team_stats["all_play_pct"]:.3f})</span>
+                                <span style="color: var(--ink-2); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;">All-Play Record</span><br/>
+                                <span style="color: var(--cobalt); font-size: 1.15rem; font-family: ui-monospace, Consolas, monospace;">
+                                    {your_team_stats["all_play_wins"]}-{your_team_stats["all_play_losses"]}-{your_team_stats["all_play_ties"]}</span>
+                                <span style="color: var(--ink-2); font-size: 0.8rem;"> ({your_team_stats["all_play_pct"]:.3f})</span>
                             </div>
                             <div>
-                                <span style="color: var(--ink-2); font-size: 0.85rem;">LUCK FACTOR</span><br/>
-                                <span style="color: {luck_color}; font-size: 1.8rem; font-family: ui-monospace, Consolas, monospace;">
-                                    {your_team_stats["luck"]:+.1f}%
-                                </span>
-                                <span style="color: {luck_color}; font-size: 1rem;"> ({luck_text})</span>
+                                <span style="color: var(--ink-2); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;">Luck Factor</span><br/>
+                                <span style="color: {luck_color}; font-size: 1.15rem; font-family: ui-monospace, Consolas, monospace;">
+                                    {your_team_stats["luck"]:+.1f}%</span>
+                                <span style="color: {luck_color}; font-size: 0.8rem;"> ({luck_text})</span>
                             </div>
                         </div>
                     </div>
@@ -2740,6 +3922,18 @@ def main():
             st.exception(e)
 
         render_footer()
+
+
+def main():
+    """Entry point. st.navigation resolves the current URL path to a page (running its
+    tiny router function, which just sets st.session_state.active_page - see _route_to
+    above), then _app_body() does all the actual rendering exactly as before, branching on
+    that same active_page. position="hidden" keeps Streamlit's native page picker out of
+    the UI entirely - our own render_top_nav() is still the only visible navigation."""
+    pages = _build_pages()
+    nav = st.navigation(pages, position="hidden")
+    nav.run()
+    _app_body()
 
 
 if __name__ == "__main__":
