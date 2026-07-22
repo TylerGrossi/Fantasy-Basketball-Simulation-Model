@@ -21,6 +21,13 @@ except ImportError:
             "ESPN_SWID, and GEMINI_API_KEY environment variables."
         )
 
+# Pasting long values into a hosting dashboard (Render, etc.) often appends a stray newline
+# or surrounding whitespace. ESPN sends these as HTTP cookie header values, which cannot
+# contain newlines ("Invalid header value"), so strip every credential defensively.
+ESPN_S2 = ESPN_S2.strip()
+ESPN_SWID = ESPN_SWID.strip()
+GEMINI_API_KEY = GEMINI_API_KEY.strip()
+
 # =============================================================================
 # ESPN connection - non-secret identifiers (the auth cookies are in config_secrets.py).
 # The sidebar only asks which team to analyze.
