@@ -229,6 +229,38 @@ CUSTOM_CSS = """
     [data-baseweb="select"] input,
     [data-baseweb="select"] svg { color: var(--ink) !important; fill: var(--ink-2) !important; }
 
+    /* Multiselect selections read as plain text, not filled chips. BaseWeb ships each
+       selection as a solid primary-color "tag" pill, which in a narrow filter box (Position,
+       NBA Team) renders as a blue block that crowds out its own label. Flatten it: no fill,
+       no border, ink text. The per-tag ✕ goes with it — the value is still removable by
+       clicking it off in the menu, or with the select's own clear-all ✕. */
+    .stMultiSelect [data-baseweb="tag"] {
+        background: transparent !important; background-color: transparent !important;
+        border: none !important; box-shadow: none !important;
+        color: var(--ink) !important;
+        height: auto !important; max-width: none !important;
+        margin: 0 !important; padding: 0 !important;
+    }
+    .stMultiSelect [data-baseweb="tag"] > span,
+    .stMultiSelect [data-baseweb="tag"] span[title],
+    .stMultiSelect [data-baseweb="tag"] div {
+        color: var(--ink) !important;
+        font-family: var(--sans) !important; font-size: 0.9rem !important; font-weight: 600 !important;
+        max-width: none !important; padding: 0 !important;
+    }
+    /* Only the FIRST selection is shown. These filter boxes are narrow and sit in a fixed
+       row: listing every selection made the box grow downward a line at a time, shoving the
+       whole filter row (and the results under it) around as you picked. One value keeps the
+       control a stable one-line height; the full selection is still visible in the menu. */
+    .stMultiSelect [data-baseweb="tag"] ~ [data-baseweb="tag"] { display: none !important; }
+    .stMultiSelect [data-baseweb="select"] > div { flex-wrap: nowrap !important; }
+    /* Match the ✕ by "the element wrapping an svg", not by role — BaseWeb also puts
+       role="presentation" on the label wrapper in some versions, and hiding that would
+       take the text with it. */
+    .stMultiSelect [data-baseweb="tag"] svg { display: none !important; }
+    .stMultiSelect [data-baseweb="tag"] span:has(> svg),
+    .stMultiSelect [data-baseweb="tag"] div:has(> svg) { display: none !important; }
+
     /* Widget labels + option text follow the theme (readable in dark mode) */
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] label,
@@ -448,7 +480,6 @@ CUSTOM_CSS = """
     .st-key-navb_week button::before,     .st-key-navb_season button::before,
     .st-key-navb_tools button::before,    .st-key-navb_settings button::before,
     .st-key-navb_home button::before,     .st-key-navp_settings button::before,
-    .st-key-navb_search button::before,   .st-key-navp_search button::before,
     .st-key-navb_assistant button::before, .st-key-navp_assistant button::before {
         content: ""; display: inline-block; flex: none;
         width: 1.05rem; height: 1.05rem;
@@ -456,15 +487,13 @@ CUSTOM_CSS = """
         -webkit-mask: var(--nav-ic) center / contain no-repeat;
                 mask: var(--nav-ic) center / contain no-repeat;
     }
-    .st-key-navp_search button, .st-key-navb_search button { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktc2VhcmNoIiB2aWV3Qm94PSIwIDAgMTYgMTYiPjxwYXRoIGQ9Ik0xMS43NDIgMTAuMzQ0YTYuNSA2LjUgMCAxIDAtMS4zOTcgMS4zOThoLS4wMDFxLjA0NC4wNi4wOTguMTE1bDMuODUgMy44NWExIDEgMCAwIDAgMS40MTUtMS40MTRsLTMuODUtMy44NWExIDEgMCAwIDAtLjExNS0uMXpNMTIgNi41YTUuNSA1LjUgMCAxIDEtMTEgMCA1LjUgNS41IDAgMCAxIDExIDAiLz48L3N2Zz4="); }
     .st-key-navp_assistant button, .st-key-navb_assistant button { --nav-ic: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktcm9ib3QiIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHBhdGggZD0iTTYgMTIuNWEuNS41IDAgMCAxIC41LS41aDNhLjUuNSAwIDAgMSAwIDFoLTNhLjUuNSAwIDAgMS0uNS0uNU0zIDguMDYyQzMgNi43NiA0LjIzNSA1Ljc2NSA1LjUzIDUuODg2YTI2LjYgMjYuNiAwIDAgMCA0Ljk0IDBDMTEuNzY1IDUuNzY1IDEzIDYuNzYgMTMgOC4wNjJ2MS4xNTdhLjkzLjkzIDAgMCAxLS43NjUuOTM1Yy0uODQ1LjE0Ny0yLjM0LjM0Ni00LjIzNS4zNDZzLTMuMzktLjItNC4yMzUtLjM0NkEuOTMuOTMgMCAwIDEgMyA5LjIxOXptNC41NDItLjgyN2EuMjUuMjUgMCAwIDAtLjIxNy4wNjhsLS45Mi45YTI1IDI1IDAgMCAxLTEuODcxLS4xODMuMjUuMjUgMCAwIDAtLjA2OC40OTVjLjU1LjA3NiAxLjIzMi4xNDkgMi4wMi4xOTNhLjI1LjI1IDAgMCAwIC4xODktLjA3MWwuNzU0LS43MzYuODQ3IDEuNzFhLjI1LjI1IDAgMCAwIC40MDQuMDYybC45MzItLjk3YTI1IDI1IDAgMCAwIDEuOTIyLS4xODguMjUuMjUgMCAwIDAtLjA2OC0uNDk1Yy0uNTM4LjA3NC0xLjIwNy4xNDUtMS45OC4xODlhLjI1LjI1IDAgMCAwLS4xNjYuMDc2bC0uNzU0Ljc4NS0uODQyLTEuN2EuMjUuMjUgMCAwIDAtLjE4Mi0uMTM1WiIvPjxwYXRoIGQ9Ik04LjUgMS44NjZhMSAxIDAgMSAwLTEgMFYzaC0yQTQuNSA0LjUgMCAwIDAgMSA3LjVWOGExIDEgMCAwIDAtMSAxdjJhMSAxIDAgMCAwIDEgMXYxYTIgMiAwIDAgMCAyIDJoMTBhMiAyIDAgMCAwIDItMnYtMWExIDEgMCAwIDAgMS0xVjlhMSAxIDAgMCAwLTEtMXYtLjVBNC41IDQuNSAwIDAgMCAxMC41IDNoLTJ6TTE0IDcuNVYxM2ExIDEgMCAwIDEtMSAxSDNhMSAxIDAgMCAxLTEtMVY3LjVBMy41IDMuNSAwIDAgMSA1LjUgNGg1QTMuNSAzLjUgMCAwIDEgMTQgNy41Ii8+PC9zdmc+"); }
-    /* Search / AI = icon only in the desktop header: keep the label for screen readers
+    /* AI = icon only in the desktop header: keep the label for screen readers
        but hide it visually. */
-    .st-key-navp_search button p, .st-key-navp_assistant button p {
+    .st-key-navp_assistant button p {
         position: absolute !important; width: 1px; height: 1px;
         overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
     }
-    .st-key-navp_search button::before,
     .st-key-navp_assistant button::before { font-size: 1.2rem; }
 
     /* -------- AI Assistant chat page: narrow, centered chat column (Claude/Gemini feel) -- */
@@ -663,13 +692,17 @@ CUSTOM_CSS = """
     [class*="st-key-navmenu_"][class*="_active"] [data-testid="stPopover"] button {
         color: var(--ink) !important; box-shadow: inset 0 -2px 0 var(--cobalt) !important;
     }
-    /* dropdown panel = a clean menu of the sub-pages. BaseWeb anchors it at the trigger's
-       top (inside the fixed header); nudge it down so it drops *below* the bar. A soft
-       shadow gives it depth since it floats over content, not just a hairline border. */
+    /* dropdown panel = a clean menu of the sub-pages. BaseWeb anchors it just under the
+       trigger, which sits inside the fixed header; nudge it the rest of the way so it
+       clears the bar's bottom edge by a hair: the anchor lands ~8px down, so this is
+       --nav-h (3.9rem) minus that, give or take a few px of breathing room. Measured, not
+       guessed — too little and the panel covers the nav links it dropped from, too much
+       and it floats detached in the content area. A soft shadow gives it depth since it
+       floats over content, not just a hairline border. */
     [data-testid="stPopoverBody"] {
         background: var(--card) !important; border: 1px solid var(--line) !important;
         border-radius: 12px !important; padding: 0.4rem !important; min-width: 168px !important;
-        margin-top: 3.1rem !important;
+        margin-top: 3.6rem !important;
         box-shadow: 0 10px 28px rgba(20,16,10,0.14), 0 2px 6px rgba(20,16,10,0.06) !important;
     }
     [data-testid="stPopoverBody"] [data-testid="stVerticalBlock"] { gap: 0.15rem !important; }

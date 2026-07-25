@@ -104,20 +104,26 @@ with st.container(key="css_injector"):
 # components.html instead: it's an iframe with allow-same-origin, so its script can reach
 # through `window.parent.document` to edit the real page's <head>. Wrapped in a keyed
 # container so styles.py's nav-gap-collapse rule can zero it out too (see GAP gotcha).
-with st.container(key="touch_icon_injector"):
-    components.html(
-        f"""<script>
-        (function() {{
-            const doc = window.parent.document;
-            doc.querySelectorAll('link[rel~="apple-touch-icon"]').forEach(el => el.remove());
-            const link = doc.createElement('link');
-            link.rel = 'apple-touch-icon';
-            link.href = 'data:image/png;base64,{TOUCH_ICON_PNG_B64}';
-            doc.head.appendChild(link);
-        }})();
-        </script>""",
-        height=0,
-    )
+# Once per session, not once per rerun: the <link> it appends lives in the real page's
+# <head>, which survives every rerun (a browser reload starts a new session and re-injects).
+# Re-mounting the iframe on every navigation cost a frame of layout + a script load for a
+# tag that was already there.
+if not st.session_state.get("_touch_icon_injected"):
+    st.session_state["_touch_icon_injected"] = True
+    with st.container(key="touch_icon_injector"):
+        components.html(
+            f"""<script>
+            (function() {{
+                const doc = window.parent.document;
+                doc.querySelectorAll('link[rel~="apple-touch-icon"]').forEach(el => el.remove());
+                const link = doc.createElement('link');
+                link.rel = 'apple-touch-icon';
+                link.href = 'data:image/png;base64,{TOUCH_ICON_PNG_B64}';
+                doc.head.appendChild(link);
+            }})();
+            </script>""",
+            height=0,
+        )
 
 # ESPN-style periods: regular weeks 1–19, then playoff matchup 1 = periods 20–21, matchup 2 = 22–23.
 REGULAR_SEASON_WEEKS = 19
@@ -355,14 +361,16 @@ def render_sortable_table(df, key, default_col=None, default_desc=True, max_heig
     kwargs = dict(width=table_width, hide_index=True, column_config=cfg, key=f"srt_{key}")
     rows = len(df)
     # Size the grid to show every row with headroom so it never scrolls internally.
-    # Glide rows are 35px (header + rows) plus ~12px chrome; a too-tight height leaves a
-    # few px of vertical overflow, showing BOTH scrollbars. A small buffer clears that —
-    # but a FULL extra row of headroom (the old `(rows+1)*35`) rendered as a visible blank
-    # row at the bottom, so keep the overshoot well under one row's height.
+    # Glide rows are 35px each and the header is another 35, so the exact content height is
+    # (rows + 1) * 35 plus the grid's 2px border: `rows * 35 + 37`. The old `+ 32` landed a
+    # few px UNDER that, which is why a full table still showed a (tiny) vertical scrollbar.
+    # Round up by 1px rather than a whole row — a FULL extra row of headroom renders as a
+    # visible blank row at the bottom.
+    fit_height = rows * 35 + 38
     if 0 < rows <= 25:
-        kwargs["height"] = rows * 35 + 32
+        kwargs["height"] = fit_height
     elif rows > 25:
-        kwargs["height"] = min(rows * 35 + 32, max_height)
+        kwargs["height"] = min(fit_height, max_height)
     if selectable:
         kwargs["on_select"] = "rerun"
         kwargs["selection_mode"] = "single-row"
@@ -1001,6 +1009,8 @@ def render_power_rankings(meta, team_name):
 # =============================================================================
 
 _VALUE_COUNT_CATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM"]
+# Lineup order (backcourt -> frontcourt), used to order position filter menus.
+POSITION_ORDER = ["PG", "SG", "SF", "PF", "C"]
 _AGG_KEYS = ["FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO", "PTS"]
 
 
@@ -1505,13 +1515,22 @@ def render_player_value(meta, team_name):
         with f_name:
             name_filter = st.text_input("Player name", key="pv_name", placeholder="Search...")
         with f_pos:
-            positions = sorted(p for p in df["Position"].dropna().unique().tolist() if p)
+            # Basketball order (PG -> C), not alphabetical - "C, PF, PG, SF, SG" reads as
+            # noise to anyone who thinks in lineup slots. Anything unexpected (a combo slot,
+            # a blank) still shows, appended alphabetically after the five real positions.
+            present = set(p for p in df["Position"].dropna().unique().tolist() if p)
+            positions = ([p for p in POSITION_ORDER if p in present]
+                         + sorted(present - set(POSITION_ORDER)))
             pos_filter = st.multiselect("Position", positions, key="pv_pos", placeholder="Any")
         with f_team:
             teams = sorted(t for t in df["NBA_Team"].dropna().unique().tolist() if t)
             team_filter = st.multiselect("NBA Team", teams, key="pv_team", placeholder="Any")
         with f_owner:
-            owners = sorted(o for o in df["Owner"].dropna().unique().tolist() if o)
+            # Free agents first — it's the one "owner" people filter to constantly, and
+            # alphabetical buried it between team names. The rest stay alphabetical.
+            all_owners = sorted(o for o in df["Owner"].dropna().unique().tolist() if o)
+            owners = ([o for o in all_owners if o == "FA"]
+                      + [o for o in all_owners if o != "FA"])
             owner_filter = st.multiselect("Fantasy Owner", owners, key="pv_owner", placeholder="Any")
         with f_val:
             vm_d = st.selectbox("Value basis", ["Regular", "30D", "15D"], key="pv_valuemode_d")
@@ -2390,7 +2409,8 @@ WEEK_PAGES = ("Matchup", "Scoreboard", "Streamers", "Bench", "Roster")
 # Season Summary is intentionally NOT in any nav section — it's reachable only from the
 # Home page tiles (owner request).
 SEASON_PAGES = ("Season Stats", "League Stats", "Schedule")
-TOOLS_PAGES = ("Player Value", "Compare", "Power Rankings", "Playoff Odds", "Trade Simulator", "Agent")
+TOOLS_PAGES = ("Player Card", "Player Value", "Compare", "Power Rankings", "Playoff Odds",
+               "Trade Simulator", "Agent")
 
 # Section-based navigation. Each section groups related pages. The top bar (desktop)
 # and the fixed bottom icon bar (mobile) show one control per section; a labeled
@@ -2402,15 +2422,15 @@ NAV_SECTIONS = (
     ("week",     "This Week", WEEK_PAGES),
     ("season",   "Season",    SEASON_PAGES),
     ("tools",    "Tools",     TOOLS_PAGES),
-    ("search",   "Search",    ("Player",)),
     ("settings", "Settings",  ("Settings",)),
 )
 
-# Every valid page name (for validating a ?page=... deep link). "Player" is the global
-# player-search / detail page reached from the header search icon. "Agent" (the AI chat
-# page) is a top-level header tab on desktop and lives under Tools on mobile.
+# Every valid page name (for validating a ?page=... deep link). "Player Card" is the global
+# player search / detail page — it used to be its own header search icon, now it's the first
+# entry under Tools. "Agent" (the AI chat page) is a top-level header tab on desktop and
+# lives under Tools on mobile.
 ALL_PAGES = (set(WEEK_PAGES) | set(SEASON_PAGES) | set(TOOLS_PAGES)
-             | {"Home", "Season Summary", "Settings", "Player"})
+             | {"Home", "Season Summary", "Settings"})
 
 
 # =============================================================================
@@ -2505,6 +2525,11 @@ def render_footer():
     script reaches into `window.parent.document` to attach a real listener. It also has
     to scroll `[data-testid=stMain]`, not the window - that's the actual internal
     scroll container Streamlit uses, not the page/document itself.
+
+    The same script also hides the link on pages that don't scroll (a short page with
+    everything already on screen), since "back to top" there does nothing. Whether the
+    page scrolls isn't knowable from Python - it depends on the viewport - so it's a
+    scrollHeight check re-run on resize/scroll and whenever the content resizes.
     """
     with st.container(key="app_footer"):
         st.markdown(
@@ -2517,14 +2542,40 @@ def render_footer():
         components.html(
             """<script>
             (function() {
-                const doc = window.parent.document;
+                const win = window.parent;
+                const doc = win.document;
+                const main = doc.querySelector('[data-testid="stMain"]');
                 doc.querySelectorAll('.app-footer-top').forEach(function(el) {
                     el.onclick = function(e) {
                         e.preventDefault();
-                        const main = doc.querySelector('[data-testid="stMain"]');
-                        (main || window).scrollTo({top: 0, behavior: 'smooth'});
+                        (main || win).scrollTo({top: 0, behavior: 'smooth'});
                     };
                 });
+                function sync() {
+                    // 8px slack: sub-pixel layout rounding can leave a scrollHeight a hair
+                    // over clientHeight on a page that doesn't actually scroll.
+                    const scrolls = main ? (main.scrollHeight - main.clientHeight > 8) : true;
+                    doc.querySelectorAll('.app-footer-top').forEach(function(el) {
+                        el.style.display = scrolls ? '' : 'none';
+                    });
+                }
+                sync();
+                if (main && win.ResizeObserver) {
+                    // Observing the scroll container catches viewport resizes; observing its
+                    // content catches reruns that swap the page under it (the footer script
+                    // re-runs then too, but content can settle after this script does).
+                    const ro = new win.ResizeObserver(sync);
+                    ro.observe(main);
+                    if (main.firstElementChild) ro.observe(main.firstElementChild);
+                }
+                if (main) main.addEventListener('scroll', sync, {passive: true});
+                // One listener per session, not one per rerun.
+                if (!win.__fbbTopSync) {
+                    win.__fbbTopSync = true;
+                    win.addEventListener('resize', function() {
+                        doc.querySelectorAll('.app-footer-top').length && sync();
+                    });
+                }
             })();
             </script>""",
             height=0,
@@ -2680,7 +2731,8 @@ FLAT_NAV = (
     ("link", "Current Matchup", "Scoreboard"),
     ("link", "Schedule", "Schedule"),
     ("menu", "Stats", (("Season", "Season Stats"), ("League", "League Stats"))),
-    ("menu", "Tools", (("Player Value", "Player Value"),
+    ("menu", "Tools", (("Player Card", "Player Card"),
+                       ("Player Value", "Player Value"),
                        ("Compare", "Compare"),
                        ("Power Rankings", "Power Rankings"),
                        ("Playoff Odds", "Playoff Odds"),
@@ -2727,8 +2779,9 @@ def render_top_nav(meta, team_name):
     # -------- Desktop header: brand(Home) | page links + dropdowns | Settings gear ----
     # Centered cluster (no growing spacer) so the nav doesn't stretch across the whole bar.
     with st.container(key="nav_top"):
-        # brand | search icon (left) | nav items (incl. the "Agent" tab) | Settings gear
-        ratios = ([2.2, 0.55]
+        # brand | nav items (incl. the "Agent" tab) | Settings gear. Player search has no
+        # icon of its own up here any more — it's "Player Card", the first item under Tools.
+        ratios = ([2.2]
                   + [round(0.55 + 0.072 * (len(it[1]) + (2 if it[0] == "menu" else 0)), 2)
                      for it in items]
                   + [0.55])  # trailing: Settings gear
@@ -2736,11 +2789,8 @@ def render_top_nav(meta, team_name):
         if cols[0].button("Fantasy Basketball", key="nav_brand", width='stretch',
                           type="primary" if active == "Home" else "secondary"):
             _go_page("Home")
-        if cols[1].button("Search players", key="navp_search", width='stretch',
-                          type="primary" if active == "Player" else "secondary"):
-            _go_page("Player")
         for i, item in enumerate(items):
-            col = cols[i + 2]
+            col = cols[i + 1]
             if item[0] == "link":
                 lab, pg = item[1], item[2]
                 # "Current Matchup" (targets a This Week page) stays highlighted for ANY
@@ -2877,7 +2927,7 @@ def _app_body():
         # sticky "Data via ESPN" footer would otherwise strand it at the very bottom.
         render_assistant(league_meta, team_name)
         return
-    if active_page == "Player":
+    if active_page == "Player Card":
         render_player_search(league_meta, team_name)
         render_footer()
         return
