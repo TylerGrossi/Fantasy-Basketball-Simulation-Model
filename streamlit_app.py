@@ -12,7 +12,6 @@ import random
 import threading
 import functools
 from concurrent.futures import ThreadPoolExecutor
-import plotly.graph_objects as go
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 
@@ -47,6 +46,7 @@ from simulation import (
     simulate_playoff_probabilities,
     current_matchup_period_effective,
     _get_matchup_variance_multiplier,
+    set_box_scores_fetcher,
 )
 from visualizations import (
     create_scoreboard_vertical,
@@ -540,6 +540,47 @@ def get_week_box_scores(league_id, year, espn_s2, swid, week):
     return league.box_scores(matchup_period=week)
 
 
+# How long a LIVE period's box scores may be reused. Long enough that flicking between
+# Scoreboard / Matchup / Roster doesn't refetch on every single tab change, short enough
+# that an in-progress week still feels live. Completed periods never change, so they use
+# get_week_box_scores' full hour instead.
+LIVE_BOX_SCORE_TTL = 90
+
+
+@st.cache_resource(ttl=LIVE_BOX_SCORE_TTL, show_spinner=False)
+def _get_live_box_scores(league_id, year, espn_s2, swid, period):
+    """The current period's box scores - same fetch as get_week_box_scores, short TTL."""
+    league = get_league_cached(league_id, year, espn_s2, swid)
+    return league.box_scores(matchup_period=period)
+
+
+def get_box_scores_cached(period):
+    """
+    One period's box scores, cached, with the TTL chosen by whether that period is still
+    being played: ~90s while live, an hour once it's final.
+
+    This is THE entry point for box scores. `league.box_scores()` is a live ESPN round
+    trip measured at ~450ms, and it sat uncached on the hot path - every rerun of every
+    This Week page (Matchup / Scoreboard / Roster / Bench / Streamers) paid it again,
+    which is why those pages never got faster on a second visit while Schedule, which
+    already went through get_week_box_scores, dropped to ~0.03s.
+    """
+    league = get_league_cached(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+    season_over = datetime.now(ZoneInfo("America/New_York")).date() > SEASON_END_DATE
+    try:
+        is_live = (not season_over) and int(period) == current_matchup_period_effective(league)
+    except Exception:
+        is_live = not season_over
+    args = (ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID, period)
+    return _get_live_box_scores(*args) if is_live else get_week_box_scores(*args)
+
+
+# simulation.py fetches box scores in four places (season stats, the playoff bracket, the
+# semifinal-pair lookups) and can't import this cache without a circular import, so hand
+# it over explicitly. See the note above set_box_scores_fetcher there.
+set_box_scores_fetcher(get_box_scores_cached)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_playoff_probabilities(year, sims, league_stats, blend_weight, injury_data):
     """
@@ -1001,7 +1042,7 @@ def render_power_rankings(meta, team_name):
     if weeks and len(weeks) >= 2:
         st.markdown('<h3><i class="bi bi-activity" style="color: var(--cobalt);"></i> Rank Movement</h3>', unsafe_allow_html=True)
         st.caption(f"Weekly power-rank path. **{resolved}** is highlighted.")
-        st.plotly_chart(create_rank_trend_chart(teams, weeks, resolved), width='stretch')
+        st.markdown(create_rank_trend_chart(teams, weeks, resolved), unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -1465,8 +1506,14 @@ def _render_pv_compare(a, b):
     )
 
 
+@st.fragment
 def render_player_value(meta, team_name):
     """
+    A FRAGMENT (see render_settings for the reasoning) - this is the most widget-dense page
+    in the app (three selectboxes, three multiselects, two toggles, a search box), and every
+    one of them used to rerun the entire script just to re-filter a table this function
+    already has in hand. Nothing here navigates, so isolating it is safe.
+
     Every rostered player + top free agents: 9-cat Value/Trend.
 
     Desktop and mobile are deliberately different (a wide sortable grid is unusable on a
@@ -1605,8 +1652,11 @@ def render_player_value(meta, team_name):
         components.html(_PV_GAMELOG_SCRIPT, height=0)
 
 
+@st.fragment
 def render_player_compare(meta, team_name):
     """
+    A FRAGMENT (see render_settings) - swapping either player picker reruns only this page.
+
     Head-to-head of any two players (its own Tools page): two pickers, then a comparison of
     season Value + per-game categories with the better side highlighted, and each player's
     lazy "Last 10 games" log (filled client-side by _PV_GAMELOG_SCRIPT).
@@ -1743,9 +1793,12 @@ def _render_player_detail(r, df, bio):
     )
 
 
+@st.fragment
 def render_player_search(meta, team_name):
     """Global player search: pick any player and see their full profile (its own page,
-    reached from the header search icon)."""
+    reached from the header search icon).
+
+    A FRAGMENT (see render_settings) - picking a different player reruns only this page."""
     st.markdown('<h2><i class="bi bi-search" style="color: var(--cobalt);"></i> Player Search</h2>', unsafe_allow_html=True)
     try:
         pool = get_player_pool(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
@@ -1784,8 +1837,12 @@ def render_player_search(meta, team_name):
         components.html(_PV_GAMELOG_SCRIPT, height=0)
 
 
+@st.fragment
 def render_trade_simulator(meta, team_name):
-    """Buy-low / sell-high trends, then a live give-and-get trade simulator."""
+    """Buy-low / sell-high trends, then a live give-and-get trade simulator.
+
+    A FRAGMENT (see render_settings) - adding or removing a player on either side of the
+    trade reruns only this page, not the whole app."""
     st.markdown('<h2><i class="bi bi-shuffle" style="color: var(--cobalt);"></i> Trade Simulator</h2>', unsafe_allow_html=True)
     resolved = team_name
     try:
@@ -2588,8 +2645,19 @@ def init_settings():
         st.session_state[k] = st.session_state.get(k, v)
 
 
+@st.fragment
 def render_settings(meta):
-    """Settings page - everything that used to live in the sidebar."""
+    """
+    Settings page - everything that used to live in the sidebar.
+
+    A FRAGMENT: dragging the Simulations slider or ticking a checkbox used to rerun the
+    whole script - rebuilding all ~20 nav buttons and both header popovers - for a value
+    that only this page displays. As a fragment, the interaction reruns just this function.
+    Nothing is lost by not rerunning the rest: every control writes to a `cfg_*` key in
+    st.session_state, which persists, and the next real page change is a full run that
+    picks the new values up (see init_settings). Safe to fragment because nothing in here
+    navigates - no _go_page / st.switch_page / st.rerun.
+    """
     st.markdown('<h2><i class="bi bi-gear-fill"></i> Settings</h2>', unsafe_allow_html=True)
     st.caption("Applies to every page. Choices persist while the app is open.")
 
@@ -2973,8 +3041,11 @@ def _app_body():
             blend_weight = 0.7  # used for bracket projection + stat merge below
             # Get matchup info for the selected period
             with st.container(key=_pkey(2)), st.spinner("Loading matchup data..."):
+                # Cached box scores (see get_box_scores_cached): this was the last uncached
+                # ESPN round trip on the This Week hot path, paid on every rerun.
                 your_team_obj, opp_team_obj, matchup, current_week = get_matchup_info(
-                    league, team_id, matchup_period=view_period
+                    league, team_id, matchup_period=view_period,
+                    boxscores=get_box_scores_cached(view_period),
                 )
                 your_team_name = your_team_obj.team_name
                 opp_team_name = opp_team_obj.team_name
@@ -3191,15 +3262,15 @@ def _app_body():
                 
                 with col1:
                     st.markdown('<h3><i class="bi bi-bullseye" style="color: var(--cobalt);"></i> Win Probability</h3>', unsafe_allow_html=True)
-                    st.plotly_chart(create_win_probability_gauge(win_pct), width='stretch')
+                    st.markdown(create_win_probability_gauge(win_pct), unsafe_allow_html=True)
                 
                 with col2:
                     st.markdown('<h3><i class="bi bi-dice-5-fill" style="color: var(--clay);"></i> Score Distribution</h3>', unsafe_allow_html=True)
-                    st.plotly_chart(create_outcome_distribution(outcome_counts, total_sims), width='stretch')
+                    st.markdown(create_outcome_distribution(outcome_counts, total_sims), unsafe_allow_html=True)
                 
                 # Category breakdown
                 st.markdown('<h3><i class="bi bi-clipboard-data-fill" style="color: var(--cobalt);"></i> Category Analysis</h3>', unsafe_allow_html=True)
-                st.plotly_chart(create_category_chart(category_results, your_sim, opp_sim), width='stretch')
+                st.markdown(create_category_chart(category_results, your_sim, opp_sim), unsafe_allow_html=True)
                 
                 # Detailed category table (always open)
                 st.markdown('<h3><i class="bi bi-table" style="color: var(--cobalt);"></i> Detailed Category Projections</h3>', unsafe_allow_html=True)
@@ -3817,13 +3888,13 @@ def _app_body():
                 # Championship probability bar chart
                 st.markdown('<h3><i class="bi bi-trophy-fill" style="color: var(--clay);"></i> Championship Probability</h3>', unsafe_allow_html=True)
                 chart_rows = championship_display_rows if is_championship_table else playoff_results
-                st.plotly_chart(
+                st.markdown(
                     create_championship_chart(
                         chart_rows,
                         your_team_name,
                         finalist_team_ids=cf_ids_int if is_championship_table else None,
                     ),
-                    width='stretch',
+                    unsafe_allow_html=True,
                 )
             
             # ==================== STREAMER ANALYSIS (loads last) ====================

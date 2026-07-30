@@ -465,13 +465,19 @@ def resolve_team_id(league, team_name, fallback_id=None):
     )
 
 
-def get_matchup_info(league, team_id, matchup_period=None):
+def get_matchup_info(league, team_id, matchup_period=None, boxscores=None):
     """
     Matchup and opponent for a fantasy scoring period.
     matchup_period: ESPN matchup week number, or None for league.currentMatchupPeriod.
+    boxscores: optional pre-fetched box scores for that period. `league.box_scores()` is a
+        live ESPN round trip (~450ms measured) and this function is on the hot path for
+        every This Week page, so the app passes in a cached copy - see
+        `get_box_scores_cached` in streamlit_app.py, which decides the TTL based on whether
+        the period is still live. Left optional so this module still works standalone.
     """
     period = matchup_period if matchup_period is not None else league.currentMatchupPeriod
-    boxscores = league.box_scores(matchup_period=period)
+    if boxscores is None:
+        boxscores = league.box_scores(matchup_period=period)
     your_team_obj = next(t for t in league.teams if t.team_id == team_id)
     matchup = next(
         m for m in boxscores

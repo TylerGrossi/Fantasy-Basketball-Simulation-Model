@@ -21,7 +21,7 @@ and correctness over generality.
 | [streamlit_app.py](streamlit_app.py) | UI entry point. `main()`, the section nav (`render_top_nav` + `NAV_SECTIONS`), the per-page `if active_page == …` bodies, the Home landing, Season Summary, and Settings. Orchestrates everything. |
 | [data.py](data.py) | ESPN connection, roster/matchup/box-score fetch, NBA schedule scraping, and **games-left counting** (injury-aware, IR-aware, 10-per-day cap). |
 | [simulation.py](simulation.py) | Simulation engine: per-team category sim, matchup comparison, streamer analysis, bench strategy, league stats, playoff bracket. |
-| [visualizations.py](visualizations.py) | Plotly charts + the scoreboard HTML. All chart colors live here. |
+| [visualizations.py](visualizations.py) | **All charts, as inline SVG / HTML-CSS — no charting library.** Five charts (win-probability gauge, category analysis, score distribution, championship probability, rank trend) plus the scoreboard HTML. Each returns a **string** for `st.markdown(..., unsafe_allow_html=True)`. Colors come from the `var(--*)` custom properties in `styles.py`. |
 | [config.py](config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
 | [styles.py](styles.py) | The "Analyst Sheet" design system as one big CSS string (`CUSTOM_CSS`), including the fixed-header / centered-column layout shell. Light-only (no `DARK_CSS`). |
 | [assets/icon_font.py](assets/icon_font.py) | **Self-hosted Bootstrap Icons** — the font subset to the ~37 glyphs the app uses, base64-embedded as `@font-face` (`ICON_FONT_CSS`, imported as `from assets.icon_font import …`). Injected separately so it can never render-block the layout. Regenerate with [assets/build_icon_font.py](assets/build_icon_font.py) if the icon set changes. |
@@ -88,10 +88,13 @@ Type: system grotesk (`system-ui, 'Segoe UI', Helvetica, Arial`) for text, and
 hairline dividers, no gradients on data, no uppercase shouting, no rainbow icons
 (all `.bi` are forced to one cobalt via CSS), no emoji.
 
-When you change colors, change them in **all three** places that carry the palette:
-`styles.py` (CSS), `.streamlit/config.toml` (Streamlit theme), and
-`visualizations.py` (Plotly). Two-series chart colors (you vs. opponent) were
-validated for colorblind separation — keep that in mind if you re-hue them.
+When you change colors, change them in the **two** places that carry the palette:
+`styles.py` (CSS) and `.streamlit/config.toml` (Streamlit theme). `visualizations.py`
+used to be a third, because Plotly couldn't read CSS variables; now that the charts are
+plain SVG/HTML they use `var(--cobalt)` etc. directly, so they follow `styles.py`
+automatically. (A few literals remain at the top of the file for `create_scoreboard_vertical`
+and opacity blends.) Two-series chart colors (you vs. opponent) were validated for
+colorblind separation — keep that in mind if you re-hue them.
 
 ## Current product state (season is over)
 
@@ -222,9 +225,20 @@ section, `_section_landing` gives the page a section opens to):
   category comparison, moved out of the Matchup page into its own page (owner request — a
   15-column wide table doesn't work well on a phone) and redesigned **vertically**:
   `visualizations.create_scoreboard_vertical` renders a hero row (team names + big overall
-  W-L-T) then one stacked row **per category** (your value · category label · a two-tone
-  cobalt/clay lead bar · opponent value), the pattern ESPN/Yahoo fantasy apps use — no
-  horizontal scrolling needed at any width. The `week_sel` Week/Round picker lives in the
+  W-L-T) then one stacked row **per category** (your value · category label + margin · a
+  lead bar · opponent value), the pattern ESPN/Yahoo fantasy apps use — no
+  horizontal scrolling needed at any width. **The bar shows the MARGIN, not the magnitude
+  split.** It used to be `you / (you + opp)`, which sits near 50/50 for every category no
+  matter what — on a real 10-5 matchup the bars spanned only 38.7–56.5% while the true
+  margins ran +0.9% to −45%, so the only graphic on the page was flat exactly where the data
+  was most varied. Each bar now diverges from a centre line by the relative margin
+  `(you − opp) / mean`, normalised to the biggest margin in that matchup (floored at 10%, so
+  an all-close week doesn't render hairline leads as dramatic full-width bars), with the
+  signed margin printed beside the category — one decimal below 10%, none above, because on a
+  category won by 0.9% the precision is the whole point. TO's sign is flipped so *fewer*
+  turnovers reads as a lead. Ratio categories print as `48.7%`, not `0.4868`. Category order
+  deliberately stays ESPN's (owner choice over sorting by margin), so a row is where you
+  expect it. The `week_sel` Week/Round picker lives in the
   matchup header row (the "Playoffs - Round N" dropdown between the two team names), kept
   alive across page switches by a self-assign so its state survives runs where that row isn't
   rendered.
@@ -255,6 +269,55 @@ object is cached with `@st.cache_resource` (`get_league_cached`); injury data an
 league stats are `@st.cache_data`. Page bodies are `if active_page == "...":` blocks
 (converted from the old `with tab_x:`). Known rough edge: the shared matchup compute
 still runs for non-summary season pages, so a brief progress bar can flash on them.
+
+### Performance (measured — don't undo these)
+
+The app is deliberately built to avoid three costs that were each measured in a real
+browser / against live ESPN. See **Gotchas** for the traps involved.
+
+1. **No charting library.** Streamlit's Plotly integration downloaded a **4.87 MB** JS
+   chunk the first time any chart page opened and spent **~1s of main-thread script**
+   re-rendering figures on every visit. Replacing all five charts with inline SVG /
+   HTML-CSS took the app from **10.7 MB → 5.7 MB** of JS, first Matchup open from
+   **2.28s → 1.33s**, and its browser script time from **996ms → 200ms**. Don't reintroduce
+   `plotly`, `altair`, or `st.line_chart`/`st.bar_chart` (those pull ~1 MB of Vega) — add a
+   function to `visualizations.py` instead.
+2. **Closed-form Monte Carlo.** See the block comment above `_draw_player_totals` in
+   [simulation.py](simulation.py). A sum of independent normals is normal, so a player's
+   n-game total is one draw, not n. `simulate_team` is **~40x** faster (385ms → 10ms at
+   10k sims) with a statistically identical distribution. `analyze_streamers` also
+   simulates each roster player **once** and subtracts the dropped player's contribution,
+   instead of re-simulating the whole roster per (streamer × drop) pair — that was
+   `O(streamers × droppables × players)` draws, ~200M random values for a normal league.
+3. **Fragments + 0ms press feedback.** The five widget-dense, navigation-free pages
+   (`render_settings`, `render_player_value`, `render_player_compare`,
+   `render_player_search`, `render_trade_simulator`) are `@st.fragment`, so a widget change
+   reruns only that page rather than the whole script + all ~20 nav buttons. And the
+   press-state block at the very **end** of `styles.py` makes every nav control acknowledge
+   a tap in the same frame, instead of waiting for the server to send back
+   `type="primary"`.
+
+4. **All box-score fetches are cached.** `league.box_scores(matchup_period=N)` is a live
+   ESPN round trip measured at **~450ms**, and it used to sit uncached on the This Week hot
+   path — every rerun of Matchup / Scoreboard / Roster / Bench / Streamers paid it again,
+   which is why those pages never got faster on a second visit while Schedule (already
+   cached) dropped to ~0.03s. **`get_box_scores_cached(period)` in
+   [streamlit_app.py](streamlit_app.py) is now the single entry point**; it picks the TTL
+   from whether that period is still being played — `LIVE_BOX_SCORE_TTL` (90s) while live,
+   3600s once final, since a completed week never changes. `get_matchup_info` takes the
+   result via its `boxscores=` argument. Tab switches went **1.05s → 0.71s** (Current
+   Matchup), **1.33s → 0.80s** (Matchup), **1.36s → 0.84s** (Roster), verified identical
+   output across every period. `simulation.py` reaches the same cache through
+   `set_box_scores_fetcher` (a module-level hook — importing the cache directly would be a
+   circular import), falling back to a direct fetch if none is installed.
+
+   Don't call `league.box_scores(...)` directly in new code — use `get_box_scores_cached`,
+   or `_box_scores(league, period)` from inside `simulation.py`.
+
+Also worth knowing: [render.yaml](render.yaml) deploys to Render's **free** plan — 0.1 CPU,
+512 MB, spins down after ~15 min idle with a 30–60s cold start. Every CPU-bound number
+above is roughly an order of magnitude worse there than measured locally, and a warmed
+session already sits around 330 MB of the 512 MB cap.
 
 ## Domain notes
 
@@ -363,6 +426,58 @@ still runs for non-summary season pages, so a brief progress bar can flash on th
   invalid, silently computing to `0` — no console warning. If you introduce a new
   `--custom-property`, declare it at `:root` unless you're certain every place that reads it
   is a genuine descendant of where you're declaring it.
+- **Cached box scores hold references to the cached `League`'s Team objects.**
+  `matchup.home_team` / `away_team` *are* the objects from `league.teams` (espn-api swaps
+  the ids for the real Team objects), which is why `opp_team_obj.roster` works. Both caches
+  are `@st.cache_resource`, so if `get_league_cached` were rebuilt while a box-score entry
+  was still alive, the opponent object could come from the previous `League` instance. In
+  practice that just means an opponent roster as stale as the cache window already allows,
+  and it predates the current caching, but keep the TTLs aligned (or shorter on the box
+  scores) if you change them — don't give box scores a *longer* TTL than the League.
+- **Numpy is SLOWER than stdlib for scalar draws.** Vectorizing looks like it should always
+  win, and for arrays it does — but `_simulate_matchup_winner` is a *scalar* path called tens
+  of thousands of times by the playoff bracket, and rewriting its 14-category loop as one
+  vectorized array draw measured **slower** (41µs vs 33µs per call): setting up arrays of 14
+  elements costs more than the 28 scalar draws it saved. What actually worked was keeping the
+  loop and swapping `np.random.normal` for stdlib **`random.gauss`** (plus hoisting the stat
+  list / variance factors to module scope as plain Python floats): **33µs → 12µs**. At high
+  call counts on tiny data, per-call overhead is the whole story — measure, don't assume.
+- **Restart the server after editing an imported module.** Streamlit hot-reloads the main
+  script, but a changed function in `visualizations.py` / `simulation.py` can keep serving the
+  **old** code from `sys.modules`. A CSS/markup fix that "didn't take effect" is usually this,
+  not a broken selector — kill the process and re-run before debugging anything else.
+- **Selenium `driver.get()` starts a NEW Streamlit session**, which resets `st.session_state`
+  by design. Any test of state persistence (settings surviving a page switch, the `week_sel`
+  self-assign) **must** navigate with client-side nav clicks instead, or it will report a
+  false failure. This produced a bogus "settings don't persist" result while testing the
+  `render_settings` fragment; via nav clicks it persists correctly.
+- **Charts have degenerate cases now that the season is over.** A completed week has exactly
+  one possible outcome, so the score-distribution chart gets a single 100% bar — without a
+  `max-width` on the column it stretched into one giant block across the whole container.
+  Every chart in `visualizations.py` also needs an explicit empty-input branch (they all
+  return a short "no data" `<p>`). Check both when adding one.
+- **`:has(.st-key-x)` + `@st.fragment` = the whole page gets absolutely positioned.** The
+  gap-collapse rule in `styles.py` absolutely-positions any direct child of the main column
+  that *contains* a given key. `render_player_search` renders a `pv_gl_injector` container,
+  which was in that list — so the moment that page became a fragment, **everything** moved
+  under one wrapper, that wrapper matched `:has(.st-key-pv_gl_injector)` (descendant!), and
+  the entire Player Card page became `position:absolute; height:0`, rendering shifted right
+  and out of flow. Fix: the rule now uses the **child combinator**, `:has(> .st-key-x)`,
+  which only ever matches the keyed container's own wrapper. Keep it that way — a
+  descendant `:has()` in a rule that repositions its subject is a trap waiting for the next
+  re-nesting.
+- **`html, body { overflow-x: hidden }` hides inner overflow from an overflow check.**
+  `document.documentElement.scrollWidth - window.innerWidth` reported **0** on every page
+  while blocks inside were 1878px wide inside a 1180px column — the clip on html/body
+  swallowed it. To actually catch this, compare each element's `getBoundingClientRect()`
+  against the **block container's** width, and test at a **wide viewport** (~1900px); at
+  1440px the bug was invisible because the overflowing wrapper still fit on screen.
+- **Only fragment a page that doesn't navigate.** `st.switch_page` / `_go_page` from inside an
+  `@st.fragment` doesn't work, which is why `render_schedule` (it calls `_go_page("Matchup")`)
+  and `render_assistant` (`st.rerun()`) are deliberately **not** fragments, and
+  `render_home`'s tiles aren't either. Grep the function for `_go_page|switch_page|st.rerun`
+  before decorating it. Pages with no widgets at all (Season Summary, Power Rankings) gain
+  nothing from a fragment — they'd never rerun independently.
 - **Streamlit's own default padding stacks with yours:** `[data-testid="stSidebarContent"]`
   ships a default `20px` horizontal padding that has nothing to do with any rule in
   `styles.py` — it stacked with our own `stSidebarUserContent` padding and offset the This

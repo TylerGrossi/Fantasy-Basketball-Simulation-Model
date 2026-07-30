@@ -3,7 +3,8 @@
 A web-based **Monte Carlo simulation** tool for one ESPN Fantasy Basketball league
 (head-to-head, category scoring). It pulls live data from ESPN, projects the rest of
 a matchup week, and reports win probability, category breakdowns, streamer pickups,
-bench decisions, standings, and playoff odds. Built with Streamlit + Plotly.
+bench decisions, standings, and playoff odds. Built with Streamlit; charts are hand-rolled
+inline SVG, so the app ships no charting library.
 
 > Working on this repo as an AI agent? Start with **[AGENTS.md](AGENTS.md)**.
 
@@ -96,7 +97,7 @@ for the tokens.
 streamlit_app.py    UI, top nav, page bodies, season summary, week rail
 data.py             ESPN + NBA schedule + games-left counting
 simulation.py       simulation engine, streamers, bench, playoffs
-visualizations.py   Plotly charts + scoreboard HTML
+visualizations.py   charts (inline SVG / HTML) + scoreboard HTML
 config.py           constants + ESPN credentials
 styles.py           Analyst Sheet CSS
 .streamlit/         theme (config.toml) + secrets template

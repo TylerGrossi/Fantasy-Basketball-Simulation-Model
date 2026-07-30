@@ -416,16 +416,26 @@ CUSTOM_CSS = """
        flex item, so it's collapsed here too — otherwise it pushes everything below it down by
        a full gap and puts the This Week rail (fixed, top:0) out of alignment with the in-flow
        Season/Tools sub-row. */
-    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_top),
-    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_bottom),
-    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-touch_icon_injector),
-    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-css_injector),
-    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-pv_gl_injector),
-    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has([class*="st-key-mp_hide_"]) {
+    /* NOTE THE CHILD COMBINATOR (`> .st-key-x`), and don't relax it back to a descendant
+       match. These rules absolutely-position whatever wrapper they hit, so they must only
+       ever hit the keyed container's OWN wrapper. With a descendant `:has(.st-key-x)` the
+       selector also matches any ANCESTOR wrapper containing that key — which is exactly
+       what happened when `render_player_search` became an `@st.fragment`: the fragment put
+       the whole page under one wrapper, that wrapper contained `pv_gl_injector` somewhere
+       deep inside, so the entire Player Card page got `position:absolute; height:0` and
+       rendered shifted right and out of flow. `st.container(key=X)` always renders as
+       `stLayoutWrapper > stVerticalBlock.st-key-X`, so the child combinator is the precise
+       match and is immune to any future re-nesting. */
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(> .st-key-nav_top),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(> .st-key-nav_bottom),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(> .st-key-touch_icon_injector),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(> .st-key-css_injector),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(> .st-key-pv_gl_injector),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(> [class*="st-key-mp_hide_"]) {
         position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
     }
     @media (min-width: 768px) {
-        [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(.st-key-nav_sub) {
+        [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > *:has(> .st-key-nav_sub) {
             position: absolute !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
         }
     }
@@ -1512,7 +1522,6 @@ CUSTOM_CSS = """
         }
         .dataframe { font-size: 0.75rem !important; }
         .dataframe th, .dataframe td { padding: 4px 6px !important; }
-        .js-plotly-plot { max-width: 100% !important; }
         /* Scoreboard header (team names + W-L-T score): the "sb-name" spans already
            truncate with an ellipsis instead of wrapping (min-width:0 on their flex
            parent + white-space:nowrap in visualizations.py), but still shrink the type
@@ -1539,5 +1548,74 @@ CUSTOM_CSS = """
         .st-key-matchup_header [data-baseweb="select"] input,
         .st-key-matchup_header [data-baseweb="select"] > div > div { font-size: 0.78rem !important; }
     }
+
+    /* ================= Nav press feedback (0ms, no server round trip) =================
+       Every nav control is an st.button, so "which tab is active" only updates AFTER the
+       script reruns on the server and the button comes back as type="primary". On a slow
+       page that left the nav showing the OLD tab as active for the whole wait, with no
+       acknowledgement at all that the click had registered - the app felt unresponsive
+       even when it was working fine.
+
+       Two states fix that without involving the server:
+         :active  - while the pointer is down. Instant (literally the same frame).
+         :focus   - a clicked button KEEPS focus for the whole rerun, so this carries the
+                    "you picked me, I'm loading" state right up until the real active
+                    state lands. Once it does, the target button is the focused one, so
+                    the pending underline and the real one coincide and nothing jumps.
+
+       Deliberately `:focus`, not `:focus-visible` - keyboard focus is already handled by
+       the separate `:focus-visible` outline rules above, which stay as they are.
+
+       This block lives at the END of the stylesheet on purpose: the rail / bottom-bar /
+       sub-row rules and their mobile overrides all target these same selectors with
+       !important, and at equal specificity source order decides (see the cascade-order
+       note in the This Week rail section). Being last is what makes the press state apply
+       at every width instead of being silently overridden on phones. */
+    .st-key-nav_top .stButton > button:active,
+    [class*="st-key-navmenu_"] [data-testid="stPopover"] button:active {
+        color: var(--ink) !important;
+        box-shadow: inset 0 -2px 0 var(--cobalt) !important;
+    }
+    .st-key-nav_top .stButton > button:focus,
+    [class*="st-key-navmenu_"] [data-testid="stPopover"] button:focus {
+        color: var(--ink) !important;
+        box-shadow: inset 0 -2px 0 var(--cobalt) !important;
+    }
+    /* The brand is a logo, not a tab - it never draws the underline (matches the
+       existing carve-out for its active state). */
+    .st-key-nav_top .st-key-nav_brand button:active,
+    .st-key-nav_top .st-key-nav_brand button:focus { box-shadow: none !important; }
+    /* The gear has no text label, so tint the icon itself instead of underlining. */
+    .st-key-navp_settings button:active::before,
+    .st-key-navp_settings button:focus::before { background-color: var(--cobalt) !important; }
+
+    /* Each press state below is an exact copy of that control's OWN active (primary)
+       styling, so when the rerun lands and the button really becomes primary, nothing
+       moves or re-colours - the pending state simply becomes the real one.
+       This Week rail: tinted fill + a cobalt bar down the left edge. */
+    [data-testid="stSidebar"] .stButton > button:active,
+    [data-testid="stSidebar"] .stButton > button:focus {
+        color: var(--ink) !important;
+        background: var(--cobalt-soft) !important;
+        box-shadow: inset 3px 0 0 var(--cobalt) !important;
+    }
+    /* Mobile Season/Tools sub-row: underline only, no fill. */
+    .st-key-nav_sub .stButton > button:active,
+    .st-key-nav_sub .stButton > button:focus {
+        color: var(--ink) !important;
+        background: transparent !important;
+        box-shadow: inset 0 -2px 0 var(--cobalt) !important;
+    }
+    /* Mobile bottom icon bar: icon-over-label, so press = cobalt icon + label. */
+    .st-key-nav_bottom .stButton > button:active,
+    .st-key-nav_bottom .stButton > button:focus { color: var(--cobalt) !important; }
+    .st-key-nav_bottom .stButton > button:active::before,
+    .st-key-nav_bottom .stButton > button:focus::before {
+        background-color: var(--cobalt) !important;
+    }
+    /* Kill the grey flash iOS/Android paint over a tapped control - the states above are
+       the intended feedback, and the double effect looks like a rendering glitch. */
+    .st-key-nav_top button, .st-key-nav_bottom button, .st-key-nav_sub button,
+    [data-testid="stSidebar"] button { -webkit-tap-highlight-color: transparent; }
 </style>
 """
