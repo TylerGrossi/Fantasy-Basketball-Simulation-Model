@@ -275,6 +275,20 @@ still runs for non-summary season pages, so a brief progress bar can flash on th
 The app is deliberately built to avoid three costs that were each measured in a real
 browser / against live ESPN. See **Gotchas** for the traps involved.
 
+0. **All HTTP goes through one pooled session — `data.HTTP`, never `requests.get`.**
+   This was the single biggest win in the app and the actual reason the deployed version
+   crawled while localhost felt instant. `requests.get(...)` builds a fresh Session →
+   HTTPAdapter → PoolManager → **SSLContext** every call, and creating that SSLContext
+   reloads the CA bundle from disk at **~0.25s of CPU each**. `espn-api` calls bare
+   `requests.get()` for every endpoint, so the app paid it dozens of times per page.
+   Profiling the playoff warm-up: **13.1s of its 22.8s of CPU was inside
+   `load_verify_locations`**, versus 0.5s for the Monte Carlo it was supposed to be doing.
+   `data.py` now owns one pooled `requests.Session` and swaps a `_PooledRequests` shim
+   into `espn_api.requests.espn_requests.requests` so espn-api uses it too (a shim, not a
+   plain Session, so any other `requests` attribute it reaches for still resolves).
+   Measured: 12 sequential ESPN calls **7.45s → 0.48s**; whole warm-up CPU **22.8s →
+   3.2s**; `connect_to_espn` **2.0s → 0.93s**. On 0.1 CPU that is ~228s of saturated CPU
+   down to ~32s. **Never reintroduce a bare `requests.get`.**
 1. **No charting library.** Streamlit's Plotly integration downloaded a **4.87 MB** JS
    chunk the first time any chart page opened and spent **~1s of main-thread script**
    re-rendering figures on every visit. Replacing all five charts with inline SVG /
@@ -314,10 +328,34 @@ browser / against live ESPN. See **Gotchas** for the traps involved.
    Don't call `league.box_scores(...)` directly in new code — use `get_box_scores_cached`,
    or `_box_scores(league, period)` from inside `simulation.py`.
 
+5. **Background warming is paced, not bursty.** `warm_caches` pre-fetches on a daemon
+   thread, which competes with the user's clicks for the *same* CPU budget. On 0.1 CPU a
+   back-to-back burst of heavy work makes every tab switch during it feel broken.
+   `WARM_STEP_PAUSE` yields between steps, each step is individually guarded so one
+   failure can't skip the rest, and the expensive playoff bracket runs last. The pause is
+   a genuine trade (it delays warm completion, so an early click on an unreached page pays
+   full cost) and its benefit **cannot be reproduced on a multi-core dev box** — tune it
+   against the deployed app, not locally.
+
 Also worth knowing: [render.yaml](render.yaml) deploys to Render's **free** plan — 0.1 CPU,
 512 MB, spins down after ~15 min idle with a 30–60s cold start. Every CPU-bound number
 above is roughly an order of magnitude worse there than measured locally, and a warmed
-session already sits around 330 MB of the 512 MB cap.
+session already sits around 300 MB of the 512 MB cap.
+
+**When the deployed app feels slow but localhost doesn't, suspect CPU contention, not the
+code path you're looking at.** Localhost has spare cores that absorb background work
+invisibly; 0.1 CPU does not. The two things that actually mattered here were (a) wasted
+CPU per network call, and (b) a background thread monopolising the budget — neither of
+which shows up in a local wall-clock measurement. Profile for **CPU time**
+(`psutil.Process().cpu_times()`, `cProfile` sorted by `tottime`), not wall time.
+
+One known remaining cost: the first script run of a process spends **~370ms** building the
+102 KB `CUSTOM_CSS` markdown element (subsequent reruns are ~2ms — Streamlit's ForwardMsg
+cache dedupes it). That's ~3.7s of a cold start on 0.1 CPU. It could be moved to
+`enableStaticServing` + a `<link>`, but that trades a one-time cost for a flash of
+unstyled content on every fresh load — and per the header notes above, a stylesheet that
+isn't there at first paint is exactly how the layout shell broke before. Not obviously
+worth it; measure before changing.
 
 ## Domain notes
 

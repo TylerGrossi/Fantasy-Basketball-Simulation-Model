@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import random
 import threading
+import time
 import functools
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date
@@ -2407,12 +2408,29 @@ def render_assistant(meta, team_name):
         st.rerun()
 
 
+# Pause between cache-warming steps. The warm thread competes with the user's clicks for
+# the SAME CPU budget, and on a small host (Render free is 0.1 CPU) that budget is a
+# fraction of one core - a burst of back-to-back heavy work makes every tab switch during
+# it feel broken. Yielding between steps spreads the same total work out so foreground
+# reruns get scheduled promptly; nothing being warmed is urgent, it's all speculative.
+#
+# Kept SMALL deliberately. The pause is a trade: it delays warm completion, so a click on
+# a page that hasn't been reached yet pays the full cost itself. That downside is real and
+# measurable; the upside only exists where CPU is genuinely the bottleneck, which cannot
+# be reproduced on a multi-core dev box. If the deployed app still stalls during the first
+# ~30s of a session, raise this; if pages feel cold for too long after load, lower it.
+WARM_STEP_PAUSE = 0.25
+
+
 def warm_caches(sim_count, blend_weight, team_name):
     """
     Kick off the heavy computations in a background thread on app load, so League
     Stats / Season Summary / Playoff Odds are ready (or nearly) by the time they're
     clicked. Streamlit's cache lock means a click that lands mid-warm waits for the
     in-flight result instead of recomputing.
+
+    Ordered cheapest-first so the common pages are ready soonest, with the expensive
+    playoff bracket last, and paced by WARM_STEP_PAUSE so it never monopolises the CPU.
     """
     if st.session_state.get("_caches_warmed"):
         return
@@ -2420,22 +2438,31 @@ def warm_caches(sim_count, blend_weight, team_name):
     lid, yr, s2, swid = ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID
 
     def _warm():
+        def _step(fn):
+            """Run one warm step; never let a failure stop the rest, and always yield."""
+            try:
+                return fn()
+            except Exception:
+                return None
+            finally:
+                time.sleep(WARM_STEP_PAUSE)
+
         try:
-            league = get_league_cached(lid, yr, s2, swid)
-            try:
-                tid, _ = resolve_team_id(league, team_name, DEFAULT_TEAM_ID)
-                get_team_season_stats(lid, yr, s2, swid, tid)
-                get_team_schedule_data(lid, yr, s2, swid, tid)
-            except Exception:
-                pass
-            try:
-                get_power_rankings(lid, yr, s2, swid)
-                get_player_pool(lid, yr, s2, swid)
-            except Exception:
-                pass
-            injury = get_injury_cached()
-            stats = get_season_stats(lid, yr, s2, swid)
-            get_playoff_probabilities(yr, int(sim_count), stats, blend_weight, injury)
+            league = _step(lambda: get_league_cached(lid, yr, s2, swid))
+            if league is not None:
+                tid_pair = _step(lambda: resolve_team_id(league, team_name, DEFAULT_TEAM_ID))
+                if tid_pair:
+                    tid = tid_pair[0]
+                    _step(lambda: get_team_schedule_data(lid, yr, s2, swid, tid))
+                    _step(lambda: get_team_season_stats(lid, yr, s2, swid, tid))
+            _step(lambda: get_injury_cached())
+            _step(lambda: get_power_rankings(lid, yr, s2, swid))
+            _step(lambda: get_player_pool(lid, yr, s2, swid))
+            stats = _step(lambda: get_season_stats(lid, yr, s2, swid))
+            if stats is not None:
+                injury = get_injury_cached()
+                _step(lambda: get_playoff_probabilities(
+                    yr, int(sim_count), stats, blend_weight, injury))
         except Exception:
             pass
 

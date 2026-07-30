@@ -24,6 +24,72 @@ from config import (
 ACTIVE_STATUSES = {"ACTIVE", "", "DTD", "DAY_TO_DAY"}
 
 
+# =============================================================================
+# ONE pooled HTTPS session for every outbound call. Use HTTP.get(), never
+# requests.get().
+#
+# `requests.get(...)` builds a brand-new Session -> HTTPAdapter -> urllib3 PoolManager
+# -> SSLContext on EVERY call, and constructing that SSLContext reloads the CA bundle
+# from disk. Measured at ~0.25s of pure CPU per call. espn-api calls bare
+# `requests.get()` for every endpoint, so the app paid it dozens of times per page:
+# profiling the playoff warm-up showed **13.1s of its 22.8s of CPU inside
+# load_verify_locations**, against 0.5s for the actual Monte Carlo it was supposed to
+# be doing. On a 0.1-CPU host that is the difference between a snappy app and an
+# unusable one - it was the real reason page loads crawled on Render but felt instant
+# locally, where there are spare cores to absorb it.
+#
+# Reusing one Session keeps both the SSL context and the TCP connections alive.
+# Measured: 12 sequential ESPN calls 7.45s -> 0.48s, with zero CA-bundle loads.
+#
+# Thread safety: the app fetches from background threads (cache warming, the schedule
+# prefetch pool). urllib3's connection pool is thread-safe and nothing here mutates
+# session state (no shared headers/cookies are set on HTTP itself - espn-api passes its
+# cookies per request), so concurrent GETs are fine.
+# =============================================================================
+HTTP = requests.Session()
+_HTTP_ADAPTER = requests.adapters.HTTPAdapter(
+    pool_connections=8, pool_maxsize=16, max_retries=1
+)
+HTTP.mount("https://", _HTTP_ADAPTER)
+HTTP.mount("http://", _HTTP_ADAPTER)
+
+
+class _PooledRequests:
+    """
+    Stands in for the `requests` module inside espn-api so its bare `requests.get(...)`
+    calls go through the pooled session above. Every other attribute it reaches for
+    (exceptions, status codes, ...) passes straight through to the real module, so this
+    stays safe if espn-api starts using more of the API.
+
+    Also applies a default timeout: espn-api sets none, which on a hosted box means a
+    hung ESPN request pins a worker forever instead of failing and moving on.
+    """
+
+    def __init__(self, session, real):
+        self._session = session
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def get(self, *args, **kwargs):
+        kwargs.setdefault("timeout", 20)
+        return self._session.get(*args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        kwargs.setdefault("timeout", 20)
+        return self._session.post(*args, **kwargs)
+
+
+try:
+    from espn_api.requests import espn_requests as _espn_requests
+    _espn_requests.requests = _PooledRequests(HTTP, requests)
+except Exception:
+    # espn-api's internals moved - bare requests still works, just slower. Never let
+    # this break the app.
+    pass
+
+
 # -----------------------------------------------------------------------------
 # Helper functions
 # -----------------------------------------------------------------------------
@@ -622,7 +688,7 @@ def get_team_schedule_bundle(team_abbrev):
     slug = NBA_TEAM_MAP[team_abbrev]
     url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{slug}/schedule"
     try:
-        r = requests.get(url, timeout=10)
+        r = HTTP.get(url, timeout=10)
         if r.status_code != 200:
             return [], {}
         eastern = ZoneInfo("America/New_York")
@@ -833,7 +899,7 @@ def get_player_bio(player_id):
     if not player_id:
         return {}
     try:
-        r = requests.get(
+        r = HTTP.get(
             f"https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{int(player_id)}",
             timeout=8,
         )
@@ -868,7 +934,7 @@ def get_espn_injury_data():
     """Fetch NBA injuries from ESPN public API. Returns dict: player_name -> {description, return_date}."""
     url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
     try:
-        r = requests.get(url, timeout=15)
+        r = HTTP.get(url, timeout=15)
         if r.status_code != 200:
             return {}
         data = r.json()
