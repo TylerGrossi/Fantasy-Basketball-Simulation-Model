@@ -1,0 +1,13 @@
+# Keep the Python side out of the Vercel build.
+#
+# `legacy/` is the Streamlit app (deployed separately, on Render) and `scripts/` only runs
+# on your machine or in CI to regenerate public/data/league.json. Neither is needed to
+# build or serve the Next.js app, and excluding them keeps the upload small and stops
+# Vercel's framework detection from noticing Python it should not act on.
+#
+# NOTE: public/data/league.json IS required at build time — do not exclude public/.
+legacy/
+scripts/
+Old Models/
+*.pyc
+__pycache__/

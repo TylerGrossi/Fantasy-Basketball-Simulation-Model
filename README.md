@@ -8,17 +8,74 @@ inline SVG, so the app ships no charting library.
 
 > Working on this repo as an AI agent? Start with **[AGENTS.md](AGENTS.md)**.
 
-## Quick start
+---
+
+## Two apps live here right now
+
+A migration is in progress. The Streamlit app is still the live site; a Next.js
+replacement is being built alongside it.
+
+| | Where | Run it |
+|---|---|---|
+| **Next.js** (new, → Vercel) | repo root | `npm run dev` → http://localhost:3000 |
+| **Streamlit** (current live site, → Render) | [legacy/](legacy/) | `cd legacy && streamlit run streamlit_app.py` |
+
+### Running the new app locally
+
+One-time setup:
 
 ```bash
+npm install                 # Node dependencies
+npm run setup               # writes .env.local + generates public/data/league.json
+```
+
+Then, any time:
+
+```bash
+npm run dev                 # http://localhost:3000
+```
+
+`npm run setup` does two things, and you can run them separately:
+
+- `npm run env` — writes `.env.local` with your ESPN credentials, read out of
+  `legacy/config_secrets.py` so you never copy cookies by hand. It's gitignored and is
+  only ever read server-side (by `app/api/live`), never bundled into the browser.
+- `npm run data` — regenerates `public/data/league.json` from ESPN (~47 KB, a couple of
+  seconds). Re-run it to refresh rosters, games left and injuries. The *live* category
+  totals don't come from here — those are fetched per request by `/api/live`.
+
+Other scripts: `npm run build` (production build), `npm run start` (serve the build),
+`npm run typecheck`.
+
+If `/api/live` returns 500, `.env.local` is missing or empty — run `npm run env`. The
+pages still render from the last generated snapshot, and the badge under the team names
+tells you which data you're looking at.
+
+**Demo mode:** add `?demo=1` to any page (e.g. `/matchup?demo=1`) to freeze it on the
+generated snapshot and skip the live fetch. The season is over, so the live projection UI
+— win-probability gauge, score distribution, streamer rankings — has nothing to show
+against real data; point `?demo=1` at a fixture and you can see it any time. The badge
+says "Demo — frozen snapshot", so it can never be mistaken for live.
+
+If every page suddenly 500s with `Cannot find module './331.js'`, a `next dev` and a
+`next build` have clobbered each other's `.next` directory: `rm -rf .next && npm run build`.
+
+### Running the Streamlit app locally
+
+```bash
+cd legacy
 pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The app opens in your browser. ESPN connection details are **already set in the code**
-(see Configuration). Navigation drives everything — there is no "run" button. Pick a
-page from the top bar; the **Settings** page chooses which team to analyze, and the
-**This Week** left rail (shown on the matchup pages) chooses the week/round.
+Everything moved into `legacy/` as one unit, so its imports are unchanged — but you do
+have to `cd legacy` first, which is also how it finds `.streamlit/config.toml`.
+
+Navigation drives everything — there is no "run" button. Pick a page from the top bar;
+the **Settings** page chooses which team to analyze, and the **This Week** left rail
+(shown on the matchup pages) chooses the week/round.
+
+---
 
 ## Configuration
 

@@ -3,6 +3,128 @@
 This file orients an AI agent (Claude Code, etc.) working in this repo. Read it
 before making changes. Human-facing setup lives in [README.md](README.md).
 
+---
+
+## ⚠️ MIGRATION IN PROGRESS — read this first
+
+The repo now holds **two front ends**. Everything below this section describes the
+**Streamlit app, which now lives in [legacy/](legacy/)** — every path it mentions
+(`streamlit_app.py`, `styles.py`, `data.py`, …) is relative to `legacy/`, not the root.
+
+```
+legacy/          the Streamlit app — STILL THE LIVE SITE (Render), do not break it
+app/             Next.js pages + app/api/live (the replacement)
+components/      React components
+lib/             probability.ts (the engine), league.ts, loadLeague.ts, useLiveTotals.ts
+scripts/         build_data.py — exports public/data/league.json from the legacy engine
+public/data/     generated JSON (checked in; regenerate with `npm run data`)
+```
+
+**Why:** Streamlit Community Cloud's badge covers the mobile header, and Render's free
+tier is 0.1 CPU with a 15-minute spin-down. The Next.js version deploys to Vercel free,
+where a static page has no cold start and no CPU ceiling.
+
+**The Streamlit app moved as ONE unit, so no import changed** — the modules are still
+siblings of each other. `render.yaml` does `cd legacy` first. If you touch that folder,
+re-verify it boots (`cd legacy && streamlit run streamlit_app.py`).
+
+### The architecture that makes the new version work
+
+Data is split into two tiers, because a team's projected category total is
+`mu = current_total + Σ(avg × games_left)` and `sd` depends only on the projection:
+
+- **SLOW** (`scripts/build_data.py`, scheduled): player averages, games left, variances →
+  `public/data/league.json`. ~47 KB for the whole league.
+- **LIVE** (`app/api/live`, per request): current banked totals. One ESPN call. Current
+  totals are certain, so they shift the mean and add **no** uncertainty — which is exactly
+  why the expensive half is cacheable.
+
+**All probability maths runs in the browser** (`lib/probability.ts`), from 56 numbers
+(14 stats × mu/sd × 2 teams). Categories are independent normals, so per-category odds
+are a closed form and the number of categories won is an exact Poisson-binomial DP — no
+Monte Carlo. Validated against the Python it replaces: **0.44pp** worst disagreement vs a
+200,000-sim run, and TS vs Python agree to **7.3e-8**. At **5 µs per full evaluation**,
+every what-if (bench, streamer, trade) is instant with no server round trip.
+
+### Traps already hit here — don't repeat them
+
+- **Never guess ESPN stat ids.** A wrong id does not error, it reads as a column of
+  **zeros**, silently turning a category loss into a tie (TW is 43, not 38 — 38 is
+  triple-doubles; the scoreboard read 10-4-1 instead of 10-5-0). `build_data.py` derives
+  them from espn-api's own `STATS_MAP` and fails loudly if one is missing.
+- **`scoreByStat` values are objects** `{score, result, rank}`, not numbers.
+- **ESPN's `matchupPeriodId` is not the app's period.** Playoff rounds span two scoring
+  periods, so the app's "period 23" is ESPN matchupPeriodId 21. `app/api/live` resolves
+  exact → league's `currentMatchupPeriod` → the team's latest, and reports which it used.
+- **Wide tables must scroll inside `.table-scroll`**, never widen the page. When auditing
+  overflow, exclude descendants of that box or you get false positives.
+- **`current` and `projMu` in the snapshot are a MATCHED PAIR.** The live fetch replaces
+  `current` but not the projection. Against a hand-made or stale snapshot that produces an
+  impossible state — the FINAL score alongside games still to play — and every derived
+  number turns to nonsense (it briefly made the streamer page recommend dropping Nikola
+  Jokic). `?demo=1` freezes the snapshot and skips the fetch; use it whenever testing with
+  a fabricated in-season fixture, and never compare a reading taken before the live fetch
+  with one taken after.
+- **A probability is not an outcome.** Once the season is over, the bracket sim puts the
+  two finalists near 50/50 — so the Playoffs page would read "51%" for the team that
+  actually won. The Streamlit page sidestepped this by showing the real result instead.
+  The Next version shows the model's numbers AND a banner naming the actual champion,
+  because silently swapping in the outcome makes the model look prescient and silently
+  showing 51% makes it look wrong. Watch for this anywhere a projection outlives the
+  event it was projecting.
+- **Never run `next dev` and `next build` against the same `.next`.** They clobber each
+  other's chunks and you get `Cannot find module './331.js'` 500s on every page, which
+  looks like a code bug and isn't. `rm -rf .next && npm run build`. Check for a stray dev
+  server before starting another one — `EADDRINUSE` on 3000 means the old process is still
+  serving stale code.
+
+### Phase status
+
+Done: repo split, `build_data.py` (matchups, free agents, season-wide data), the TS
+engine + cross-language tests, and **nine pages** — Scoreboard, Matchup, Roster,
+Streamers, Bench, Season, Schedule, Rankings, Playoffs.
+
+Not done: tools (Player Value, Compare, Player Card, Trade Simulator), Agent, Settings,
+and an actual Vercel deploy (needs `ESPN_LEAGUE_ID`, `ESPN_SEASON_YEAR`, `ESPN_S2`,
+`ESPN_SWID` set in the dashboard).
+
+**Season-wide data is computed by the LEGACY module, not reimplemented.**
+`build_season()` in `build_data.py` imports `streamlit_app` (works outside a Streamlit
+runtime — `st.*` calls no-op with warnings) and calls `get_season_stats`,
+`get_power_rankings`, `get_team_schedule_data` and `get_playoff_probabilities`. Those are
+hundreds of lines of verified all-play / bracket logic and a second copy would drift. It
+is imported lazily and every step is guarded, so a failure degrades to "no season data"
+rather than losing the matchup export. Costs ~13s (playoff sim is ~6s of it).
+
+**`LeagueData.season` is the YEAR; `LeagueData.seasonData` is the season-wide object.**
+They collided on the first attempt — don't merge them.
+
+**Testing in the offseason:** the season is over, so every live path sits in its empty
+state against real data. `scripts/`-adjacent helper `fixture.py` (in the agent scratchpad,
+not committed) swaps `public/data/league.json` between the real export and a synthetic
+mid-week fixture. **Always view a fixture with `?demo=1`** — see the matched-pair trap
+above.
+
+**Streamers runs entirely client-side** (`lib/streamers.ts`): every (pick up, drop) pair
+is moment arithmetic plus the Poisson-binomial DP, so a 1,274-scenario sweep takes 13.5ms
+and re-runs instantly on every toggle. Verified against an independent Python
+implementation on the real league data: identical top-10 pickups AND drops, baseline
+agreeing to 1.1e-7.
+
+**Bench** (`lib/bench.ts`) reuses the same subtraction: play-all vs bench-all, plus a
+per-player "what if they sat" column the Streamlit version never had (it only did the
+all-or-nothing form). "Sit" means the player misses ALL remaining games in the window —
+the export carries games-left over the whole window, not a per-day schedule, so a literal
+"bench today" is not expressible with this data.
+
+**Caveat that applies to BOTH Streamers and Bench:** the analysis optimises THIS MATCHUP ONLY.
+A player with no games left this week costs nothing to drop, so the engine will happily
+suggest dropping a star who is resting. That is correct for the objective it is given and
+wrong for the season — which is what the "Protect from dropping" chips are for. Consider
+persisting them (localStorage) rather than resetting each visit.
+
+---
+
 ## What this project is
 
 A **Streamlit web app** that runs **Monte Carlo simulations** for an ESPN Fantasy

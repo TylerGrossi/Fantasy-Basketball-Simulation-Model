@@ -1,0 +1,729 @@
+/*
+ * "Analyst Sheet" design system — ported from legacy/styles.py.
+ *
+ * The palette, type and spacing are carried over verbatim so the two front ends look
+ * identical during the migration. What is NOT carried over is every rule that existed
+ * only to fight Streamlit's DOM: the [data-testid] selectors, the flex-gap collapse
+ * hacks, the :has() traps, the cascade-order landmines. That was roughly two thirds of
+ * styles.py and none of it is needed when we own the markup.
+ *
+ * Light-only, deliberately (the dark mode was removed from the Streamlit app on
+ * web-dev feedback). No gradients on data, hairline dividers, monospace tabular
+ * figures for every number, and no emoji.
+ */
+
+:root {
+  --paper: #f4f3ef;
+  --card: #fcfbf8;
+  --surface-2: #f1efe9;
+  --ink: #1b1d22;
+  --ink-2: #6a6e79;
+  --ink-3: #9a9da6;
+  --line: #dedbd3;
+  --line-2: #eae8e1;
+  --line-strong: #c9c5bb;
+  --cobalt: #2f6fed;
+  --cobalt-soft: rgba(47, 111, 237, 0.1);
+  --clay: #e06a3b;
+  --good: #2e7d46;
+  --bad: #c0392b;
+  --row-highlight: #eef3ff;
+  --header-bg: #ffffff;
+
+  --sans: system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Consolas", "Liberation Mono", monospace;
+
+  --nav-h: 3.9rem;
+  --bottomnav-h: 4.2rem;
+  --content-max: 1180px;
+  --page-pad: clamp(1rem, 4vw, 2.5rem);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  /* Never let a wide table push the page sideways; wide content scrolls in its own box. */
+  overflow-x: hidden;
+}
+
+/* Every number in this app is a tabular figure. */
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- layout shell */
+
+.page {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 0 var(--page-pad) 3rem;
+}
+
+/* --------------------------------------------------------------------- top nav */
+/* Full-bleed bar, but its CONTENTS align to the same centred column as the page. */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.nav-inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 0 var(--page-pad);
+  height: var(--nav-h);
+  display: flex;
+  align-items: center;
+  gap: 1.6rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+  margin-right: auto;
+}
+
+.nav-link {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  padding: 0.45rem 0;
+  border-bottom: 2px solid transparent;
+  /* Press feedback is instant here because it's a real link, not a server round trip. */
+  transition: color 0.12s ease;
+}
+.nav-link:hover {
+  color: var(--ink);
+}
+.nav-link[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--cobalt);
+}
+
+/* ---------------------------------------------------------------- typography */
+
+h1,
+h2,
+h3 {
+  color: var(--ink);
+  line-height: 1.25;
+}
+h1 {
+  font-size: 1.5rem;
+  margin: 1.6rem 0 0.3rem;
+}
+h2 {
+  font-size: 1.15rem;
+  margin: 1.8rem 0 0.6rem;
+}
+.caption {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  margin: 0 0 1.2rem;
+}
+.eyebrow {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* --------------------------------------------------------------- scoreboard */
+
+.sb-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.4rem 0 1rem;
+}
+.sb-name {
+  font-weight: 700;
+  font-size: 1.25rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.sb-name-right {
+  text-align: right;
+}
+.sb-score {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: center;
+}
+.sb-score-main {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--cobalt);
+}
+.sb-score-sub {
+  font-family: var(--mono);
+  font-size: 1rem;
+  color: var(--ink-3);
+  margin-left: 0.7rem;
+}
+
+.sb-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.1rem;
+  border-bottom: 1px solid var(--line);
+}
+.sb-val {
+  min-width: 62px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.98rem;
+}
+.sb-val-right {
+  text-align: right;
+}
+.sb-win {
+  color: var(--ink);
+  font-weight: 700;
+}
+.sb-lose {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.sb-mid {
+  flex: 1;
+  min-width: 0;
+}
+.sb-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-bottom: 0.28rem;
+}
+.sb-cat {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.sb-margin {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+
+/* The bar shows MARGIN, diverging from a centre line — never the magnitude split.
+   See the note in legacy/visualizations.py: a magnitude split is ~50/50 for every
+   category and carries almost no information. */
+.sb-track {
+  display: flex;
+  align-items: center;
+  height: 9px;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 0.5px),
+    var(--line) calc(50% - 0.5px),
+    var(--line) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+.sb-half {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+}
+.sb-half-left {
+  justify-content: flex-end;
+}
+.sb-half-right {
+  justify-content: flex-start;
+}
+.sb-axis {
+  flex: 0 0 1px;
+  height: 9px;
+  background: var(--ink-3);
+}
+.sb-bar {
+  height: 7px;
+}
+.sb-bar-you {
+  background: var(--cobalt);
+  border-radius: 0 3px 3px 0;
+}
+.sb-bar-opp {
+  background: var(--clay);
+  border-radius: 3px 0 0 3px;
+}
+
+/* ------------------------------------------------------------------ live badge */
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--ink-2);
+}
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--good);
+}
+.live-dot.stale {
+  background: var(--ink-3);
+}
+.live-dot.error {
+  background: var(--bad);
+}
+
+/* ------------------------------------------------------------------- mobile */
+
+@media (max-width: 767px) {
+  .sb-name {
+    font-size: 1rem;
+  }
+  .sb-score-main {
+    font-size: 1.6rem;
+  }
+  .sb-score-sub {
+    font-size: 0.75rem;
+    margin-left: 0.35rem;
+  }
+  .sb-val {
+    min-width: 54px;
+    font-size: 0.86rem;
+  }
+  h1 {
+    font-size: 1.25rem;
+  }
+}
+
+/* ------------------------------------------------------------- metric tiles */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.7rem;
+  margin: 1rem 0 1.4rem;
+}
+.metric {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+}
+.metric-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: 0.2rem;
+}
+.metric-delta {
+  font-size: 0.72rem;
+  margin-top: 0.15rem;
+}
+
+.two-up {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+/* -------------------------------------------------- category analysis chart */
+
+.ca-legend {
+  display: flex;
+  justify-content: center;
+  gap: 1.3rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.72rem;
+  color: var(--ink-2);
+}
+.swatch {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: -1px;
+}
+.ca-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 2px 0;
+}
+.ca-label {
+  flex: 0 0 52px;
+  text-align: right;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ca-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+/* Quarter gridlines inside each half, so the rows line up with the axis ticks. */
+.ca-half {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  background: repeating-linear-gradient(
+    to right,
+    var(--line) 0 1px,
+    transparent 1px 12.5%
+  );
+}
+.ca-half-left {
+  justify-content: flex-end;
+}
+.ca-half-right {
+  justify-content: flex-start;
+}
+.ca-axis {
+  flex: 0 0 1px;
+  background: var(--ink-3);
+}
+.ca-bar {
+  height: 19px;
+  display: flex;
+  align-items: center;
+  min-width: 2px;
+}
+.ca-bar-left {
+  background: var(--clay);
+  border-radius: 3px 0 0 3px;
+  justify-content: flex-start;
+}
+.ca-bar-right {
+  background: var(--cobalt);
+  border-radius: 0 3px 3px 0;
+  justify-content: flex-end;
+}
+.ca-bar-text {
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.ca-out-text {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.ca-axis-row {
+  margin-top: 0.35rem;
+}
+.ca-ticks {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-3);
+}
+
+/* --------------------------------------------------------- score distribution */
+
+.dist-plot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.35rem;
+}
+.dist-col {
+  flex: 1 1 0;
+  min-width: 0;
+  /* Cap the width so a single-outcome chart is a bar, not a giant block. */
+  max-width: 74px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+.dist-pct {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.dist-slot {
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.dist-bar {
+  width: 72%;
+  border-radius: 3px 3px 0 0;
+}
+.dist-label {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dist-axis {
+  text-align: center;
+  margin-top: 0.45rem;
+}
+
+/* --------------------------------------------------------------- data tables */
+/* Wide tables scroll INSIDE their own box — the page itself never scrolls sideways. */
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+table.sheet {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+table.sheet th {
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+table.sheet td {
+  padding: 0.42rem 0.7rem;
+  border-bottom: 1px solid var(--line-2);
+  white-space: nowrap;
+}
+table.sheet tr:last-child td {
+  border-bottom: none;
+}
+table.sheet .num {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+table.sheet .row-muted td {
+  color: var(--ink-3);
+}
+.tag {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--clay);
+}
+
+@media (max-width: 767px) {
+  .metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .two-up {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  .metric-value {
+    font-size: 1.35rem;
+  }
+  table.sheet {
+    font-size: 0.72rem;
+  }
+  .ca-label {
+    flex-basis: 42px;
+    font-size: 0.64rem;
+  }
+}
+
+/* ----------------------------------------------------------------- controls */
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.8rem;
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+}
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cobalt);
+  cursor: pointer;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.chip {
+  font: inherit;
+  font-size: 0.76rem;
+  padding: 0.32rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-2);
+  cursor: pointer;
+  /* Instant press feedback — a real button, no server round trip to wait on. */
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.chip:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.chip-on {
+  background: var(--cobalt-soft);
+  border-color: var(--cobalt);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+
+/* -------------------------------------------------------------- season pages */
+
+.champion {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--cobalt);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 1rem 1.2rem;
+  margin: 0.6rem 0 1.4rem;
+  text-align: center;
+}
+.champion-name {
+  font-family: var(--mono);
+  font-size: 1.7rem;
+  font-weight: 700;
+  margin-top: 0.2rem;
+}
+.champion-rec {
+  color: var(--ink-3);
+  font-size: 0.95rem;
+}
+
+/* Your own row, so it's findable at a glance in a 10-row table. */
+table.sheet tr.row-you td {
+  background: var(--row-highlight);
+  font-weight: 600;
+}
+
+/* Horizontal probability bars (championship odds). */
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.42rem 0.1rem;
+  border-bottom: 1px solid var(--line);
+}
+.bar-label {
+  flex: 0 0 34%;
+  min-width: 0;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 9px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+.bar-value {
+  flex: 0 0 54px;
+  text-align: right;
+  font-size: 0.86rem;
+}
+
+@media (max-width: 767px) {
+  .bar-label {
+    flex-basis: 42%;
+    font-size: 0.76rem;
+  }
+  .champion-name {
+    font-size: 1.35rem;
+  }
+}
+
+/* Context banner — used where a number could be read as saying something it doesn't. */
+.notice {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--cobalt);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.7rem 0.9rem;
+  margin: 0 0 1.2rem;
+  font-size: 0.84rem;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.notice strong {
+  color: var(--ink);
+}

@@ -8,3 +8,10 @@ __pycache__/
 
 # Local secrets (ESPN cookies + Gemini API key) - never commit these
 config_secrets.py
+
+# Next.js
+node_modules/
+.next/
+next-env.d.ts
+.vercel
+tsconfig.tsbuildinfo
