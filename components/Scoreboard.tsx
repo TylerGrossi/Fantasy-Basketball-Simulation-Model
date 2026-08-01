@@ -52,29 +52,46 @@ export default function Scoreboard({
 
   return (
     <>
-      <div className="sb-hero">
-        <span className="sb-name">{youName}</span>
-        <span className="sb-score">
-          <span className="sb-score-main">
-            {rec.win}-{rec.loss}-{rec.tie}
-          </span>
-          <span className="sb-score-sub">
-            {rec.loss}-{rec.win}-{rec.tie}
-          </span>
-        </span>
-        <span className="sb-name sb-name-right">{oppName}</span>
+      {/*
+        One line per side, the way a scoreboard reads: name, score, status, score, name.
+        The record used to print twice (10-5-0 and its mirror 5-10-0) — the same fact
+        stated backwards. Each side now owns its own number, so the mirror is the layout
+        rather than a second string, and the leader is the one at full strength.
+      */}
+      <div className="board">
+        <div className="board-side">
+          <span className="board-team board-you">{youName}</span>
+        </div>
+        <div className={`board-score ${rec.win >= rec.loss ? "sb-win" : "sb-lose"}`}>
+          {rec.win}
+        </div>
+        {/*
+          Ties are a third outcome, not a third score. A tied category belongs to
+          neither side, so it is held out of both numbers and stated once underneath —
+          10 and 5 plus "1 tie" accounts for all 15 categories. Hidden when there are
+          none, which is the usual case, rather than printing a dead "-0".
+        */}
+        <div className="board-center">
+          <span className="board-status">{hasGamesLeft ? "In progress" : "Final"}</span>
+          {rec.tie > 0 && (
+            <span className="board-ties">
+              {rec.tie} {rec.tie === 1 ? "tie" : "ties"}
+            </span>
+          )}
+        </div>
+        <div className={`board-score ${rec.loss >= rec.win ? "sb-win" : "sb-lose"}`}>
+          {rec.loss}
+        </div>
+        <div className="board-side board-side-right">
+          <span className="board-team board-opp">{oppName}</span>
+        </div>
       </div>
 
       <LiveBadge {...live} generatedAt={league.generatedAt} />
 
-      {hasGamesLeft ? (
-        <WinProbabilityGauge percent={outcome.win * 100} />
-      ) : (
-        <p className="caption">
-          Final result — no games remain in this matchup, so these are the finished
-          category totals.
-        </p>
-      )}
+      {/* Nothing stands in for the gauge once the matchup is done — the board says
+          FINAL and the rows are self-evidently the finished totals. */}
+      {hasGamesLeft && <WinProbabilityGauge percent={outcome.win * 100} />}
 
       <div>
         {rows.map((r) => (

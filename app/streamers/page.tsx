@@ -1,5 +1,5 @@
 import StreamersView from "@/components/StreamersView";
-import { loadLeague, myTeam, resolveMatchup } from "@/lib/loadLeague";
+import { loadLeague, myTeam, resolveMatchup, trimLeague } from "@/lib/loadLeague";
 
 /**
  * `?demo=1` freezes the page on the build-time snapshot and skips the live fetch.
@@ -17,7 +17,7 @@ export default async function Page({
 }) {
   const demo = (await searchParams).demo === "1";
   const league = await loadLeague();
-  const me = myTeam(league);
+  const me = await myTeam(league);
   const r = resolveMatchup(league, me.id);
 
   if (!r) {
@@ -29,6 +29,8 @@ export default async function Page({
     );
   }
 
+  // Only what this page's client component needs — see trimLeague.
+  const slim = trimLeague(league, { matchupTeamId: me.id, freeAgents: true });
   return (
     <>
       <h1>Streamers</h1>
@@ -38,7 +40,7 @@ export default async function Page({
       </p>
       <StreamersView
         live={!demo}
-        league={league}
+        league={slim}
         matchup={r.matchup}
         isHome={r.isHome}
         teamId={me.id}

@@ -1,5 +1,5 @@
 import BenchView from "@/components/BenchView";
-import { loadLeague, myTeam, resolveMatchup } from "@/lib/loadLeague";
+import { loadLeague, myTeam, resolveMatchup, trimLeague } from "@/lib/loadLeague";
 
 /** `?demo=1` freezes the snapshot and skips the live fetch — see app/page.tsx. */
 export default async function Page({
@@ -9,7 +9,7 @@ export default async function Page({
 }) {
   const demo = (await searchParams).demo === "1";
   const league = await loadLeague();
-  const me = myTeam(league);
+  const me = await myTeam(league);
   const r = resolveMatchup(league, me.id);
 
   if (!r) {
@@ -21,6 +21,8 @@ export default async function Page({
     );
   }
 
+  // Only what this page's client component needs — see trimLeague.
+  const slim = trimLeague(league, { matchupTeamId: me.id });
   return (
     <>
       <h1>Bench</h1>
@@ -30,7 +32,7 @@ export default async function Page({
       </p>
       <BenchView
         live={!demo}
-        league={league}
+        league={slim}
         matchup={r.matchup}
         isHome={r.isHome}
         teamId={me.id}

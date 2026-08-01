@@ -3,7 +3,7 @@ import { loadLeague, myTeam, resolveMatchup } from "@/lib/loadLeague";
 
 export default async function Page() {
   const league = await loadLeague();
-  const me = myTeam(league);
+  const me = await myTeam(league);
   const r = resolveMatchup(league, me.id);
 
   if (!r) {

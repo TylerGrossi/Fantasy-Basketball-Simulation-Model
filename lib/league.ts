@@ -41,6 +41,19 @@ export interface Matchup {
   away: TeamSide;
 }
 
+/** One finished matchup: final banked totals only, no rosters. */
+export interface PeriodGame {
+  homeId: number;
+  awayId: number;
+  home: StatVector;
+  away: StatVector;
+}
+
+export interface PeriodResult {
+  period: number;
+  games: PeriodGame[];
+}
+
 export interface Team {
   id: number;
   name: string;
@@ -55,6 +68,12 @@ export interface StandingRow {
   teamId: number;
   teamName: string;
   standing: number;
+  /**
+   * ESPN's final placing once the bracket is done — the number the league actually
+   * remembers, which is NOT the category-record order (`standing`). Optional because
+   * it is 0/absent mid-season and in exports built before it was added.
+   */
+  finalStanding?: number;
   wins: number;
   losses: number;
   ties: number;
@@ -101,9 +120,51 @@ export interface PlayoffOddsRow {
   championshipProb: number;
   inPlayoffs: boolean;
   record: number[];
+  /**
+   * Chance of finishing on each seed, keyed by seed number as a string, plus
+   * `no_playoffs`. Only meaningful before the bracket starts — optional because it is
+   * absent from exports built before it was added.
+   */
+  seedProbs?: Record<string, number>;
+}
+
+export interface PoolPlayer {
+  name: string;
+  nbaTeam: string;
+  position: string;
+  /** Fantasy team that owns them, or "" / "Waivers" when free. */
+  owner: string;
+  status: string;
+  playerId: number | null;
+  /** 9-cat value: standard deviations above/below a replacement-level player. */
+  value: number;
+  recent: number;
+  trend: number;
+  recent15: number;
+  trend15: number;
+  fgPct: number;
+  ftPct: number;
+  tpPct: number;
+  PTS: number; REB: number; AST: number; STL: number; BLK: number;
+  "3PM": number; TO: number; FGM: number; FGA: number; FTM: number;
+  FTA: number; "3PA": number; DD: number;
+}
+
+export interface SeasonPlayerLine {
+  name: string;
+  gp: number;
+  [stat: string]: number | string;
+}
+
+export interface TeamSeasonStats {
+  totals: Record<string, number>;
+  players: SeasonPlayerLine[];
 }
 
 export interface SeasonData {
+  playerPool?: PoolPlayer[];
+  /** Keyed by team id (string, since JSON keys are strings). */
+  teamSeasonStats?: Record<string, TeamSeasonStats>;
   standings?: StandingRow[];
   powerRankings?: { weeks: number[]; teams: PowerRankingRow[] };
   /** Keyed by team id (as a string, since JSON keys are strings). */
@@ -115,17 +176,48 @@ export interface SeasonData {
 export interface LeagueData extends LeagueMeta {
   generatedAt: string;
   season: number;
+  /** The ESPN league's own name. Optional — older exports predate it. */
+  leagueName?: string;
   leaguePeriod: number;
   period: number;
   seasonOver: boolean;
+  /** Weeks before the playoffs start. Optional — older exports predate it. */
+  regularSeasonWeeks?: number;
+  /** How many playoff rounds follow them. Optional — older exports predate it. */
+  playoffRounds?: number;
   /** Per-stat variance factor. The one source for turning averages into moments. */
   variance: number[];
   statIds: Record<string, number>;
   teams: Team[];
   matchups: Matchup[];
   freeAgents: FreeAgent[];
+  /** Final totals for every completed week. Optional — older exports predate it. */
+  periodResults?: PeriodResult[];
   /** Season-wide data. `season` above is the YEAR — do not confuse them. */
   seasonData: SeasonData;
+}
+
+/**
+ * What to call a matchup period: "Week 12", or "Playoffs · Round 2".
+ *
+ * A playoff round spans TWO scoring periods, so the round is found by halving the
+ * distance past the regular season — the same arithmetic as `resolve_view_window` in
+ * the legacy app, deliberately, because both period 22 and period 23 are round 2 and
+ * an exact reverse lookup of the period→label map would miss one of them. (The
+ * offseason export pins `period` to 23, so this is not a hypothetical.)
+ *
+ * The two constants ride along in the export; the defaults here only cover exports
+ * built before they were added.
+ */
+export function periodLabel(league: LeagueData, period = league.period): string {
+  const weeks = league.regularSeasonWeeks ?? 19;
+  const rounds = league.playoffRounds ?? 2;
+  if (period > weeks) {
+    const round = Math.floor((period - weeks - 1) / 2) + 1;
+    if (round >= 1 && round <= rounds) return `Playoffs · Round ${round}`;
+    return "Playoffs";
+  }
+  return `Week ${period}`;
 }
 
 /**

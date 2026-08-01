@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeStreamers } from "@/lib/streamers";
 import { useLiveTotals } from "@/lib/useLiveTotals";
+import { useSettings } from "@/lib/useSettings";
 import LiveBadge from "./LiveBadge";
 
 interface Props {
@@ -35,8 +36,15 @@ export default function StreamersView({
     opp.current,
     liveEnabled
   );
-  const [openSpot, setOpenSpot] = useState(false);
-  const [untouchable, setUntouchable] = useState<Set<string>>(new Set());
+  // Persisted in localStorage so protected players and the open-spot flag survive a
+  // reload — in the Streamlit version these lived in server session state and were lost
+  // whenever the host spun down.
+  const [settings, updateSettings] = useSettings();
+  const openSpot = settings.hasOpenSpot;
+  const untouchable = useMemo(
+    () => new Set(settings.untouchables),
+    [settings.untouchables]
+  );
 
   const youMoments = useMemo(() => sideMoments(you, live.you), [you, live.you]);
   const oppMoments = useMemo(() => sideMoments(opp, live.opp), [opp, live.opp]);
@@ -55,12 +63,10 @@ export default function StreamersView({
   const anyGamesLeft = league.freeAgents.some((f) => f.gamesLeft > 0);
 
   function toggleUntouchable(name: string) {
-    setUntouchable((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
+    const next = new Set(settings.untouchables);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    updateSettings({ untouchables: [...next] });
   }
 
   return (
@@ -79,7 +85,7 @@ export default function StreamersView({
               <input
                 type="checkbox"
                 checked={openSpot}
-                onChange={(e) => setOpenSpot(e.target.checked)}
+                onChange={(e) => updateSettings({ hasOpenSpot: e.target.checked })}
               />
               I have an open roster spot
             </label>

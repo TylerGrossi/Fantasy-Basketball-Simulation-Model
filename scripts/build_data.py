@@ -193,6 +193,207 @@ def config_blend():
     return 0.7  # matches the app's blend_weight default
 
 
+PLAYER_POOL_STATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO",
+                     "FGM", "FGA", "FTM", "FTA", "3PA", "DD"]
+
+
+def build_player_pool(app):
+    """
+    Every rostered player + top free agents with their 9-cat Value and trend.
+
+    Powers Player Value, Player Card, Compare and the Trade Simulator — all four are
+    views over this one list, so it is exported once rather than per page.
+    """
+    try:
+        pool = app.get_player_pool(config.ESPN_LEAGUE_ID, config.ESPN_SEASON_YEAR,
+                                   config.ESPN_S2, config.ESPN_SWID)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! player pool failed: {exc}")
+        return []
+    out = []
+    for p in pool:
+        row = {
+            "name": p.get("Player", ""),
+            "nbaTeam": p.get("NBA_Team", ""),
+            "position": p.get("Position", ""),
+            "owner": p.get("Owner", ""),
+            "status": p.get("Status", ""),
+            "playerId": int(p["PlayerId"]) if p.get("PlayerId") == p.get("PlayerId") and p.get("PlayerId") is not None else None,
+            "value": _round(p.get("Value", 0), 3),
+            "recent": _round(p.get("Recent", 0), 3),
+            "trend": _round(p.get("Trend", 0), 3),
+            "recent15": _round(p.get("Recent15", 0), 3),
+            "trend15": _round(p.get("Trend15", 0), 3),
+            "fgPct": _round(p.get("FG%", 0), 4),
+            "ftPct": _round(p.get("FT%", 0), 4),
+            "tpPct": _round(p.get("3P%", 0), 4),
+        }
+        for s in PLAYER_POOL_STATS:
+            row[s] = _round(p.get(s, 0), 2)
+        out.append(row)
+    out.sort(key=lambda r: -r["value"])
+    return out
+
+
+def stat_vector(raw_stats):
+    """Banked category totals as a vector in canonical STATS order."""
+    flat = D.flatten_stat_dict(raw_stats or {})
+    return [_round(flat.get(s, 0) or 0, 2) for s in STATS]
+
+
+def _cat_value(vec, cat):
+    """One scored category's value, deriving the ratio categories from their pair."""
+    pair = {"FG%": ("FGM", "FGA"), "FT%": ("FTM", "FTA"), "3P%": ("3PM", "3PA")}.get(cat)
+    if pair:
+        made, att = vec[STATS.index(pair[0])], vec[STATS.index(pair[1])]
+        return made / att if att else 0.0
+    return vec[STATS.index(cat)] if cat in STATS else 0.0
+
+
+def score_vs(a, b):
+    """W-L-T for vector `a` against `b`, over the scored categories. TO is inverted."""
+    w = l = t = 0
+    for cat in config.CATEGORIES:
+        x, y = _cat_value(a, cat), _cat_value(b, cat)
+        if cat == "TO":
+            x, y = -x, -y
+        if x > y:
+            w += 1
+        elif x < y:
+            l += 1
+        else:
+            t += 1
+    return w, l, t
+
+
+def build_period_results(league, schedules):
+    """
+    Final category totals for every completed matchup period.
+
+    Only TOTALS - no rosters, no projections. A finished week has no games left, so its
+    page needs the two stat vectors and nothing else; that keeps this whole section to a
+    few KB instead of re-exporting ten rosters per week.
+
+    ESPN's `matchupPeriodId` is NOT always the app's period number (the app counts scoring
+    periods, and playoff rounds span two). Rather than assume they line up, each period is
+    keyed by ESPN's id and then CHECKED against the score already in the schedule table -
+    a wrong mapping would silently show the wrong week's numbers, which is precisely the
+    failure mode that made the TW stat id bug survive so long.
+    """
+    wanted = sorted({int(r["period"]) for rows in schedules.values() for r in rows})
+    if not wanted:
+        return []
+
+    out = []
+    for p in range(1, max(wanted) + 1):
+        try:
+            games = league.box_scores(matchup_period=p)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! period {p}: {exc}", flush=True)
+            continue
+        rows = []
+        for m in games:
+            home, away = m.home_team, m.away_team
+            if not hasattr(home, "team_id") or not hasattr(away, "team_id"):
+                continue
+            h, a = stat_vector(m.home_stats), stat_vector(m.away_stats)
+            if not any(h) and not any(a):
+                continue  # unplayed week
+            rows.append({
+                "homeId": int(home.team_id), "awayId": int(away.team_id),
+                "home": h, "away": a,
+            })
+        if rows:
+            out.append({"period": p, "games": rows})
+    print(f"  period results: {len(out)} periods", flush=True)
+    return out
+
+
+def check_period_results(period_results, schedules):
+    """
+    Confirm the exported periods line up with the schedule table, by re-deriving each
+    week's W-L-T from the totals and comparing it to the score ESPN already reported.
+    Returns a list of problems (empty = the mapping is right).
+    """
+    by_period = {pr["period"]: pr for pr in period_results}
+    problems, checked = [], 0
+    for team_id, rows in schedules.items():
+        for r in rows:
+            want = str(r.get("score") or "").strip()
+            if not want or "-" not in want:
+                continue
+            pr = by_period.get(int(r["period"]))
+            if pr is None:
+                problems.append(f"team {team_id} period {r['period']}: no exported totals")
+                continue
+            tid = int(team_id)
+            game = next(
+                (g for g in pr["games"] if tid in (g["homeId"], g["awayId"])), None
+            )
+            if game is None:
+                problems.append(f"team {team_id} period {r['period']}: not in that period")
+                continue
+            mine = game["home"] if game["homeId"] == tid else game["away"]
+            theirs = game["away"] if game["homeId"] == tid else game["home"]
+            got = "-".join(str(n) for n in score_vs(mine, theirs))
+            checked += 1
+            if got != want:
+                problems.append(
+                    f"team {team_id} period {r['period']}: derived {got}, schedule says {want}"
+                )
+    print(f"  period-result cross-check: {checked} matchups, {len(problems)} mismatch(es)",
+          flush=True)
+    return problems
+
+
+def build_team_season_stats(app, league):
+    """Per-team season totals and per-player season lines, for the Season Stats page."""
+    lid, yr = config.ESPN_LEAGUE_ID, config.ESPN_SEASON_YEAR
+    s2, swid = config.ESPN_S2, config.ESPN_SWID
+    out = {}
+    for t in league.teams:
+        try:
+            res = app.get_team_season_stats(lid, yr, s2, swid, int(t.team_id))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! season stats for {t.team_name} failed: {exc}")
+            continue
+        totals, per_player = (res[0], res[1]) if isinstance(res, tuple) else ({}, {})
+        players = []
+        for name, line in (per_player or {}).items():
+            row = {"name": name, "gp": _round(line.get("GP", 0), 0)}
+            for k, v in line.items():
+                if k != "GP":
+                    row[k] = _round(v, 2)
+            players.append(row)
+        players.sort(key=lambda r: -(r.get("PTS") or 0))
+        out[str(int(t.team_id))] = {
+            "totals": {k: _round(v, 3) for k, v in (totals or {}).items()},
+            "players": players,
+        }
+    return out
+
+
+def _season_shape():
+    """
+    How many regular-season weeks and playoff rounds this league has.
+
+    Read from the legacy module (where REGULAR_SEASON_WEEKS / PLAYOFF_SCORING_DATES
+    live) so the two front ends can't disagree about where the playoffs start.
+    Guarded like every other legacy import here: if it fails the export still ships,
+    and the browser falls back to its own defaults.
+    """
+    try:
+        import streamlit_app as app  # noqa: PLC0415
+
+        return {
+            "regularSeasonWeeks": int(app.REGULAR_SEASON_WEEKS),
+            "playoffRounds": len(app.PLAYOFF_SCORING_DATES),
+        }
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! could not read the season shape: {exc}")
+        return {}
+
+
 def build_season(league, injury_data, sims=8000):
     """
     Season-wide data: standings, power rankings, schedules, playoff odds.
@@ -226,10 +427,19 @@ def build_season(league, injury_data, sims=8000):
 
     stats = step("league stats", lambda: app.get_season_stats(lid, yr, s2, swid))
     if stats:
+        # `standing` from get_season_stats is the CATEGORY-RECORD order; ESPN's
+        # final_standing is where the bracket actually left each team. The Season
+        # Summary ranks by the latter (it's the placing the league remembers), so
+        # carry it too rather than making the page infer one from the other.
+        final_by_id = {
+            int(t.team_id): int(getattr(t, "final_standing", 0) or 0)
+            for t in league.teams
+        }
         out["standings"] = [{
             "teamId": int(t["team_id"]),
             "teamName": t["team_name"],
             "standing": int(t["standing"]),
+            "finalStanding": final_by_id.get(int(t["team_id"]), 0),
             "wins": int(t["actual_wins"]), "losses": int(t["actual_losses"]),
             "ties": int(t["actual_ties"]), "winPct": _round(t["actual_pct"], 5),
             "allPlayWins": int(t["all_play_wins"]), "allPlayLosses": int(t["all_play_losses"]),
@@ -253,6 +463,10 @@ def build_season(league, injury_data, sims=8000):
                 "rankHistory": [int(r) for r in t.get("rank_history", [])],
             } for t in pr.get("teams", [])],
         }
+
+    out["playerPool"] = step("player pool", lambda: build_player_pool(app)) or []
+    out["teamSeasonStats"] = step("team season stats",
+                                  lambda: build_team_season_stats(app, league)) or {}
 
     schedules = {}
     for t in league.teams:
@@ -284,6 +498,11 @@ def build_season(league, injury_data, sims=8000):
                 "championshipProb": _round(r.get("championship_prob", 0), 3),
                 "inPlayoffs": bool(r.get("in_playoffs", False)),
                 "record": list(r.get("record", [])),
+                # Seed distribution (keys are seed numbers plus "no_playoffs"). Only
+                # meaningful before the bracket starts, but the page renders those
+                # columns then, so it has to ship.
+                "seedProbs": {str(k): _round(v, 3)
+                              for k, v in (r.get("seed_probs") or {}).items()},
             } for r in rows]
             fin = rows[0].get("championship_finalist_team_ids")
             if fin:
@@ -348,10 +567,7 @@ def main():
             "standing": int(getattr(t, "standing", 0) or 0),
         })
 
-    def current_vector(raw_stats):
-        """Current banked totals as a vector in canonical STATS order."""
-        flat = D.flatten_stat_dict(raw_stats or {})
-        return [_round(flat.get(s, 0) or 0, 2) for s in STATS]
+    current_vector = stat_vector
 
     matchups = []
     for m in league.box_scores(matchup_period=period):
@@ -380,12 +596,24 @@ def main():
     print("season-wide data:", flush=True)
     season = build_season(league, injury)
 
+    period_results = build_period_results(league, season.get("schedules") or {})
+    mapping_problems = check_period_results(period_results, season.get("schedules") or {})
+
     payload = {
         "generatedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
         "season": yr,
+        # The league's own name, shown in the Home eyebrow. Falls back rather than
+        # failing: a missing name costs a nicety, not a page.
+        "leagueName": str(
+            getattr(getattr(league, "settings", None), "name", "") or ""
+        ).strip(),
         "leaguePeriod": league_period,
         "period": period,
         "seasonOver": season_over,
+        # The season's shape, so the browser can name a period ("Week 12",
+        # "Playoffs · Round 2") with the SAME arithmetic resolve_view_window uses
+        # rather than a second copy of these numbers in TypeScript.
+        **_season_shape(),
         "stats": STATS,              # the 14 counting stats, in canonical order
         "statIds": espn_stat_ids(),  # ESPN's numeric id per stat (see espn_stat_ids)
         "categories": list(config.CATEGORIES),   # the 15 SCORED categories
@@ -394,10 +622,12 @@ def main():
         "teams": teams,
         "matchups": matchups,
         "freeAgents": free_agents,
+        # Final totals per completed week, for the clickable schedule -> week view.
+        "periodResults": period_results,
         "seasonData": season,
     }
 
-    problems = validate(payload)
+    problems = validate(payload) + mapping_problems
     dt = time.perf_counter() - t0
     if problems:
         print("\nVALIDATION FAILED:")

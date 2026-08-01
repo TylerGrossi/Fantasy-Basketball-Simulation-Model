@@ -65,6 +65,14 @@ every what-if (bench, streamer, trade) is instant with no server round trip.
   Jokic). `?demo=1` freezes the snapshot and skips the fetch; use it whenever testing with
   a fabricated in-season fixture, and never compare a reading taken before the live fetch
   with one taken after.
+- **Never pass the whole `league` object to a client component.** Anything a server
+  component hands a client component is serialised into the page payload. Passing `league`
+  put the entire 258 KB export into the HTML of every interactive page — /player-value
+  shipped **405 KB**, /scoreboard 314 KB, against 23 KB for a pure server page. Use
+  `trimLeague(league, {...})` in `lib/loadLeague.ts` to declare what that page actually
+  needs; it returns the same shape with the rest emptied, so component signatures don't
+  change. Measured saving across the app: **2.08 MB, 62%**. Check with
+  `curl -s <url> | wc -c` after adding any client component.
 - **A probability is not an outcome.** Once the season is over, the bracket sim puts the
   two finalists near 50/50 — so the Playoffs page would read "51%" for the team that
   actually won. The Streamlit page sidestepped this by showing the real result instead.
@@ -84,9 +92,38 @@ Done: repo split, `build_data.py` (matchups, free agents, season-wide data), the
 engine + cross-language tests, and **nine pages** — Scoreboard, Matchup, Roster,
 Streamers, Bench, Season, Schedule, Rankings, Playoffs.
 
-Not done: tools (Player Value, Compare, Player Card, Trade Simulator), Agent, Settings,
-and an actual Vercel deploy (needs `ESPN_LEAGUE_ID`, `ESPN_SEASON_YEAR`, `ESPN_S2`,
-`ESPN_SWID` set in the dashboard).
+**Feature parity reached: 17 routes.** Home, Scoreboard, Matchup, Roster, Streamers,
+Bench, Season, Season Stats, League Stats, Schedule, Rankings, Playoffs, Player Value,
+Player Card, Compare, Trade, Settings — plus the desktop header (with Stats/Tools
+dropdowns) and the full mobile pattern (no header; bottom icon bar + section sub-row +
+This Week top sub-bar).
+
+Still missing vs the Streamlit app: the **Agent** chat page (needs a Gemini serverless
+function).
+
+The **Tools** pages (Player Card, Player Value, Compare, Power Rankings, Playoff Odds,
+Trade Simulator) were re-matched to their Streamlit originals: Player Value is the ranked
+`.pv-list` card list (value bar, trend chip, expandable ESPN-style card) with the same six
+filters, Player Card has the bio header and value tiles, Compare has the diverging-bar
+head-to-head, and Trade has Buy Low / Sell High plus the all-play record and the
+before/after category table. Shared helpers live in `lib/playerPool.ts` (status mapping,
+headshot, 9-cat aggregates) — port of the legacy `_player_status` / `_team_agg` /
+`_cat9_record` family; keep the four views reading from it rather than re-deriving.
+
+**The per-player "Last 10 games" log and the Player Card bio are fetched CLIENT-SIDE**
+(`components/GameLog.tsx`, `usePlayerBio`) from ESPN's public CORS-enabled
+`site.web.api.espn.com` endpoints, on open, with a module-level cache — exactly the
+trade-off `_PV_GAMELOG_SCRIPT` made in Streamlit. Pre-fetching them into the export would
+be ~290 extra ESPN round trips per build for detail almost nobody opens. For the same
+reason the Player Value cards only MOUNT their body once the row is opened; rendering all
+289 cards up front added ~80 KB of HTML for nothing.
+
+Settings are real, not decorative: the team choice is a COOKIE (`lib/team.ts`) because
+every page resolves the team while server-rendering — localStorage would arrive too late
+and the first paint would show the wrong team. Protected players and the open-spot flag
+are localStorage (`lib/useSettings.ts`), which is what makes them survive a restart; the
+Streamlit version kept them in server session state and a free-tier spin-down wiped them
+every 15 minutes.
 
 **Season-wide data is computed by the LEGACY module, not reimplemented.**
 `build_season()` in `build_data.py` imports `streamlit_app` (works outside a Streamlit

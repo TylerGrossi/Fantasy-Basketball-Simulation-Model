@@ -23,6 +23,8 @@ interface Props {
   teamId: number;
   /** false = freeze on the snapshot, never fetch (?demo=1). */
   live?: boolean;
+  /** Numbers are synthetic (mid-week preview) — disclosed in the badge. */
+  simulated?: boolean;
   youName: string;
   oppName: string;
 }
@@ -39,6 +41,7 @@ export default function MatchupView({
   isHome,
   teamId,
   live: liveEnabled = true,
+  simulated = false,
   youName,
   oppName,
 }: Props) {
@@ -83,7 +86,7 @@ export default function MatchupView({
     return (
       <>
         <Header youName={youName} oppName={oppName} />
-        <LiveBadge {...live} generatedAt={league.generatedAt} />
+        <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
         <div className="metrics">
           <Metric label="Final" value={`${rec.win}-${rec.loss}-${rec.tie}`} />
           <Metric label="Categories won" value={String(rec.win)} />
@@ -106,7 +109,7 @@ export default function MatchupView({
   return (
     <>
       <Header youName={youName} oppName={oppName} />
-      <LiveBadge {...live} generatedAt={league.generatedAt} />
+      <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
 
       <div className="metrics">
         <Metric

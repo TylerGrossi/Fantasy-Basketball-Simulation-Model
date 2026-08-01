@@ -47,6 +47,15 @@ npm run dev                 # http://localhost:3000
 Other scripts: `npm run build` (production build), `npm run start` (serve the build),
 `npm run typecheck`.
 
+**Pages** (17 routes): Home · Scoreboard · Matchup · Roster · Streamers · Bench ·
+Season Summary · Season Stats · League Stats · Schedule · Power Rankings · Playoffs ·
+Player Value · Player Card · Compare · Trade Simulator · Settings.
+
+**Navigation** deliberately differs by device, as the Streamlit app did. Desktop is one
+flat header (brand, links, Stats/Tools dropdowns, gear) plus a left "This Week" rail on
+matchup pages. Mobile has **no header at all**: a fixed bottom icon bar, a section
+sub-row, and the This Week rail as a top sub-bar.
+
 If `/api/live` returns 500, `.env.local` is missing or empty — run `npm run env`. The
 pages still render from the last generated snapshot, and the badge under the team names
 tells you which data you're looking at.

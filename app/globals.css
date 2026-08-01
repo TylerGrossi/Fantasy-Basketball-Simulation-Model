@@ -53,8 +53,14 @@ body {
   color: var(--ink);
   font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
-  /* Never let a wide table push the page sideways; wide content scrolls in its own box. */
-  overflow-x: hidden;
+  /* Never let a wide table push the page sideways; wide content scrolls in its own box.
+     `clip`, NOT `hidden`: both suppress sideways scrolling, but `hidden` makes this a
+     scroll container, and a sticky descendant sticks to its nearest scroll container —
+     which made `.nav`'s `position: sticky` silently do nothing and the header scroll
+     away with the page. `clip` creates no scroll container, so sticky works and the
+     horizontal guarantee is unchanged. (It also leaves overflow-y `visible`, where
+     `hidden` would have forced it to `auto`.) */
+  overflow-x: clip;
 }
 
 /* Every number in this app is a tabular figure. */
@@ -71,8 +77,15 @@ body {
   padding: 0 var(--page-pad) 3rem;
 }
 
-/* --------------------------------------------------------------------- top nav */
-/* Full-bleed bar, but its CONTENTS align to the same centred column as the page. */
+/* ===================== NAVIGATION SHELL =====================
+   Desktop and mobile are DIFFERENT layouts, both rendered, shown/hidden by breakpoint —
+   no width detection, no flash of the wrong one. Breakpoint is 767px: an iPad in portrait
+   (768) gets the desktop treatment.
+
+     desktop  : one flat sticky header + a left "This Week" rail on week pages
+     mobile   : NO header. Fixed bottom icon bar + a section sub-row, and the This Week
+                rail becomes a sub-bar pinned to the top.
+   ============================================================ */
 
 .nav {
   position: sticky;
@@ -81,7 +94,10 @@ body {
   background: var(--header-bg);
   border-bottom: 1px solid var(--line);
 }
-
+/* Brand, links and gear span the SAME content column as the page body, so the header's
+   left and right edges line up with the content beneath it. `.nav-inner` and `.page`
+   share --content-max and --page-pad, which is what makes the two edges agree; the links
+   flex to fill the middle rather than the cluster sitting narrow in the centre. */
 .nav-inner {
   max-width: var(--content-max);
   margin: 0 auto;
@@ -89,13 +105,22 @@ body {
   height: var(--nav-h);
   display: flex;
   align-items: center;
-  gap: 1.6rem;
+  justify-content: space-between;
+  gap: 1.1rem;
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  /* Fill the space between brand and gear, spreading the links evenly across it. `gap`
+     is the floor: once the row runs out of room it stops spreading and then scrolls. */
+  flex: 1 1 auto;
+  justify-content: space-evenly;
+  gap: 1.1rem;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.nav-inner::-webkit-scrollbar {
-  display: none;
-}
+.nav-links::-webkit-scrollbar { display: none; }
 
 .nav-brand {
   display: inline-flex;
@@ -106,7 +131,7 @@ body {
   color: var(--ink);
   text-decoration: none;
   white-space: nowrap;
-  margin-right: auto;
+  flex: 0 0 auto;
 }
 
 .nav-link {
@@ -117,16 +142,113 @@ body {
   white-space: nowrap;
   padding: 0.45rem 0;
   border-bottom: 2px solid transparent;
-  /* Press feedback is instant here because it's a real link, not a server round trip. */
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  font-family: inherit;
+  cursor: pointer;
   transition: color 0.12s ease;
 }
-.nav-link:hover {
-  color: var(--ink);
-}
+.nav-link:hover { color: var(--ink); }
+/* Instant press feedback — these are real links, so there is no round trip to wait on. */
+.nav-link:active { color: var(--ink); }
 .nav-link[aria-current="page"] {
   color: var(--ink);
   border-bottom-color: var(--cobalt);
 }
+.nav-link:focus-visible,
+.nav-gear:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+.nav-gear {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-2);
+  padding: 0.4rem;
+  border-radius: 6px;
+  transition: color 0.12s ease;
+}
+.nav-gear:hover,
+.nav-gear:active { color: var(--cobalt); }
+.nav-gear[aria-current="page"] { color: var(--cobalt); }
+
+/* -------- header dropdowns (Stats / Tools) -------- */
+.nav-menu { position: relative; }
+.nav-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.nav-chevron { opacity: 0.7; }
+/* FIXED, not absolute, and positioned from JS — `.nav-links` is a scroll container on
+   both axes (see the note in Nav.tsx) and would otherwise clip this away entirely. */
+.nav-menu-panel {
+  position: fixed;
+  transform: translateX(-50%);
+  min-width: 170px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(27, 29, 34, 0.1);
+  padding: 0.3rem;
+  z-index: 200;
+}
+.nav-menu-item {
+  display: block;
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.nav-menu-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-menu-item[aria-current="page"] { color: var(--ink); font-weight: 700; }
+
+/* -------- "This Week" rail: desktop left rail -------- */
+.week-rail {
+  position: fixed;
+  top: var(--nav-h);
+  left: 0;
+  bottom: 0;
+  width: 230px;
+  padding: 1.2rem 0.9rem;
+  background: var(--surface-2);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  z-index: 90;
+}
+.week-rail-label { margin-bottom: 0.5rem; padding-left: 0.7rem; }
+.week-link {
+  display: block;
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.week-link:hover { background: var(--cobalt-soft); color: var(--ink); }
+.week-link:active,
+.week-link[aria-current="page"] {
+  background: var(--cobalt-soft);
+  color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--cobalt);
+}
+/* Page content shifts right to clear the rail — only when the rail is present. */
+body:has(.week-rail) .page { padding-left: calc(230px + var(--page-pad)); }
+
+/* -------- mobile-only chrome, hidden on desktop -------- */
+.sub-row,
+.bottom-nav { display: none; }
 
 /* ---------------------------------------------------------------- typography */
 
@@ -195,6 +317,99 @@ h2 {
   font-size: 1rem;
   color: var(--ink-3);
   margin-left: 0.7rem;
+}
+
+/* ---- the board -------------------------------------------------------------
+   The matchup header as an actual scoreboard: one row, each side owning its own
+   number, a status chip between them. Its own block rather than a variant of
+   .sb-hero, which Compare and Matchup also use and which must not move. */
+
+.board {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto 1fr;
+  align-items: center;
+  gap: clamp(0.6rem, 2.5vw, 1.6rem);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem 1.3rem;
+  /* Carries its own top gap — the title sits directly above it with no caption between. */
+  margin: 0.9rem 0 0.8rem;
+}
+/* Each name hugs its own score rather than being flung to the board's outer edge,
+   so the five parts read as one line. The 1fr columns still absorb the slack, which
+   is what lets a long team name expand instead of truncating early. */
+.board-side {
+  min-width: 0;
+  text-align: right;
+}
+.board-side-right {
+  text-align: left;
+}
+.board-team {
+  display: inline-block;
+  max-width: 100%;
+  font-weight: 700;
+  font-size: 1.25rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Which side is which, in the app's two team colors — the same pairing the
+     category bars below use. */
+  border-bottom: 2px solid transparent;
+  padding-bottom: 0.2rem;
+}
+.board-you {
+  border-bottom-color: var(--cobalt);
+}
+.board-opp {
+  border-bottom-color: var(--clay);
+}
+/* Categories won. Reuses .sb-win / .sb-lose so the leader is emphasised exactly
+   the way the winning value in each category row below is. */
+.board-score {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 2.6rem;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.board-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+.board-status {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  white-space: nowrap;
+}
+.board-ties {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .board {
+    padding: 0.85rem 0.9rem;
+  }
+  .board-team {
+    font-size: 1rem;
+  }
+  .board-score {
+    font-size: 2rem;
+  }
 }
 
 .sb-row {
@@ -340,21 +555,148 @@ h2 {
   gap: 0.7rem;
   margin: 1rem 0 1.4rem;
 }
+/* Label and figure both centred, and taller than a bare text box so the number has room
+   to sit as the tile's subject rather than crowding the label. */
 .metric {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 0.75rem 0.9rem;
+  padding: 1.15rem 0.9rem 1.25rem;
+  min-height: 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 .metric-value {
   font-size: 1.6rem;
   font-weight: 700;
   line-height: 1.1;
-  margin-top: 0.2rem;
+  /* Deliberate separation from the label — they read as two things, not one stacked
+     block. Applies everywhere metrics are used (Schedule, Season Summary, Matchup…). */
+  margin-top: 0.75rem;
 }
 .metric-delta {
   font-size: 0.72rem;
   margin-top: 0.15rem;
+}
+
+/* ---- Season Stats: category leaders ---------------------------------------
+   Eight tiles read as one block at 4-up, and stay legible at 2-up on a phone
+   rather than stacking into eight full-width cards that bury the table. */
+.leader-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.7rem;
+  margin: 0.6rem 0 1.4rem;
+}
+.leader {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  min-width: 0;
+}
+.leader-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin-top: 0.2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leader-detail {
+  font-size: 0.8rem;
+  color: var(--ink-2);
+  margin-top: 0.1rem;
+}
+
+@media (max-width: 900px) {
+  .leader-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+
+/* ---- a table sized to be READ, not scanned sideways ------------------------
+   The column groups keep this to nine columns at most, which fits the content
+   column outright on a desktop — so it never actually scrolls there, even though
+   it still sits in a .table-scroll. That wrapper is the safety net for narrow
+   screens: without it a too-wide group is CLIPPED by the `overflow-x: clip` on
+   body rather than scrolled, and the last columns become unreachable. */
+table.sheet.sheet-lg {
+  width: 100%;
+  font-size: 0.95rem;
+}
+table.sheet.sheet-lg th {
+  font-size: 0.72rem;
+}
+table.sheet.sheet-lg td {
+  padding: 0.6rem 0.8rem;
+}
+/* The one column with real text takes the slack; the numbers stay tight. */
+table.sheet.sheet-lg .cell-name {
+  width: 40%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 0;
+}
+
+@media (max-width: 767px) {
+  /* Still bigger than the 0.78rem sheets elsewhere, but tight enough that the
+     two narrow groups fit a phone without scrolling at all. */
+  table.sheet.sheet-lg {
+    font-size: 0.88rem;
+  }
+  table.sheet.sheet-lg td {
+    padding: 0.5rem 0.55rem;
+  }
+  table.sheet.sheet-lg .th-sort {
+    padding: 0.5rem 0.55rem;
+  }
+}
+
+/* ---- sortable table headers ------------------------------------------------
+   The whole header cell is the hit target, so the caret is decoration rather
+   than the thing you have to aim at. */
+table.sheet.sortable th {
+  padding: 0;
+}
+.th-sort {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  background: none;
+  border: 0;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+table.sheet.sortable th.num .th-sort {
+  justify-content: flex-end;
+}
+.th-sort:hover {
+  color: var(--ink);
+}
+.th-sort:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -2px;
+}
+/* Dim on every column so the row's alignment doesn't shift when sort moves. */
+.sort-caret {
+  font-size: 0.6em;
+  opacity: 0.25;
+}
+.sort-caret.on {
+  opacity: 1;
+  color: var(--cobalt);
 }
 
 .two-up {
@@ -559,6 +901,88 @@ table.sheet .num {
 table.sheet .row-muted td {
   color: var(--ink-3);
 }
+/* -------- week selector (Scoreboard) -------- */
+.week-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1.2rem;
+  flex-wrap: wrap;
+}
+.week-select-label { flex: 0 0 auto; }
+.week-select .field-select { min-width: 200px; }
+.week-step {
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.week-step:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); }
+.week-step:disabled { opacity: 0.4; cursor: default; }
+
+/* -------- week picker (unused chip variant, kept for the mobile sub-bar) -------- */
+.week-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0 0 1.2rem;
+  min-width: 0;
+}
+.week-picker-label { flex: 0 0 auto; }
+/* Twenty-two weeks will not fit on a phone, so the strip scrolls inside its own box —
+   the page itself never moves sideways. */
+.week-picker-scroll {
+  display: flex;
+  gap: 0.3rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.week-picker-scroll::-webkit-scrollbar { display: none; }
+.week-chip {
+  flex: 0 0 auto;
+  min-width: 2rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink-2);
+  text-decoration: none;
+  text-align: center;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.week-chip:hover { color: var(--ink); border-color: var(--line-strong); }
+.week-chip[aria-current="page"] {
+  background: var(--cobalt);
+  border-color: var(--cobalt);
+  color: #fff;
+}
+
+/* A whole table row that navigates. The anchor sits in one cell for keyboard access and
+   is stretched over the row with a pseudo-element, so the click target is the full row
+   without nesting an <a> inside every <td>. `position: relative` on the row is what the
+   stretched anchor positions against. */
+tr.row-link { position: relative; cursor: pointer; }
+tr.row-link:hover td { background: var(--row-highlight); }
+.row-link-a { color: inherit; text-decoration: none; font-weight: 600; }
+.row-link-a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+tr.row-link:focus-within td { background: var(--row-highlight); }
+.row-link-a:focus-visible { outline: 2px solid var(--cobalt); outline-offset: -2px; }
+
 .tag {
   font-size: 0.6rem;
   font-weight: 700;
@@ -668,6 +1092,112 @@ table.sheet tr.row-you td {
   font-weight: 600;
 }
 
+/* ---- Season Summary -------------------------------------------------------
+   The one centered page in the app. It is a verdict, not a worksheet: a title,
+   who won, your four numbers, the table. Everything is capped to 960px and
+   centered so the whole thing lands on one 1080p screen, which is how the
+   Streamlit version it replaces read. Scoped with .ss-* so the left-aligned
+   Analyst Sheet default still governs every other page. */
+
+.ss-title {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0.8rem 0 0.8rem;
+}
+.ss-col {
+  max-width: 1020px;
+  margin: 0 auto;
+}
+.ss-finish {
+  text-align: center;
+  color: var(--ink-2);
+  font-size: 1rem;
+  margin: 1rem 0 0;
+}
+.ss-finish strong {
+  color: var(--ink);
+}
+.ss-finish .ss-place {
+  color: var(--cobalt);
+}
+
+/* Tiles read as a scoreline here, so they center — elsewhere they sit in dense
+   left-aligned rows and must not. */
+.ss-metrics {
+  margin: 0.8rem 0 0.9rem;
+}
+.ss-metrics .metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-align: center;
+  min-height: 124px;
+  padding: 0.9rem 0.7rem;
+}
+.ss-metrics .eyebrow {
+  font-size: 0.78rem;
+}
+.ss-metrics .metric-value {
+  font-size: 2rem;
+  margin-top: 0;
+}
+
+/* Rank is a label, not a measurement — left-aligned like the team name it
+   belongs to, and muted so the eye lands on the names. */
+table.sheet.ss-standings td.ss-rank {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  border-left: 3px solid transparent;
+}
+table.sheet.ss-standings tr.row-you td.ss-rank {
+  border-left-color: var(--cobalt);
+}
+table.sheet.ss-standings td.ss-team {
+  font-weight: 500;
+}
+table.sheet.ss-standings tr.row-you td.ss-team {
+  font-weight: 700;
+}
+/* Ten rows are the whole point of this page, so they get more room than the dense
+   sheets elsewhere — still one screen at 1080p. */
+table.sheet.ss-standings {
+  font-size: 0.95rem;
+}
+table.sheet.ss-standings th {
+  font-size: 0.72rem;
+  padding: 0.7rem 0.95rem;
+}
+table.sheet.ss-standings td {
+  padding: 0.65rem 0.95rem;
+}
+
+@media (max-width: 767px) {
+  .ss-title {
+    font-size: 1.5rem;
+  }
+  .ss-finish {
+    font-size: 0.92rem;
+  }
+  /* Four cramped columns become two readable ones. */
+  .ss-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ss-metrics .metric-value {
+    font-size: 1.5rem;
+  }
+  .ss-metrics .eyebrow {
+    font-size: 0.7rem;
+  }
+  table.sheet.ss-standings {
+    font-size: 0.88rem;
+  }
+}
+
 /* Horizontal probability bars (championship odds). */
 .bar-row {
   display: flex;
@@ -726,4 +1256,1005 @@ table.sheet tr.row-you td {
 }
 .notice strong {
   color: var(--ink);
+}
+
+
+/* ===================== MOBILE NAVIGATION (<=767px) =====================
+   At this width there is NO top header at all — exactly the Streamlit app's pattern.
+   Navigation is the fixed bottom icon bar plus a section sub-row, and the This Week rail
+   becomes a sub-bar pinned to the top (there is no header above it to sit under).
+   ====================================================================== */
+
+@media (max-width: 767px) {
+  .nav { display: none; }
+
+  .page {
+    /* Clear the bottom bar; the top offset depends on whether a sub-bar is showing. */
+    padding-bottom: calc(var(--bottomnav-h) + 1.5rem);
+    padding-top: 0.75rem;
+  }
+  /* Neither rail nor sub-row is a left rail on mobile, so drop the desktop inset. */
+  body:has(.week-rail) .page { padding-left: var(--page-pad); }
+  /* A top sub-bar is fixed, so its height has to come out of the page's top padding. */
+  body:has(.week-rail) .page,
+  body:has(.sub-row) .page { padding-top: 3.5rem; }
+
+  /* -------- This Week rail becomes a fixed top sub-bar -------- */
+  .week-rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.4rem var(--page-pad);
+    background: var(--paper);
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    scrollbar-width: none;
+    z-index: 95;
+  }
+  .week-rail::-webkit-scrollbar { display: none; }
+  /* The "This Week" caption is a vertical-rail affordance; it reads as clutter in a row. */
+  .week-rail-label { display: none; }
+  .week-link {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.86rem;
+    border-radius: 0;
+  }
+  /* Underline, not a tinted box — a filled pill reads as "boxed" in a horizontal bar. */
+  .week-link:active,
+  .week-link[aria-current="page"] {
+    background: transparent;
+    box-shadow: inset 0 -2px 0 var(--cobalt);
+  }
+
+  /* -------- section sub-row (Season / Tools) -------- */
+  .sub-row {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.4rem var(--page-pad);
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    scrollbar-width: none;
+    z-index: 95;
+  }
+  .sub-row::-webkit-scrollbar { display: none; }
+  .sub-link {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.6rem;
+    color: var(--ink-2);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.86rem;
+    white-space: nowrap;
+  }
+  .sub-link:active,
+  .sub-link[aria-current="page"] {
+    color: var(--ink);
+    box-shadow: inset 0 -2px 0 var(--cobalt);
+  }
+
+  /* -------- fixed bottom icon bar -------- */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    background: var(--header-bg);
+    border-top: 1px solid var(--line);
+    /* Keep clear of the iOS home indicator. */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .bottom-link {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.5rem 0.2rem 0.45rem;
+    color: var(--ink-3);
+    text-decoration: none;
+    font-size: 0.64rem;
+    font-weight: 600;
+    /* 44px minimum tap target. */
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bottom-link span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  /* Instant press feedback — no server round trip to wait on. */
+  .bottom-link:active,
+  .bottom-link[aria-current="page"] { color: var(--cobalt); }
+
+  /* Metric tiles wrap 2-up rather than one-per-screen. */
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Tablet and up: the sub-row is desktop-redundant (those pages are top-level links or
+   live in the dropdowns), so it never shows. */
+@media (min-width: 768px) {
+  .sub-row { display: none; }
+}
+
+
+/* ===================== HOME ===================== */
+
+.home-mobile { display: none; }
+
+.hero { margin: 1.5rem 0 1.6rem; }
+.hero-title { font-size: 2rem; margin: 0 0 0.2rem; letter-spacing: -0.01em; }
+.hero-sub { color: var(--ink-2); font-size: 0.92rem; margin: 0; }
+
+/* -------- home hero: centred, matching the Streamlit landing page -------- */
+.home-hero { text-align: center; padding: 2.6rem 1rem 1.4rem; }
+.home-eyebrow {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.home-title {
+  /* Set uppercase here rather than shouting in the markup, so the accessible name and
+     the page title stay in normal case. */
+  text-transform: uppercase;
+  /* 2.2rem, not the 2.6rem in the Streamlit markup's inline style: `.main-header` set
+     `font-size: 2.2rem !important`, and an !important rule beats a plain inline one, so
+     2.2 is what the old page actually rendered. */
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0.3rem 0 0;
+  text-wrap: balance;
+}
+.home-sub {
+  color: var(--ink-2);
+  max-width: 560px;
+  margin: 0.7rem auto 0;
+  font-size: 0.95rem;
+}
+.home-sub strong { color: var(--ink); font-weight: 700; }
+
+/* Full content width — the cards are the page's main content, so they get all of it
+   rather than sitting in a narrower inner column. */
+.home-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.4rem;
+}
+
+/* The cards stay inside the shared content column so their edges line up with the
+   header's. `.nav-inner` and `.page` already resolve to the same content box, so this
+   needs no extra width of its own. */
+/* The cell stacks the card and its Open button; the whole thing is one link. */
+.home-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-decoration: none;
+  color: var(--ink);
+}
+.home-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  min-height: 210px;
+  padding: 1.6rem 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: transform 0.14s ease;
+}
+/* Hover lifts the card but leaves the border alone — the blue outline read as a
+   selected/active state rather than a hover. The Open button still brightens. */
+.home-cell:hover .home-card { transform: translateY(-2px); }
+.home-cell:active .home-card { transform: none; }
+.home-card-icon { color: var(--cobalt); line-height: 1; }
+.home-card-title {
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--ink);
+  margin-top: 0.7rem;
+}
+.home-card-desc {
+  color: var(--ink-2);
+  font-size: 0.95rem;
+  line-height: 1.45;
+  margin-top: 0.45rem;
+}
+/* A real filled button, as on the Streamlit page — not a text link. */
+.home-card-open {
+  display: block;
+  text-align: center;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: var(--cobalt);
+  color: #fff;
+  font-weight: 600;
+  font-size: 1rem;
+  transition: filter 0.12s ease;
+}
+.home-cell:hover .home-card-open { filter: brightness(1.08); }
+.home-cell:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 3px; border-radius: 12px; }
+
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.7rem;
+}
+.home-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 104px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  -webkit-tap-highlight-color: transparent;
+}
+.home-tile svg { color: var(--cobalt); }
+.home-tile:active { background: var(--cobalt-soft); border-color: var(--cobalt); }
+
+/* ===================== FORM CONTROLS ===================== */
+
+.field {
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.42rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  min-width: 180px;
+}
+.field:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 1px; }
+.field-select { cursor: pointer; }
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card);
+}
+.seg {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.seg + .seg { border-left: 1px solid var(--line); }
+.seg:hover { color: var(--ink); }
+.seg-on { background: var(--cobalt-soft); color: var(--ink); }
+
+.chip-val { color: var(--ink-3); font-family: var(--mono); font-size: 0.72rem; }
+
+/* ===================== PLAYER CARD ===================== */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0 2rem;
+}
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.45rem 0.1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.88rem;
+}
+.stat-row span:last-child { font-weight: 700; }
+
+/* ===================== LEAGUE STATS RANK CHIPS ===================== */
+
+.rank-chip {
+  display: inline-block;
+  margin-left: 0.4rem;
+  min-width: 16px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-3);
+}
+.rank-good { color: var(--good); font-weight: 700; }
+.rank-bad { color: var(--bad); }
+
+@media (max-width: 767px) {
+  .home-desktop { display: none; }
+  .home-mobile { display: block; }
+  .hero { margin: 0.6rem 0 1rem; }
+  .hero-title { font-size: 1.4rem; }
+  .hero-sub { font-size: 0.82rem; }
+  /* Compact hero so the tile grid still fits one phone screen without scrolling. The
+     title here is the team name — a proper noun, so it is not uppercased. */
+  .home-hero { padding: 0.7rem 0.5rem 0.6rem; }
+  .home-eyebrow { font-size: 0.68rem; }
+  .home-title { font-size: 1.4rem; text-transform: none; margin-top: 0.15rem; }
+  .home-sub { font-size: 0.85rem; margin-top: 0.35rem; }
+  .stat-grid { grid-template-columns: 1fr; gap: 0; }
+  .controls { gap: 0.6rem; }
+  .field { min-width: 0; width: 100%; }
+  .segmented { width: 100%; }
+  .seg { flex: 1 1 0; padding: 0.45rem 0.3rem; }
+}
+
+/* ===================== TOOLS PAGES =====================
+   Player Value / Player Card / Compare / Trade. Ported from the .pv-* / .pd-* blocks in
+   legacy/styles.py so the four Tools pages read exactly as they did in the Streamlit app;
+   what is dropped is only the Streamlit plumbing (the .st-key-* scoping), because the
+   desktop/mobile split there was two rendered copies and here it is one component that
+   reflows.
+   ====================================================================== */
+
+/* -------- multi-select (Player Value filters, Trade give/get) -------- */
+.ms { position: relative; }
+.ms-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 0.2rem;
+}
+.ms-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.ms-trigger.ms-on { border-color: var(--cobalt); color: var(--ink); }
+.ms-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-panel {
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  min-width: 100%;
+  max-width: 320px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(27, 29, 34, 0.12);
+  padding: 0.35rem;
+}
+.ms-search { width: 100%; min-width: 0; margin-bottom: 0.3rem; }
+/* Capped and scrollable — a 290-name list must not run off the bottom of the page. */
+.ms-list { max-height: 15rem; overflow-y: auto; }
+.ms-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ms-opt:hover { background: var(--surface-2); }
+.ms-opt input { accent-color: var(--cobalt); cursor: pointer; }
+.ms-empty { padding: 0.4rem 0.45rem; font-size: 0.82rem; color: var(--ink-3); }
+.ms-clear {
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.3rem;
+  border: 0;
+  border-top: 1px solid var(--line-2);
+  border-radius: 0 0 6px 6px;
+  background: none;
+  color: var(--cobalt);
+  cursor: pointer;
+}
+
+/* Filters sit on one row with their labels above, so the row reads as a control strip. */
+.pv-filters { align-items: flex-end; gap: 0.8rem; }
+.pv-injured { padding-bottom: 0.45rem; white-space: nowrap; }
+
+/* -------- Player Value: the ranked card list -------- */
+.pv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pv-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  overflow: hidden;
+}
+.pv-item[open] { background: var(--surface-2); }
+.pv-sum {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  cursor: pointer;
+  list-style: none;
+  overflow: hidden;
+}
+.pv-sum::-webkit-details-marker { display: none; }
+/* The value bar sits BEHIND the row's text rather than beside it — a full-width row of
+   its own would double the list's height for one number. */
+.pv-fill { position: absolute; left: 0; top: 0; bottom: 0; opacity: 0.14; z-index: 0; }
+.pv-sum > span:not(.pv-fill),
+.pv-detail { position: relative; z-index: 1; }
+.pv-rank {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  min-width: 2rem;
+}
+.pv-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 1.02rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pv-meta { color: var(--ink-3); font-size: 0.64rem; white-space: nowrap; }
+.pv-val {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.05rem;
+  min-width: 3.2rem;
+  text-align: right;
+}
+.pv-trend { font-size: 0.68rem; min-width: 0.9rem; text-align: center; }
+.pv-trend.up { color: var(--good); }
+.pv-trend.down { color: var(--bad); }
+.pv-trend.flat { color: var(--ink-3); }
+
+/* Expanded ESPN-style player card: headshot + identity, then the stat tiles. */
+.pv-detail { padding: 0.5rem 1.1rem 1rem; }
+.pv-card { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.9rem; }
+.pv-shot {
+  flex: 0 0 auto;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: top center;
+  background-color: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.pv-chead { min-width: 0; }
+.pv-cname { font-weight: 700; font-size: 1.35rem; color: var(--ink); line-height: 1.1; }
+.pv-csub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  margin-top: 0.3rem;
+}
+/* Meta text can shrink; the badges keep their own nowrap group so they never overlap. */
+.pv-cmeta { flex: 0 1 auto; min-width: 0; }
+.pv-badges { display: inline-flex; align-items: center; gap: 0.3rem; flex: 0 0 auto; }
+.pv-statgrid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+.pv-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 0.55rem 0.2rem;
+}
+.pv-stat-l { font-size: 0.64rem; color: var(--ink-3); letter-spacing: 0.03em; }
+.pv-stat-v {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--ink);
+  margin-top: 0.2rem;
+}
+
+/* Availability badge + FA chip. */
+.pv-badge {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 0.56rem;
+  letter-spacing: 0.03em;
+  padding: 0.08rem 0.34rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pv-badge.out { background: rgba(192, 57, 43, 0.14); color: var(--bad); }
+.pv-badge.day { background: rgba(224, 106, 59, 0.16); color: var(--clay); }
+.pv-fa {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 0.54rem;
+  letter-spacing: 0.04em;
+  padding: 0.06rem 0.3rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  background: var(--cobalt-soft);
+  color: var(--cobalt);
+}
+
+/* -------- "Last 10 games" disclosure + table -------- */
+.pv-gl { margin-top: 0.7rem; border-top: 1px solid var(--line-2); padding-top: 0.6rem; }
+.pv-gl-sum {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--cobalt);
+}
+.pv-gl-sum::-webkit-details-marker { display: none; }
+/* Chevron drawn from two borders — no font glyph, so it can't render as a box. */
+.pv-gl-sum::before {
+  content: "";
+  display: inline-block;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: center;
+  margin-right: 0.5rem;
+  position: relative;
+  top: -2px;
+  transition: transform 0.15s;
+}
+.pv-gl[open] .pv-gl-sum::before { transform: rotate(45deg); top: -3px; }
+.pv-gl-body { margin-top: 0.4rem; overflow-x: auto; }
+.pv-gl-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+}
+.pv-gl-tbl th {
+  color: var(--ink-3);
+  font-weight: 600;
+  text-align: right;
+  padding: 4px 10px;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+.pv-gl-tbl td {
+  color: var(--ink);
+  text-align: right;
+  padding: 4px 10px;
+  white-space: nowrap;
+  border-top: 1px solid var(--line-2);
+}
+.pv-gl-tbl th:first-child,
+.pv-gl-tbl td:first-child,
+.pv-gl-tbl th:nth-child(2),
+.pv-gl-tbl td:nth-child(2) { text-align: left; }
+.pv-gl-tbl td.pv-gl-w { color: var(--good); font-weight: 600; }
+.pv-gl-tbl td.pv-gl-l { color: var(--bad); font-weight: 600; }
+
+/* -------- Compare: head-to-head with bars diverging from the centre label --------
+   [A value] [A bar >|] LABEL [|< B bar] [B value] */
+.pv-cmp-pickers { max-width: 920px; margin: 0 auto 0.8rem; }
+.pv-cmp { max-width: 920px; margin: 0.6rem auto 0; }
+.pv-cmp-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.pv-cmp-player { text-align: center; min-width: 0; }
+.pv-cmp-player .pv-shot { margin: 0 auto 0.5rem; width: 96px; height: 96px; }
+.pv-cmp-name {
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: var(--ink);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.pv-cmp-sub { justify-content: center; font-size: 0.8rem; }
+.pv-cmp-row {
+  display: grid;
+  grid-template-columns: 3.7rem 1fr auto 1fr 3.7rem;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line-2);
+}
+.pv-cmp-a,
+.pv-cmp-b {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.pv-cmp-a { text-align: right; }
+.pv-cmp-b { text-align: left; }
+.pv-cmp-lbl {
+  text-align: center;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  min-width: 3.6rem;
+}
+.pv-cmp-win { color: var(--good); }
+.pv-cmp-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  display: flex;
+  overflow: hidden;
+}
+.pv-cmp-bar-a { justify-content: flex-end; }
+.pv-cmp-bar-b { justify-content: flex-start; }
+.pv-cmp-fill { height: 100%; border-radius: 5px; }
+.pv-cmp-bar-a .pv-cmp-fill { background: var(--cobalt); }
+.pv-cmp-bar-b .pv-cmp-fill { background: var(--clay); }
+.pv-cmp-logs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem 2rem;
+  margin-top: 1rem;
+}
+.pv-cmp-logs .pv-gl-tbl { font-size: 0.72rem; }
+
+/* -------- Player Card: the full one-player profile -------- */
+.pd-search { max-width: 860px; margin: 0 auto 0.6rem; }
+.pd { max-width: 860px; margin: 0.6rem auto 0; }
+.pd-head { display: flex; align-items: center; gap: 1.3rem; margin-bottom: 0.9rem; }
+.pd-head .pv-shot { flex: 0 0 auto; width: 100px; height: 100px; }
+.pd-id { min-width: 0; }
+.pd-name {
+  font-weight: 800;
+  font-size: 1.7rem;
+  color: var(--ink);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.pd-team { font-size: 0.95rem; color: var(--ink-2); margin-top: 0.25rem; }
+.pd-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ink-2);
+  margin-top: 0.35rem;
+}
+.pd-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 0.35rem;
+}
+.pd-dot.ok { background: var(--good); }
+.pd-dot.out { background: var(--bad); }
+.pd-dot.day { background: var(--clay); }
+.pd-owner { color: var(--ink-3); }
+.pd-owner b { color: var(--ink); }
+/* Bio facts (label over value), between hairlines. */
+.pd-bio {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.1rem 2.2rem;
+  padding: 0.8rem 0.1rem;
+  margin-bottom: 1.1rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.pd-bio-f { display: flex; flex-direction: column; }
+.pd-bl {
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pd-bv { font-size: 0.9rem; font-weight: 600; color: var(--ink); margin-top: 0.15rem; }
+.pd-values {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  margin-bottom: 1.1rem;
+}
+.pd-vtile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.4rem;
+}
+.pd-vl {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.pd-vv {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.5rem;
+  margin: 0.1rem 0;
+}
+.pd-vr { font-family: var(--mono); font-size: 0.66rem; color: var(--ink-3); }
+.pd-sec {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0.2rem 0 0.4rem;
+}
+.pd-sec span {
+  color: var(--ink-3);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 0.72rem;
+}
+.pd-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 2.6rem;
+  margin-bottom: 1.1rem;
+}
+.pd-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.15rem;
+  border-bottom: 1px solid var(--line-2);
+}
+.pd-sl { font-size: 0.82rem; color: var(--ink-2); }
+.pd-sv {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+/* -------- Trade Simulator -------- */
+.metrics.metrics-3 { grid-template-columns: repeat(3, 1fr); }
+.trade-side { font-size: 1rem; margin: 0 0 0.4rem; }
+.trade-sell { color: var(--good); }
+.trade-buy { color: var(--cobalt); }
+.trade-line { padding: 0.5rem 0; border-bottom: 1px solid var(--line-2); font-size: 0.9rem; }
+/* The shift table is four narrow columns — full width would strand them across a desk. */
+.trade-shift { max-width: 560px; }
+
+@media (max-width: 767px) {
+  /* Three tiles across is unreadable on a phone; the third wraps under, as elsewhere. */
+  .metrics.metrics-3 { grid-template-columns: repeat(2, 1fr); }
+  /* Six stacked full-width controls pushed the list a whole screen down. Two-up keeps
+     every filter the desktop has while the first rows of data stay above the fold. */
+  .pv-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 0.6rem;
+    align-items: end;
+  }
+  .pv-filters .ms-label { font-size: 0.62rem; }
+  .pv-injured { grid-column: 1 / -1; padding-bottom: 0; font-size: 0.8rem; }
+  .ms { width: 100%; min-width: 0 !important; }
+  .ms-panel { max-width: none; }
+  /* The list collapses to one bordered box, the way the phone layout had it. */
+  .pv-list {
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--card);
+  }
+  .pv-item { border: 0; border-bottom: 1px solid var(--line-2); border-radius: 0; }
+  .pv-item:last-child { border-bottom: none; }
+  .pv-sum { padding: 0.5rem 0.7rem; }
+  .pv-name { font-size: 0.9rem; }
+  .pv-val { font-size: 0.92rem; min-width: 2.8rem; }
+  .pv-rank { font-size: 0.72rem; min-width: 1.5rem; }
+  .pv-detail { padding: 0.5rem 0.7rem 0.7rem; }
+  .pv-card { gap: 0.7rem; margin-bottom: 0.6rem; }
+  .pv-shot { width: 58px; height: 58px; }
+  .pv-cname { font-size: 1rem; }
+  .pv-csub { font-size: 0.72rem; margin-top: 0.2rem; }
+  /* Eight tiles on one row is unreadable on a phone — two rows of four. */
+  .pv-statgrid { grid-template-columns: repeat(4, 1fr); gap: 0.35rem; }
+  .pv-stat { padding: 0.3rem 0.1rem; border-radius: 6px; }
+  .pv-stat-l { font-size: 0.56rem; }
+  .pv-stat-v { font-size: 0.82rem; margin-top: 0.1rem; }
+  .pv-gl { margin-top: 0.55rem; padding-top: 0.45rem; }
+  .pv-gl-sum { font-size: 0.72rem; }
+  .pv-gl-tbl { font-size: 0.64rem; }
+  .pv-gl-tbl th { font-size: 0.55rem; padding: 2px 5px; }
+  .pv-gl-tbl td { padding: 2px 5px; }
+
+  .pv-cmp-player .pv-shot { width: 68px; height: 68px; }
+  .pv-cmp-name { font-size: 1rem; }
+  .pv-cmp-sub { font-size: 0.72rem; }
+  .pv-cmp-row {
+    grid-template-columns: 2.9rem 1fr auto 1fr 2.9rem;
+    gap: 0.4rem;
+    padding: 0.4rem 0;
+  }
+  .pv-cmp-a,
+  .pv-cmp-b { font-size: 0.88rem; }
+  .pv-cmp-lbl { font-size: 0.56rem; min-width: 2.6rem; }
+  .pv-cmp-bar { height: 7px; }
+  .pv-cmp-logs { grid-template-columns: 1fr; }
+  .pv-cmp-logs .pv-gl-tbl { font-size: 0.64rem; }
+
+  .pd-head { gap: 0.9rem; }
+  .pd-head .pv-shot { width: 78px; height: 78px; }
+  .pd-name { font-size: 1.3rem; }
+  .pd-vv { font-size: 1.3rem; }
+  .pd-stats { grid-template-columns: 1fr; column-gap: 0; }
+}
+
+/* -------- week chooser as the page title (Scoreboard) -------- */
+.week-title {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 8px;
+  padding: 0.1rem 0.45rem;
+  margin-left: -0.45rem;
+  cursor: pointer;
+}
+.week-title:hover { background: var(--surface-2); }
+.week-title-text { white-space: nowrap; }
+/* Caret drawn with borders — no icon font, no asset. */
+.week-title-caret {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--ink-3);
+  flex: 0 0 auto;
+}
+/* The real control, laid over the label so its hit area matches the text exactly. */
+.week-title-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.week-title:focus-within {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+/* -------- week chooser menu (Scoreboard title) -------- */
+.week-title-wrap { position: relative; display: inline-block; }
+.week-title { margin: 1.6rem 0 0.3rem; }
+.week-title-btn {
+  font: inherit;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.25;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.1rem 0.45rem;
+  margin-left: -0.45rem;
+  cursor: pointer;
+}
+.week-title-btn:hover { background: var(--surface-2); }
+.week-title-btn:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
+.week-title-caret {
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--ink-3);
+  flex: 0 0 auto;
+}
+/* Capped and scrollable — the whole point of replacing the native select. */
+.week-menu {
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  left: 0;
+  z-index: 200;
+  min-width: 210px;
+  max-height: 15rem;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(27, 29, 34, 0.12);
+  padding: 0.3rem;
+}
+.week-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.7rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.week-menu-item:hover { background: var(--surface-2); color: var(--ink); }
+.week-menu-item[aria-selected="true"] {
+  background: var(--cobalt-soft);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* Small qualifier under a KPI figure — says what the number counts. */
+.metric-sub {
+  font-size: 0.68rem;
+  color: var(--ink-3);
+  margin-top: 0.3rem;
+  line-height: 1.3;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
