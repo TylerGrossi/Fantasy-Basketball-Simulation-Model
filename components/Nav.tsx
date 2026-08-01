@@ -4,10 +4,9 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
-  FLAT_NAV,
-  SECTIONS,
   WEEK_PAGES,
   isActive,
+  navFor,
   sectionFor,
   type NavEntry,
 } from "@/lib/nav";
@@ -25,15 +24,19 @@ import { BasketballMark, ChevronIcon, SECTION_ICONS, SettingsIcon } from "./Icon
  *
  * Both are rendered and shown/hidden by CSS breakpoint, so there is no width detection
  * and no flash of the wrong layout.
+ *
+ * `seasonOver` comes from the export via the layout rather than being read here: the
+ * links have to be right in the FIRST paint (a header that drops an item after hydration
+ * is a visible shuffle), and this is a client component.
  */
-export default function Nav() {
+export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
   const pathname = usePathname();
   // Keep the chosen week when moving between the This Week pages. Only Scoreboard can
   // render a past week today, but the selection has to survive the click either way.
   const period = useSearchParams().get("period");
+  const { flat, sections } = navFor(seasonOver);
   const section = sectionFor(pathname);
-  const onWeekPage = WEEK_PAGES.some((p) => p.href === pathname);
-  const activeSection = SECTIONS.find((s) => s.key === section);
+  const activeSection = sections.find((s) => s.key === section);
   const subPages =
     activeSection && activeSection.pages.length > 1 && section !== "week"
       ? activeSection.pages
@@ -49,7 +52,7 @@ export default function Nav() {
             Fantasy Basketball
           </Link>
           <div className="nav-links">
-            {FLAT_NAV.map((entry) =>
+            {flat.map((entry) =>
               entry.kind === "link" ? (
                 <Link
                   key={entry.href}
@@ -93,7 +96,7 @@ export default function Nav() {
 
       {/* ---------------- mobile bottom bar ---------------- */}
       <nav className="bottom-nav" aria-label="Sections">
-        {SECTIONS.map((s) => {
+        {sections.map((s) => {
           const Icon = SECTION_ICONS[s.key];
           return (
             <Link

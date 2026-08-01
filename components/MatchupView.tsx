@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { LeagueData, Matchup } from "@/lib/league";
 import {
   categoryValue,
@@ -81,28 +81,17 @@ export default function MatchupView({
   if (!hasGamesLeft) {
     // No games remain: probability would be theatre. Show the finished result instead —
     // the same choice the Streamlit app makes for completed weeks.
-    const rows = scoreboardRows(league, live.you, live.opp);
-    const rec = categoryRecord(rows);
     return (
-      <>
-        <Header youName={youName} oppName={oppName} />
-        <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
-        <div className="metrics">
-          <Metric label="Final" value={`${rec.win}-${rec.loss}-${rec.tie}`} />
-          <Metric label="Categories won" value={String(rec.win)} />
-          <Metric label="Your games left" value="0" />
-          <Metric label="Opp games left" value="0" />
-        </div>
-        <p className="caption">
-          This matchup is complete — no games remain, so these are final totals rather
-          than a projection.
-        </p>
-        <h2>Category results</h2>
-        <CategoryAnalysis
-          categories={league.categories}
-          probs={rows.map((r) => (r.youWins ? 1 : r.oppWins ? 0 : 0.5))}
-        />
-      </>
+      <Recap
+        league={league}
+        youName={youName}
+        oppName={oppName}
+        youVec={live.you}
+        oppVec={live.opp}
+        badge={
+          <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
+        }
+      />
     );
   }
 
@@ -154,6 +143,138 @@ export default function MatchupView({
   );
 }
 
+/**
+ * The completed-matchup view: what happened, not what might.
+ *
+ * Everything the live view leads with — win probability, the score distribution, the
+ * projection table — is meaningless once the week is over: there is one outcome and it
+ * already happened. So this is a different page, not the live one with the numbers
+ * frozen. Games-left tiles are gone (always 0), and the final record appears ONCE
+ * rather than as both "Final 10-5-0" and "Categories won 10", which said the same
+ * thing twice. The live view above is untouched.
+ */
+function Recap({
+  league,
+  youName,
+  oppName,
+  youVec,
+  oppVec,
+  badge,
+}: {
+  league: LeagueData;
+  youName: string;
+  oppName: string;
+  youVec: number[];
+  oppVec: number[];
+  badge: ReactNode;
+}) {
+  const rows = scoreboardRows(league, youVec, oppVec);
+  const rec = categoryRecord(rows);
+
+  const won = rec.win > rec.loss;
+  const tied = rec.win === rec.loss;
+  const margin = rec.win - rec.loss;
+
+  // The two facts the strip below cannot be read for at a glance: the category you took
+  // by the widest relative margin, and the one that came closest to flipping the result.
+  const wins = rows.filter((r) => r.youWins);
+  const best = wins.length
+    ? wins.reduce((a, b) => (b.margin > a.margin ? b : a))
+    : null;
+  const decided = rows.filter((r) => r.margin !== 0);
+  const closest = decided.length
+    ? decided.reduce((a, b) => (Math.abs(b.margin) < Math.abs(a.margin) ? b : a))
+    : null;
+
+  return (
+    <>
+      <Header youName={youName} oppName={oppName} />
+      {badge}
+
+      <div className="metrics">
+        <Metric
+          label="Result"
+          value={tied ? "Tied" : won ? "Won" : "Lost"}
+          tone={tied ? undefined : won}
+          delta={`${rec.win}-${rec.loss}-${rec.tie}`}
+        />
+        <Metric
+          label="Margin"
+          value={`${margin > 0 ? "+" : ""}${margin}`}
+          delta={`of ${league.categories.length} categories`}
+        />
+        <Metric
+          label="Biggest edge"
+          value={best ? best.cat : "—"}
+          delta={best ? best.marginStr : undefined}
+          good
+        />
+        <Metric
+          label="Closest call"
+          value={closest ? closest.cat : "—"}
+          delta={closest ? closest.marginStr : undefined}
+          good={closest ? closest.margin > 0 : undefined}
+        />
+      </div>
+
+      <h2>How it finished</h2>
+      <div className="recap-strip">
+        {rows.map((r) => (
+          <div
+            key={r.cat}
+            className={`recap-cell ${r.youWins ? "won" : r.oppWins ? "lost" : "tied"}`}
+          >
+            <span className="recap-cat">{r.cat}</span>
+            <span className="recap-margin mono">{r.marginStr}</span>
+          </div>
+        ))}
+      </div>
+      <p className="caption">
+        Each category as it finished, in the league&rsquo;s own order. The margin is
+        relative to the two totals, so a category is comparable with the ones beside it.
+      </p>
+
+      <h2>Final totals</h2>
+      <div className="table-scroll">
+        <table className="sheet">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th className="num">{youName}</th>
+              <th className="num">{oppName}</th>
+              <th className="num">Margin</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.cat}>
+                <td>{r.cat}</td>
+                <td className={`num ${r.youWins ? "sb-win" : "sb-lose"}`}>{r.youStr}</td>
+                <td className={`num ${r.oppWins ? "sb-win" : "sb-lose"}`}>{r.oppStr}</td>
+                <td
+                  className="num"
+                  style={{
+                    color:
+                      r.margin === 0
+                        ? "var(--ink-3)"
+                        : r.margin > 0
+                          ? "var(--good)"
+                          : "var(--bad)",
+                  }}
+                >
+                  {r.marginStr}
+                </td>
+                <td>{r.youWins ? "Won" : r.oppWins ? "Lost" : "Tied"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 function Header({ youName, oppName }: { youName: string; oppName: string }) {
   return (
     <div className="sb-hero">
@@ -168,16 +289,29 @@ function Metric({
   value,
   delta,
   good,
+  tone,
 }: {
   label: string;
   value: string;
   delta?: string;
+  /** Colours the delta line. */
   good?: boolean;
+  /** Colours the VALUE itself — true good, false bad, omitted for neutral. */
+  tone?: boolean;
 }) {
   return (
     <div className="metric">
       <div className="eyebrow">{label}</div>
-      <div className="metric-value mono">{value}</div>
+      <div
+        className="metric-value mono"
+        style={
+          tone === undefined
+            ? undefined
+            : { color: tone ? "var(--good)" : "var(--bad)" }
+        }
+      >
+        {value}
+      </div>
       {delta && (
         <div
           className="metric-delta mono"

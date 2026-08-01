@@ -62,6 +62,10 @@ export const FLAT_NAV: NavEntry[] = [
       { label: "Trade Simulator", href: "/trade" },
     ],
   },
+  // Agent is a top-level header tab on desktop but lives under Tools on mobile — the
+  // same split the Streamlit app used. It is the one page you go to with a question
+  // rather than a page you browse, so it earns the header slot on a wide screen.
+  { kind: "link", label: "Agent", href: "/agent" },
 ];
 
 export const SEASON_PAGES = [
@@ -78,6 +82,7 @@ export const TOOLS_PAGES = [
   { label: "Rankings", href: "/rankings" },
   { label: "Playoff Odds", href: "/playoffs" },
   { label: "Trade", href: "/trade" },
+  { label: "Agent", href: "/agent" },
 ];
 
 export type SectionKey = "home" | "week" | "season" | "tools" | "settings";
@@ -104,6 +109,38 @@ export const SECTIONS: Section[] = [
     pages: [{ label: "Settings", href: "/settings" }],
   },
 ];
+
+/**
+ * Pages that only make sense while a season is being played. Playoff Odds is a
+ * FORECAST — once the bracket is decided there is nothing left to forecast, and a
+ * standing link to a page of coin-flip probabilities about a finished tournament invites
+ * exactly the misreading that page's own banner has to argue against. The route stays
+ * reachable (bookmarks, a link from Season Summary); it just leaves the menus.
+ *
+ * The Streamlit app conditions its nav the same way in the other direction —
+ * `render_top_nav` drops "Season Summary" from FLAT_NAV until the season is over.
+ */
+export const IN_SEASON_ONLY = ["/playoffs"];
+
+/**
+ * The nav for a given moment in the season: in the offseason, minus the forecast pages.
+ *
+ * `sectionFor` deliberately keeps using the UNFILTERED sections, so /playoffs still
+ * resolves to Tools when someone opens it directly in the offseason — the page is hidden
+ * from the menus, not disowned by them.
+ */
+export function navFor(seasonOver: boolean): { flat: NavEntry[]; sections: Section[] } {
+  if (!seasonOver) return { flat: FLAT_NAV, sections: SECTIONS };
+  const keep = (href: string) => !IN_SEASON_ONLY.includes(href);
+  return {
+    flat: FLAT_NAV.flatMap<NavEntry>((e) => {
+      if (e.kind === "link") return keep(e.href) ? [e] : [];
+      const items = e.items.filter((i) => keep(i.href));
+      return items.length ? [{ ...e, items }] : [];
+    }),
+    sections: SECTIONS.map((s) => ({ ...s, pages: s.pages.filter((p) => keep(p.href)) })),
+  };
+}
 
 /** Which section owns a path (defaults to home). */
 export function sectionFor(pathname: string): SectionKey {

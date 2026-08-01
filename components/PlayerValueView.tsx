@@ -85,7 +85,10 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
   return (
     <>
       <div className="controls pv-filters">
-        <div className="ms" style={{ minWidth: 170 }}>
+        {/* Widths come from .pv-f-* in globals.css so the six controls share one row —
+            see the note there. Position/NBA Team/Value basis hold short values and are
+            sized down; the two that hold long text take the leftover space. */}
+        <div className="ms pv-f-name">
           <div className="ms-label">Player name</div>
           <input
             className="field"
@@ -101,7 +104,7 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
           options={positionOptions}
           selected={positions}
           onChange={setPositions}
-          minWidth={110}
+          className="pv-f-pos"
         />
         <MultiSelect
           label="NBA Team"
@@ -109,16 +112,16 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
           selected={nbaTeams}
           onChange={setNbaTeams}
           searchable
-          minWidth={120}
+          className="pv-f-team"
         />
         <MultiSelect
           label="Fantasy Owner"
           options={ownerOptions}
           selected={owners}
           onChange={setOwners}
-          minWidth={180}
+          className="pv-f-owner"
         />
-        <div className="ms" style={{ minWidth: 110 }}>
+        <div className="ms pv-f-basis">
           <div className="ms-label">Value basis</div>
           <select
             className="field field-select"

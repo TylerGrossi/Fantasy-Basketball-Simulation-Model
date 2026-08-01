@@ -37,9 +37,10 @@ npm run dev                 # http://localhost:3000
 
 `npm run setup` does two things, and you can run them separately:
 
-- `npm run env` — writes `.env.local` with your ESPN credentials, read out of
-  `legacy/config_secrets.py` so you never copy cookies by hand. It's gitignored and is
-  only ever read server-side (by `app/api/live`), never bundled into the browser.
+- `npm run env` — writes `.env.local` with your ESPN credentials **and the Gemini key
+  the Agent page uses**, read out of `legacy/config_secrets.py` so you never copy cookies
+  by hand. It's gitignored and is only ever read server-side (by `app/api/live` and
+  `app/api/agent`), never bundled into the browser.
 - `npm run data` — regenerates `public/data/league.json` from ESPN (~47 KB, a couple of
   seconds). Re-run it to refresh rosters, games left and injuries. The *live* category
   totals don't come from here — those are fetched per request by `/api/live`.
@@ -47,9 +48,15 @@ npm run dev                 # http://localhost:3000
 Other scripts: `npm run build` (production build), `npm run start` (serve the build),
 `npm run typecheck`.
 
-**Pages** (17 routes): Home · Scoreboard · Matchup · Roster · Streamers · Bench ·
+**Pages** (18 routes): Home · Scoreboard · Matchup · Roster · Streamers · Bench ·
 Season Summary · Season Stats · League Stats · Schedule · Power Rankings · Playoffs ·
-Player Value · Player Card · Compare · Trade Simulator · Settings.
+Player Value · Player Card · Compare · Trade Simulator · Agent · Settings.
+
+**Agent** is the AI assistant: it answers from your league's real numbers (it calls
+tools that read the export — player values, rosters, category ranks, power rankings)
+and can search the web for live NBA news. It needs `GEMINI_API_KEY`; without one every
+other page works and the Agent page says what's missing. Playoff Odds only appears in
+the menus while a season is in progress.
 
 **Navigation** deliberately differs by device, as the Streamlit app did. Desktop is one
 flat header (brand, links, Stats/Tools dropdowns, gear) plus a left "This Week" rail on

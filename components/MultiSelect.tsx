@@ -17,7 +17,8 @@ export default function MultiSelect({
   onChange,
   placeholder = "Any",
   searchable = false,
-  minWidth = 150,
+  minWidth,
+  className = "",
 }: {
   label: string;
   options: string[];
@@ -27,6 +28,12 @@ export default function MultiSelect({
   /** Adds a filter box above the list — worth it past ~30 options. */
   searchable?: boolean;
   minWidth?: number;
+  /**
+   * Extra class on the wrapper, so a caller can size it within its row. Prefer this
+   * over `minWidth` — an inline min-width beats any stylesheet rule, so a caller that
+   * sets both cannot size the control below the inline floor.
+   */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -62,7 +69,11 @@ export default function MultiSelect({
         : `${selected.length} selected`;
 
   return (
-    <div className="ms" ref={box} style={{ minWidth }}>
+    <div
+      className={`ms ${className}`.trim()}
+      ref={box}
+      style={minWidth != null ? { minWidth } : undefined}
+    >
       <div className="ms-label">{label}</div>
       <button
         type="button"

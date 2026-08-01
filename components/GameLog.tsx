@@ -19,12 +19,17 @@ interface Row {
   date: string;
   atVs: string;
   opp: string;
-  res: string;
   stats: string[];
 }
 
-/** The columns ESPN labels these by, in the order the table shows them. */
-const COLS = ["MIN", "PTS", "REB", "AST", "STL", "BLK", "TO", "FG", "3PT"];
+/**
+ * The columns ESPN labels these by, in the order the table shows them.
+ *
+ * The percentages sit next to the made-attempted they come from. ESPN ships them as
+ * their own labels ("FG%", "3P%"), so they are read straight from the row rather than
+ * divided out here — a 0-attempt game then shows ESPN's own value instead of a NaN.
+ */
+const COLS = ["MIN", "PTS", "REB", "AST", "STL", "BLK", "TO", "FG", "FG%", "3PT", "3P%"];
 
 interface EspnEvent {
   eventId: string;
@@ -37,7 +42,6 @@ interface EspnLog {
     gameDate?: string;
     atVs?: string;
     opponent?: { abbreviation?: string };
-    gameResult?: string;
   }>;
   seasonTypes?: Array<{
     displayName?: string;
@@ -73,7 +77,6 @@ function parse(data: EspnLog): Parsed {
           date: m.gameDate ?? "",
           atVs: m.atVs ?? "",
           opp: m.opponent?.abbreviation ?? "",
-          res: m.gameResult ?? "",
           stats: ev.stats ?? [],
         });
       }
@@ -136,12 +139,14 @@ export default function GameLog({ playerId }: { playerId: number | null }) {
               {rows.map((g, i) => {
                 const d = g.date ? new Date(g.date) : null;
                 const ds = d ? `${d.getMonth() + 1}/${d.getDate()}` : "";
-                const rc =
-                  g.res === "W" ? "pv-gl-w" : g.res === "L" ? "pv-gl-l" : undefined;
+                // The opponent used to be tinted green/red by whether the player's NBA
+                // team won that night. That is not a fantasy fact — a player can post his
+                // best line of the month in a loss — so it read as a judgement on the row
+                // it had nothing to do with. Plain ink; the stats speak for themselves.
                 return (
                   <tr key={`${g.date}-${i}`}>
                     <td>{ds}</td>
-                    <td className={rc}>
+                    <td>
                       {g.atVs}
                       {g.opp}
                     </td>

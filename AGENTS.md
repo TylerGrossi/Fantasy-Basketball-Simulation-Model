@@ -92,14 +92,44 @@ Done: repo split, `build_data.py` (matchups, free agents, season-wide data), the
 engine + cross-language tests, and **nine pages** — Scoreboard, Matchup, Roster,
 Streamers, Bench, Season, Schedule, Rankings, Playoffs.
 
-**Feature parity reached: 17 routes.** Home, Scoreboard, Matchup, Roster, Streamers,
+**Feature parity reached: 18 routes.** Home, Scoreboard, Matchup, Roster, Streamers,
 Bench, Season, Season Stats, League Stats, Schedule, Rankings, Playoffs, Player Value,
-Player Card, Compare, Trade, Settings — plus the desktop header (with Stats/Tools
+Player Card, Compare, Trade, Agent, Settings — plus the desktop header (with Stats/Tools
 dropdowns) and the full mobile pattern (no header; bottom icon bar + section sub-row +
-This Week top sub-bar).
+This Week top sub-bar). The Agent chat page was the last gap; **parity is complete**.
 
-Still missing vs the Streamlit app: the **Agent** chat page (needs a Gemini serverless
-function).
+### The Agent (`/agent`, `app/api/agent`)
+
+Same design as the Streamlit assistant: **the LLM never does the basketball maths.** It
+picks a tool, `lib/agentTools.ts` returns real numbers out of `league.json`, and Gemini
+narrates a recommendation grounded in them. Tools ported one-for-one from the Python
+(`lookup_player`, `list_players`, `compare_players`, `team_category_ranks`, `team_roster`,
+`list_teams`, `power_rankings`, `web_search`), and the system instruction — including the
+long trade-realism paragraph, which is what stops it proposing two-good-players for a
+superstar — is carried over verbatim.
+
+- **`lib/gemini.ts` talks REST over `fetch`; there is no SDK dependency.** The tool loop
+  and the free-tier **model rotation** (`GEMINI_MODELS`, 429 → next model, every turn
+  restarts at the top of the chain) are written out, mirroring `legacy/assistant.py`.
+- **Gemini's SSE separator is `\r\n\r\n`, not `\n\n`.** Splitting on `\n\n` matches
+  nothing, every event stays in the buffer, and the stream looks empty — which surfaces as
+  "no model could be reached" while the API is answering perfectly. Cost an hour; split on
+  `/\r?\n\r?\n/`.
+- **Gemini 3 requires `thoughtSignature` to be echoed back.** The part carrying a function
+  call comes with an opaque signature, and the follow-up request is rejected without it.
+  Never rebuild a model part by hand — push the part object through untouched.
+- **Google Search grounding cannot be combined with function declarations** in one
+  request, so `web_search` runs as its own isolated grounded call underneath a tool the
+  chat sees as ordinary.
+- **The route is STATELESS**: the client posts the whole conversation each turn. Serverless
+  has nowhere to keep a live chat object. Tool calls are not carried across turns, only
+  the visible messages.
+- The key is `GEMINI_API_KEY` (server-only, written by `npm run env` from
+  `legacy/config_secrets.py`). Without it every other page still works and `/agent` says
+  what is missing rather than failing on send.
+- Replies render through `components/Markdown.tsx`, a small renderer that emits React
+  **elements**. Do not swap in a markdown-to-HTML library: model output is untrusted, and
+  `dangerouslySetInnerHTML` would make every reply an injection surface.
 
 The **Tools** pages (Player Card, Player Value, Compare, Power Rankings, Playoff Odds,
 Trade Simulator) were re-matched to their Streamlit originals: Player Value is the ranked
@@ -117,6 +147,25 @@ trade-off `_PV_GAMELOG_SCRIPT` made in Streamlit. Pre-fetching them into the exp
 be ~290 extra ESPN round trips per build for detail almost nobody opens. For the same
 reason the Player Value cards only MOUNT their body once the row is opened; rendering all
 289 cards up front added ~80 KB of HTML for nothing.
+
+**The nav is SEASONAL.** `navFor(seasonOver)` in `lib/nav.ts` drops every href in
+`IN_SEASON_ONLY` (currently `/playoffs`) from the desktop dropdowns and the mobile
+sub-row once the season is over, and Home swaps its fourth card from Playoff Odds to
+Power Rankings — a forecast page has nothing to forecast in July, and a permanent link to
+one is how a 50/50 number gets read as a verdict on a finished bracket. The **route stays
+reachable**, and `sectionFor` deliberately still uses the UNFILTERED sections so a direct
+visit to /playoffs in the offseason keeps its Tools sub-row. `seasonOver` reaches the
+client `Nav` as a **boolean prop from the root layout** (`app/layout.tsx` is now `async`
+and calls `loadLeague`) — never the league object, which would land in the payload of
+every page. The statically prerendered pages bake the flag in at build time, so
+**regenerate the export and rebuild together** (`npm run data && npm run build`).
+
+The Playoff Odds table itself has three shapes and all three are live code: regular
+season (seed columns `#1*`–`#4*`, No Playoffs, Playoff % + American odds), bracket
+underway (Advance % / Champ %, rows filtered to teams still alive), and finals set
+(collapses to the two finalists under a "Championship" heading, as the Streamlit page
+did). Only the last one is reachable from the real offseason export — to exercise the
+other two, swap in a synthetic export (see the fixture note below).
 
 Settings are real, not decorative: the team choice is a COOKIE (`lib/team.ts`) because
 every page resolves the team while server-rendering — localStorage would arrive too late

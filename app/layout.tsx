@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import Nav from "@/components/Nav";
+import { loadLeague } from "@/lib/loadLeague";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,7 +16,10 @@ export const viewport: Viewport = {
   themeColor: "#F4F3EF",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Only the boolean crosses into the client component — never the league object, which
+  // would be serialised into the payload of EVERY page (see trimLeague in loadLeague.ts).
+  const { seasonOver } = await loadLeague();
   return (
     <html lang="en">
       <body>
@@ -23,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             `useSearchParams` opts a component out of static prerendering unless it sits
             under a Suspense boundary — without this the build fails on /_not-found. */}
         <Suspense>
-          <Nav />
+          <Nav seasonOver={seasonOver} />
         </Suspense>
         <main className="page">{children}</main>
       </body>

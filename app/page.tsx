@@ -35,14 +35,30 @@ const CARDS = [
     desc: "Team records & category totals",
     Icon: TableIcon,
   },
-  {
-    href: "/playoffs",
-    title: "Playoff Odds",
-    short: "Playoffs",
-    desc: "Championship probabilities",
-    Icon: BracketIcon,
-  },
 ];
+
+/**
+ * The fourth card is seasonal. While a season is running it is Playoff Odds — the
+ * question everyone is actually asking. In the offseason that page is hidden from the
+ * nav (see IN_SEASON_ONLY), so linking it here would be the one dead end on the landing
+ * page; Power Rankings takes the slot instead, which keeps the grid at four and the
+ * 2-up phone tiles square.
+ */
+const PLAYOFF_CARD = {
+  href: "/playoffs",
+  title: "Playoff Odds",
+  short: "Playoffs",
+  desc: "Championship probabilities",
+  Icon: BracketIcon,
+};
+
+const RANKINGS_CARD = {
+  href: "/rankings",
+  title: "Power Rankings",
+  short: "Rankings",
+  desc: "All-play strength & weekly movement",
+  Icon: BracketIcon,
+};
 
 export default async function Page() {
   const league = await loadLeague();
@@ -51,6 +67,7 @@ export default async function Page() {
   const yr = `${league.season - 1}–${String(league.season).slice(2)}`;
   const leagueName = league.leagueName?.trim() || "Your League";
   const status = league.seasonOver ? "Season complete" : "Season in progress";
+  const cards = [...CARDS, league.seasonOver ? RANKINGS_CARD : PLAYOFF_CARD];
 
   return (
     <>
@@ -67,7 +84,7 @@ export default async function Page() {
           </p>
         </div>
         <div className="home-cards">
-          {CARDS.map(({ href, title, desc, Icon }) => (
+          {cards.map(({ href, title, desc, Icon }) => (
             /* The whole cell is the link — the visible "Open" button is the affordance the
                Streamlit page had, but the card above it is clickable too. */
             <Link key={href} href={href} className="home-cell">
@@ -97,7 +114,7 @@ export default async function Page() {
           </p>
         </div>
         <div className="home-tiles">
-          {CARDS.map(({ href, short, Icon }) => (
+          {cards.map(({ href, short, Icon }) => (
             <Link key={href} href={href} className="home-tile">
               <Icon size={24} />
               <span>{short}</span>

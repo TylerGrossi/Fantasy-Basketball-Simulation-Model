@@ -88,7 +88,7 @@ export default async function Page({
         {preview
           ? "Mid-week preview — a simulated in-progress state."
           : league.seasonOver
-            ? "Final result — this matchup is complete."
+            ? "Final result — how the matchup finished, category by category."
             : `Projected to the end of period ${league.period}.`}
       </p>
       {preview && (
