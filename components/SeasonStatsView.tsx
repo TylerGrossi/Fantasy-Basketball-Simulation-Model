@@ -127,6 +127,15 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
 
   const headers = ["Player", "GP", ...cols.map((c) => c.key)];
 
+  // What the numbers under the current toggles actually mean. "Totals" needs no note.
+  const caption = [
+    mode === "game" && "Per game played while on your roster. A player with no games shows a dash.",
+    mode === "share" && "Each player's share of your season team total in that category.",
+    group === "Shooting" && "Percentages are rates, so the unit toggle leaves them alone.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <>
       <div className="controls">
@@ -203,15 +212,9 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
         </table>
       </div>
 
-      <p className="caption">
-        {mode === "total" &&
-          "Totals, not averages — a player acquired mid-season shows only what they produced for you."}
-        {mode === "game" &&
-          "Per game played while on your roster. A player with no games shows a dash."}
-        {mode === "share" &&
-          "Each player's share of your season team total in that category."}
-        {group === "Shooting" && " Percentages are rates, so the unit toggle leaves them alone."}
-      </p>
+      {/* Rendered only when there is something to say — an always-present <p> would leave
+          its bottom margin under the table on the modes that no longer carry a note. */}
+      {caption && <p className="caption">{caption}</p>}
     </>
   );
 }

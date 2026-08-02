@@ -72,9 +72,6 @@ export default async function Page() {
   return (
     <>
       <h1>Season Stats</h1>
-      <p className="caption">
-        {me.name} — season totals accumulated while each player was on your roster.
-      </p>
 
       <h2>Top contributors</h2>
       <div className="leader-grid">

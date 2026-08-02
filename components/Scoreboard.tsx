@@ -114,16 +114,23 @@ export default function Scoreboard({
                   {r.marginStr}
                 </span>
               </div>
+              {/*
+                The bar grows toward the side that WINS the category — your lead points
+                left, at your own number, and the opponent's points right at theirs. The
+                first version had it backwards: your number sat on the left while the bar
+                for a category you were winning shot right, across the opponent's name,
+                which reads as them leading.
+              */}
               <div className="sb-track">
                 <div className="sb-half sb-half-left">
-                  {r.margin < 0 && (
-                    <div className="sb-bar sb-bar-opp" style={{ width: `${r.width}%` }} />
+                  {r.margin > 0 && (
+                    <div className="sb-bar sb-bar-you" style={{ width: `${r.width}%` }} />
                   )}
                 </div>
                 <div className="sb-axis" />
                 <div className="sb-half sb-half-right">
-                  {r.margin > 0 && (
-                    <div className="sb-bar sb-bar-you" style={{ width: `${r.width}%` }} />
+                  {r.margin < 0 && (
+                    <div className="sb-bar sb-bar-opp" style={{ width: `${r.width}%` }} />
                   )}
                 </div>
               </div>

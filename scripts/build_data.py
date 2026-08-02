@@ -266,7 +266,41 @@ def score_vs(a, b):
     return w, l, t
 
 
-def build_period_results(league, schedules):
+def player_lines(lineup):
+    """
+    One team's players for one matchup period, from ESPN's own box score.
+
+    `points_breakdown` carries that WEEK's totals per player — the same numbers ESPN
+    prints in its box-score view — so nothing here is derived or estimated. Players who
+    did not play are kept with `gp: 0` and no vector: the recap shows them the way ESPN
+    does, as a roster spot that produced nothing, and an absent row would quietly rewrite
+    the week's lineup.
+
+    NO SLOT FIELD. `slot_position` is worth having — it is how ESPN splits starters from
+    bench — but espn-api reports "PG" for every player in this league's box scores, so
+    exporting it would ship a column that is uniformly wrong. Nothing is lost: summing
+    every line here reproduces the team's category totals EXACTLY (verified at 1688.0 PTS
+    for period 20), which means ESPN only lists players whose stats counted. There is no
+    bench to separate.
+    """
+    out = []
+    for bp in lineup or []:
+        bd = getattr(bp, "points_breakdown", None) or {}
+        gp = int(bd.get("GP", 0) or 0)
+        row = {
+            "name": getattr(bp, "name", "") or "",
+            "gp": gp,
+            "min": _round(bd.get("MIN", 0) or 0, 1),
+        }
+        # Only carry a stat vector for someone who actually played — a zero vector is
+        # ~40 bytes per player per week across 22 weeks and says nothing gp doesn't.
+        if gp:
+            row["v"] = [_round(bd.get(stat, 0) or 0, 2) for stat in STATS]
+        out.append(row)
+    return out
+
+
+def build_period_results(league, schedules, box_out=None):
     """
     Final category totals for every completed matchup period.
 
@@ -279,6 +313,11 @@ def build_period_results(league, schedules):
     keyed by ESPN's id and then CHECKED against the score already in the schedule table -
     a wrong mapping would silently show the wrong week's numbers, which is precisely the
     failure mode that made the TW stat id bug survive so long.
+
+    `box_out`, when given, is filled with the per-player lines for the same periods. It
+    rides along HERE because this loop already pays for `league.box_scores(...)` on every
+    period - fetching them separately would double ~22 round trips for data we are
+    already holding.
     """
     wanted = sorted({int(r["period"]) for rows in schedules.values() for r in rows})
     if not wanted:
@@ -303,6 +342,10 @@ def build_period_results(league, schedules):
                 "homeId": int(home.team_id), "awayId": int(away.team_id),
                 "home": h, "away": a,
             })
+            if box_out is not None:
+                teams = box_out.setdefault(str(p), {})
+                teams[str(int(home.team_id))] = player_lines(getattr(m, "home_lineup", None))
+                teams[str(int(away.team_id))] = player_lines(getattr(m, "away_lineup", None))
         if rows:
             out.append({"period": p, "games": rows})
     print(f"  period results: {len(out)} periods", flush=True)
@@ -435,6 +478,17 @@ def build_season(league, injury_data, sims=8000):
             int(t.team_id): int(getattr(t, "final_standing", 0) or 0)
             for t in league.teams
         }
+        # Roster churn, straight off the Team object. "Moves" in ESPN's standings is the
+        # acquisition count — how many players a manager added all season, which is the
+        # difference between a set-and-forget roster and one that was worked every week.
+        moves_by_id = {
+            int(t.team_id): {
+                "acquisitions": int(getattr(t, "acquisitions", 0) or 0),
+                "drops": int(getattr(t, "drops", 0) or 0),
+                "trades": int(getattr(t, "trades", 0) or 0),
+            }
+            for t in league.teams
+        }
         out["standings"] = [{
             "teamId": int(t["team_id"]),
             "teamName": t["team_name"],
@@ -445,6 +499,7 @@ def build_season(league, injury_data, sims=8000):
             "allPlayWins": int(t["all_play_wins"]), "allPlayLosses": int(t["all_play_losses"]),
             "allPlayTies": int(t["all_play_ties"]), "allPlayPct": _round(t["all_play_pct"], 5),
             "luck": _round(t["luck"], 3),
+            **moves_by_id.get(int(t["team_id"]), {}),
             "catTotals": {k: _round(v, 4) for k, v in (t.get("cat_totals") or {}).items()},
         } for t in stats]
 
@@ -596,7 +651,13 @@ def main():
     print("season-wide data:", flush=True)
     season = build_season(league, injury)
 
-    period_results = build_period_results(league, season.get("schedules") or {})
+    # Per-player weekly lines go in their OWN file. They are several times the size of
+    # everything else put together, and only the week-recap view reads them — keeping
+    # them out of league.json means every other page's server render stays cheap.
+    box_scores = {}
+    period_results = build_period_results(
+        league, season.get("schedules") or {}, box_out=box_scores
+    )
     mapping_problems = check_period_results(period_results, season.get("schedules") or {})
 
     payload = {
@@ -644,6 +705,18 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUT_DIR / "league.json").write_text(blob, encoding="utf-8")
     print(f"wrote {OUT_DIR / 'league.json'}")
+
+    if box_scores:
+        box_blob = json.dumps(
+            {"generatedAt": payload["generatedAt"], "stats": STATS, "periods": box_scores},
+            separators=(",", ":"),
+        )
+        (OUT_DIR / "boxscores.json").write_text(box_blob, encoding="utf-8")
+        lines = sum(len(v) for teams in box_scores.values() for v in teams.values())
+        print(
+            f"wrote {OUT_DIR / 'boxscores.json'}  "
+            f"({len(box_blob) / 1024:.0f} KB, {len(box_scores)} periods, {lines} player lines)"
+        )
     return 0
 
 

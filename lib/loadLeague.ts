@@ -22,6 +22,42 @@ export async function loadLeague(): Promise<LeagueData> {
   };
 }
 
+/** One player's line for one scoring period, as ESPN reported it. */
+export interface BoxLine {
+  name: string;
+  /** NBA games that counted for this player that week. */
+  gp: number;
+  min: number;
+  /** Totals in `stats` order. Absent when the player did not play. */
+  v?: number[];
+}
+
+export interface BoxScores {
+  generatedAt: string;
+  stats: string[];
+  /** period -> team id -> player lines. Both keys are strings, as JSON keys are. */
+  periods: Record<string, Record<string, BoxLine[]>>;
+}
+
+/**
+ * Per-player weekly lines, from their own file.
+ *
+ * Deliberately NOT part of league.json: at 347 KB they are larger than everything else
+ * put together, and only the week recap reads them. Every other page's server render
+ * would pay for parsing them otherwise.
+ *
+ * Returns null when the file is missing — an export predating this feature must degrade
+ * to the team-level recap, not to a crash.
+ */
+export async function loadBoxScores(): Promise<BoxScores | null> {
+  try {
+    const file = path.join(process.cwd(), "public", "data", "boxscores.json");
+    return JSON.parse(await readFile(file, "utf8")) as BoxScores;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Which team is "yours" — read from the team cookie, falling back to the export's
  * default. Async because it touches request headers; see lib/team.ts for why a cookie

@@ -37,10 +37,17 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
   const { flat, sections } = navFor(seasonOver);
   const section = sectionFor(pathname);
   const activeSection = sections.find((s) => s.key === section);
+  /*
+   * The section's pages, as the mobile sub-row.
+   *
+   * "week" used to be excluded because This Week had its own rail. That rail no longer
+   * renders, which left the five This Week pages with NO navigation between them on a
+   * phone: the bottom bar drops you on Scoreboard and Matchup, Streamers, Bench and
+   * Roster became unreachable. They use the same sub-row as Season and Tools now —
+   * the pattern the app already has, rather than bringing the rail back.
+   */
   const subPages =
-    activeSection && activeSection.pages.length > 1 && section !== "week"
-      ? activeSection.pages
-      : null;
+    activeSection && activeSection.pages.length > 1 ? activeSection.pages : null;
 
   return (
     <>
@@ -105,7 +112,7 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
               className="bottom-link"
               aria-current={section === s.key ? "page" : undefined}
             >
-              <Icon size={20} />
+              <Icon size={24} />
               <span>{s.label}</span>
             </Link>
           );

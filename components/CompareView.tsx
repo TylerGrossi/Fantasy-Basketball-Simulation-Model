@@ -146,12 +146,6 @@ function Comparison({ a, b }: { a: PoolPlayer; b: PoolPlayer }) {
           <GameLog key={b.playerId ?? b.name} playerId={b.playerId} />
         </div>
       </div>
-
-      <p className="caption" style={{ marginTop: "1rem" }}>
-        Season per-game averages and 9-cat Value; the better side of each row is green
-        (fewer turnovers wins TO). Open a player&rsquo;s <strong>Last 10 games</strong> for
-        their recent log.
-      </p>
     </div>
   );
 }

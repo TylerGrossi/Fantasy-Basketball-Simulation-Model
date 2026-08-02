@@ -16,6 +16,7 @@
  */
 
 import type { LeagueData, PoolPlayer, StandingRow } from "./league";
+import { playerStatus } from "./playerPool";
 
 export interface ToolDeclaration {
   name: string;
@@ -49,6 +50,24 @@ function playerLine(p: PoolPlayer): string {
     `${p.TO.toFixed(1)} TO, ${p.DD.toFixed(1)} DD/g; ` +
     `FG ${pct(p.fgPct)}, FT ${pct(p.ftPct)}, 3P ${pct(p.tpPct)}; ` +
     `status: ${p.status || "active"}`
+  );
+}
+
+/**
+ * A compact one-liner for list results.
+ *
+ * `playerLine` is the full profile — fourteen numbers per player. Fine for looking up
+ * one man, ruinous for a screen of thirty, where it buries the answer and burns the
+ * context the model needs to reason with. This keeps the fields a shortlist is judged on.
+ */
+function shortLine(p: PoolPlayer): string {
+  return (
+    `${p.name} (${p.position || "?"}, ${p.nbaTeam || "?"}) — ${ownerLabel(p.owner)}; ` +
+    `val ${signed(p.value)}, 15d ${signed(p.trend15)}; ` +
+    `${p.PTS.toFixed(1)}p ${p.REB.toFixed(1)}r ${p.AST.toFixed(1)}a ` +
+    `${p.STL.toFixed(1)}s ${p.BLK.toFixed(1)}b ${p["3PM"].toFixed(1)}3 ${p.TO.toFixed(1)}to ` +
+    `${p.DD.toFixed(1)}dd; FG ${pct(p.fgPct)} FT ${pct(p.ftPct)} 3P ${pct(p.tpPct)}; ` +
+    `${p.status && p.status !== "ACTIVE" ? p.status : "healthy"}`
   );
 }
 
@@ -184,6 +203,64 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
     },
   },
   {
+    name: "find_players",
+    description:
+      "SEARCH the player pool with filters and get NAMES back. This is the tool for 'who should I trade for', 'which healthy bigs are available', 'who fits my punt build' — anything where the answer is a shortlist of specific players. Filter by who owns them, position, health and per-category minimums, then rank by whichever category matters. Prefer this over list_players whenever the request has any criteria beyond overall value.",
+    parameters: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          enum: ["other_teams", "free_agents", "my_team", "all"],
+          description:
+            '"other_teams" = rostered by someone else, i.e. TRADE targets. "free_agents" = available on the wire. Defaults to other_teams.',
+        },
+        positions: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Positions to include, e.g. ["C","PF"] for bigs. Omit for any.',
+        },
+        healthy_only: {
+          type: "boolean",
+          description: "Exclude anyone out, on IR or suspended. Default false.",
+        },
+        sort_by: {
+          type: "string",
+          enum: Object.keys(SORT_COLUMNS),
+          description: 'What to rank by — e.g. "rebounds", "fg_pct", "blocks", "value".',
+        },
+        min_value: { type: "number", description: "Minimum 9-cat value." },
+        max_value: {
+          type: "number",
+          description:
+            "Maximum 9-cat value. Use it to skip untouchable stars when looking for a realistic trade — the top ~20 in the league will not be sold at a discount.",
+        },
+        min_fg_pct: { type: "number", description: "Minimum field-goal %, as 0-1 (0.5 = 50%)." },
+        min_ft_pct: { type: "number", description: "Minimum free-throw %, as 0-1." },
+        min_rebounds: { type: "number", description: "Minimum rebounds per game." },
+        min_blocks: { type: "number", description: "Minimum blocks per game." },
+        min_assists: { type: "number", description: "Minimum assists per game." },
+        min_points: { type: "number", description: "Minimum points per game." },
+        max_turnovers: { type: "number", description: "Maximum turnovers per game." },
+        limit: { type: "integer", description: "How many to return (1-30, default 12)." },
+      },
+    },
+  },
+  {
+    name: "league_rosters",
+    description:
+      "Every fantasy team's roster in one call, each player with position, 9-cat value and 15-day trend. Use it to survey the league before proposing a trade — who is deep where, and which manager has a surplus of what. Cheaper than calling team_roster for each team.",
+    parameters: {
+      type: "object",
+      properties: {
+        include_my_team: {
+          type: "boolean",
+          description: "Include the user's own roster too. Default true.",
+        },
+      },
+    },
+  },
+  {
     name: "compare_players",
     description:
       "Compare two players head-to-head across value, trends, and per-game categories.",
@@ -298,6 +375,98 @@ export function createToolRunner(
           `Top ${top.length} by ${sortBy} (scope: ${scope}):`,
           ...top.map((p, i) => `${i + 1}. ${playerLine(p)}`),
         ].join("\n");
+      }
+
+      case "find_players": {
+        if (!pool.length) return "Player data is unavailable right now.";
+        const scope = (str("scope") || "other_teams").toLowerCase();
+        const positions = (
+          Array.isArray(args.positions) ? (args.positions as unknown[]) : []
+        ).map((p) => String(p).trim().toUpperCase());
+        const num = (k: string) =>
+          args[k] == null || args[k] === "" ? null : Number(args[k]);
+
+        let sub = pool.filter((p) => {
+          if (scope === "other_teams" && (p.owner === myTeamName || p.owner === "FA" || !p.owner))
+            return false;
+          if (scope === "free_agents" && p.owner !== "FA") return false;
+          if (scope === "my_team" && p.owner !== myTeamName) return false;
+          if (positions.length && !positions.includes((p.position || "").toUpperCase()))
+            return false;
+          if (args.healthy_only && playerStatus(p.status)[1] === "out") return false;
+          const gate: Array<[string, number, 1 | -1]> = [
+            ["min_value", p.value, 1],
+            ["max_value", p.value, -1],
+            ["min_fg_pct", p.fgPct, 1],
+            ["min_ft_pct", p.ftPct, 1],
+            ["min_rebounds", p.REB, 1],
+            ["min_blocks", p.BLK, 1],
+            ["min_assists", p.AST, 1],
+            ["min_points", p.PTS, 1],
+            ["max_turnovers", p.TO, -1],
+          ];
+          for (const [key, actual, dir] of gate) {
+            const bound = num(key);
+            if (bound == null || Number.isNaN(bound)) continue;
+            if (dir === 1 ? actual < bound : actual > bound) return false;
+          }
+          return true;
+        });
+
+        const sortBy = (str("sort_by") || "value").toLowerCase();
+        const col = SORT_COLUMNS[sortBy] ?? "value";
+        // Turnovers are the one column where less is better, so ranking them descending
+        // would hand back the WORST candidates for a low-turnover build.
+        const asc = sortBy === "turnovers";
+        sub = [...sub].sort((a, b) =>
+          asc
+            ? Number(a[col] ?? 0) - Number(b[col] ?? 0)
+            : Number(b[col] ?? 0) - Number(a[col] ?? 0)
+        );
+        const limit = Math.max(1, Math.min(Number(args.limit ?? 12) || 12, 30));
+        const top = sub.slice(0, limit);
+        if (!top.length) {
+          return (
+            `No players match those filters (scope: ${scope}). Loosen a threshold — ` +
+            "say a lower min_value or drop a per-category minimum — and try again."
+          );
+        }
+        const label =
+          scope === "other_teams"
+            ? "on other rosters (trade targets)"
+            : scope === "free_agents"
+              ? "available as free agents"
+              : scope === "my_team"
+                ? "on the user's roster"
+                : "in the league";
+        return [
+          `${top.length} of ${sub.length} matching players ${label}, ranked by ${sortBy}:`,
+          ...top.map((p, i) => `${i + 1}. ${shortLine(p)}`),
+        ].join("\n");
+      }
+
+      case "league_rosters": {
+        if (!teamNames.length) return "League data is unavailable right now.";
+        const includeMine = args.include_my_team !== false;
+        const lines: string[] = [];
+        for (const team of [...teamNames].sort()) {
+          if (!includeMine && team === myTeamName) continue;
+          const roster = pool
+            .filter((p) => p.owner === team)
+            .sort((a, b) => b.value - a.value);
+          const tag = team === myTeamName ? " (the user's team)" : "";
+          lines.push(
+            `${team}${tag}: ` +
+              roster
+                .map(
+                  (p) =>
+                    `${p.name} (${p.position || "?"} ${signed(p.value)}` +
+                    `${playerStatus(p.status)[1] === "out" ? " OUT" : ""})`
+                )
+                .join(", ")
+          );
+        }
+        return ["Every roster, best player first:", ...lines].join("\n");
       }
 
       case "compare_players": {
@@ -419,10 +588,23 @@ export function systemInstruction(teamName: string, seasonOver: boolean, season:
     "basketball question, and never say you can 'only' help with the fantasy league - if " +
     "you're unsure, use web_search and then answer.\n\n" +
     "You have two sources of truth on top of your own basketball knowledge:\n" +
-    "1. LEAGUE DATA tools (lookup_player, list_players, compare_players, " +
-    "team_category_ranks, team_roster, list_teams, power_rankings) - use these for " +
-    "anything about THIS fantasy league's players, rosters, values, or standings. ALWAYS " +
-    "call them for real league numbers; never invent a value, stat, or roster.\n" +
+    "1. LEAGUE DATA tools (lookup_player, find_players, league_rosters, list_players, " +
+    "compare_players, team_category_ranks, team_roster, list_teams, power_rankings) - use " +
+    "these for anything about THIS fantasy league's players, rosters, values, or " +
+    "standings. ALWAYS call them for real league numbers; never invent a value, stat, or " +
+    "roster.\n" +
+    "NAME NAMES. If the user asks who to trade for, who to target, who to pick up or who " +
+    "to drop, the answer is a list of SPECIFIC PLAYERS - each with the team that owns " +
+    "him and the numbers that make him a fit. Describing a 'target profile' or a 'type of " +
+    "player' to look for is a NON-ANSWER; the user cannot trade for a profile. Use " +
+    "find_players (scope 'other_teams' for trade targets, 'free_agents' for the wire) " +
+    "with the filters that match what they asked for, and league_rosters to see which " +
+    "manager has a surplus to trade from. If a first search comes back empty, loosen a " +
+    "filter and search again rather than falling back on generalities.\n" +
+    "RESPECT A STATED STRATEGY. If the user says they are punting a category, stop " +
+    "recommending fixes for it and stop counting it against a target - rank candidates " +
+    "by the categories they actually want. A punt build makes the overall 9-cat 'value' " +
+    "number misleading, so lean on the per-category figures instead.\n" +
     "2. web_search (Google) - use this LIBERALLY for anything the league data can't " +
     "answer and anything current or that you're not fully certain of: live news, " +
     "injuries, trades, standings, scores, schedules, awards, rosters, coaching changes, " +

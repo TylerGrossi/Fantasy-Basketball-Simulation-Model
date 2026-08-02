@@ -54,6 +54,7 @@ export const FLAT_NAV: NavEntry[] = [
     kind: "menu",
     label: "Tools",
     items: [
+      { label: "Lineup", href: "/lineup" },
       { label: "Player Card", href: "/player" },
       { label: "Player Value", href: "/player-value" },
       { label: "Compare", href: "/compare" },
@@ -76,6 +77,7 @@ export const SEASON_PAGES = [
 ];
 
 export const TOOLS_PAGES = [
+  { label: "Lineup", href: "/lineup" },
   { label: "Player Card", href: "/player" },
   { label: "Player Value", href: "/player-value" },
   { label: "Compare", href: "/compare" },

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
 import { AgentIcon } from "./Icons";
+import ModelBar, { type UsageSnapshot } from "./ModelBar";
 
 /**
  * The Agent chat page — the Streamlit assistant's UI, rebuilt.
@@ -37,6 +38,8 @@ const TOOL_LABELS: Record<string, string> = {
   team_roster: "Reading a roster",
   list_teams: "Listing teams",
   power_rankings: "Reading power rankings",
+  find_players: "Searching for players",
+  league_rosters: "Surveying every roster",
   web_search: "Searching the web",
 };
 
@@ -44,6 +47,9 @@ interface Message {
   role: "user" | "assistant";
   content: string;
 }
+
+/** How long a stream may go silent before we give up on it. */
+const STALL_MS = 90_000;
 
 function greeting(): string {
   const hour = Number(
@@ -71,6 +77,27 @@ export default function AgentView({
   const [status, setStatus] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  // Which model answered last, and which one to ask for first. The preference persists
+  // in this browser — it is a per-person choice, not a server setting.
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [preferred, setPreferred] = useState("");
+  const [usage, setUsage] = useState<UsageSnapshot | null>(null);
+  useEffect(() => {
+    try {
+      setPreferred(localStorage.getItem("agent.model") ?? "");
+    } catch {
+      // Private mode or storage disabled — auto is a fine default.
+    }
+  }, []);
+  const choose = (m: string) => {
+    setPreferred(m);
+    try {
+      localStorage.setItem("agent.model", m);
+    } catch {
+      // Not worth surfacing; the choice simply won't outlive the tab.
+    }
+  };
   // Rendered on the server too, so the greeting word can't come from the first render.
   const [hello, setHello] = useState("Hello");
   useEffect(() => setHello(greeting()), []);
@@ -92,11 +119,31 @@ export default function AgentView({
 
     let answer = "";
     let failed: string | null = null;
+
+    /**
+     * A stream that stops arriving must not spin forever.
+     *
+     * There is no timeout on a ReadableStream: if the connection dies quietly — a dev
+     * server recompiling mid-request will do it, so will a dropped network — `read()`
+     * simply never resolves and the page sits on "Ranking players…" until it is
+     * reloaded. The watchdog is armed per CHUNK, not per request, so a genuinely long
+     * answer that is still producing tokens is never cut off; only silence is.
+     */
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => controller.abort("stalled"), STALL_MS);
+    };
+
     try {
+      arm();
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({ messages: next, model: preferred || undefined }),
+        signal: controller.signal,
       });
       if (!res.ok || !res.body) {
         const detail = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -110,6 +157,7 @@ export default function AgentView({
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
+          arm(); // something arrived — reset the silence timer
           buffer += decoder.decode(value, { stream: true });
           // Line-ending agnostic on purpose — see the note in lib/gemini.ts.
           const events = buffer.split(/\r?\n\r?\n/);
@@ -127,6 +175,12 @@ export default function AgentView({
               answer += payload.value;
               setStatus("");
               setReply(answer);
+            } else if (payload.type === "model") {
+              setActiveModel(payload.name ?? null);
+            } else if (payload.type === "usage") {
+              // Comes from the process that served the turn; the bar merges it into the
+              // browser's own running total (see ModelBar for why that is the durable one).
+              setUsage(payload as unknown as UsageSnapshot);
             } else if (payload.type === "tool") {
               setStatus(TOOL_LABELS[payload.name ?? ""] ?? "Working");
             } else if (payload.type === "error") {
@@ -138,11 +192,29 @@ export default function AgentView({
           }
         }
       }
-    } catch {
-      failed = "The connection dropped before I could answer. Please try again.";
+    } catch (err) {
+      const stopped = controller.signal.reason === "stopped";
+      failed = stopped
+        ? "Stopped."
+        : controller.signal.aborted
+          ? "That turn went quiet for 90 seconds, so I stopped waiting. Try again — if it keeps happening the server is probably restarting mid-answer."
+          : "The connection dropped before I could answer. Please try again.";
+      if (stopped && !answer.trim()) failed = "Stopped before I got anywhere.";
+      void err;
+    } finally {
+      clearTimeout(watchdog);
+      abortRef.current = null;
     }
 
-    const final = answer.trim() || failed || "I couldn't generate a response for that one.";
+    // A partial answer plus a failure is NOT a complete answer. `answer || failed`
+    // dropped the notice whenever a single token had streamed, so a turn that died after
+    // "let me look that up" was presented as the finished reply. Keep both.
+    const partial = answer.trim();
+    const final = partial
+      ? failed
+        ? `${partial}\n\n*${failed}*`
+        : partial
+      : failed || "I couldn't generate a response for that one.";
     setMessages([...next, { role: "assistant", content: final }]);
     setReply("");
     setStatus("");
@@ -150,13 +222,14 @@ export default function AgentView({
   }
 
   const composer = (
-    <form
-      className="asst-composer"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void ask(draft);
-      }}
-    >
+    <div className="asst-composer-wrap">
+      <form
+        className="asst-composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void ask(draft);
+        }}
+      >
       <textarea
         ref={boxRef}
         className="asst-input"
@@ -178,14 +251,35 @@ export default function AgentView({
           }
         }}
       />
-      <button
-        type="submit"
-        className="asst-send"
-        disabled={streaming || !configured || !draft.trim()}
-      >
-        {streaming ? "…" : "Send"}
-      </button>
-    </form>
+      {/* While a turn is running the send button becomes Stop — a long answer you no
+          longer want should not have to be waited out or reloaded away. */}
+      {streaming ? (
+        <button
+          type="button"
+          className="asst-send asst-stop"
+          onClick={() => abortRef.current?.abort("stopped")}
+        >
+          Stop
+        </button>
+      ) : (
+        <button
+          type="submit"
+          className="asst-send"
+          disabled={!configured || !draft.trim()}
+        >
+          Send
+        </button>
+      )}
+      </form>
+      {configured && (
+        <ModelBar
+          active={activeModel}
+          preferred={preferred}
+          onPreferred={choose}
+          usage={usage}
+        />
+      )}
+    </div>
   );
 
   if (!messages.length) {

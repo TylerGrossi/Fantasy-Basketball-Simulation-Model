@@ -53,6 +53,9 @@ export default async function Page() {
     v > 0 ? "var(--good)" : v < 0 ? "var(--bad)" : "var(--ink-2)";
   const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
+  // ESPN's "Moves" is the season acquisition count — how hard a manager worked the wire.
+  const hasMoves = standings.some((t) => t.acquisitions != null);
+
   // Every data column is right-aligned monospace, records included — they are figures
   // too, and having two of the seven left-aligned made the row read as three ragged
   // groups. Only Team stays left; # keeps the treatment it had.
@@ -64,6 +67,9 @@ export default async function Page() {
     { key: "allplay", label: "All-Play", num: true },
     { key: "appct", label: "AP PCT", num: true },
     { key: "luck", label: "Luck", num: true },
+    // Only when the export carries it — an older snapshot would otherwise show a column
+    // of zeros, which reads as "nobody made a move all season" rather than "no data".
+    ...(hasMoves ? [{ key: "moves", label: "Moves", num: true }] : []),
   ];
 
   const standingRows: SortRow[] = standings.map((t) => ({
@@ -81,6 +87,14 @@ export default async function Page() {
       },
       appct: { sort: t.allPlayPct, text: pct(t.allPlayPct) },
       luck: { sort: t.luck, text: signed(t.luck), color: luckColor(t.luck) },
+      ...(hasMoves
+        ? {
+            moves: {
+              sort: t.acquisitions ?? 0,
+              text: (t.acquisitions ?? 0).toLocaleString("en-US"),
+            },
+          }
+        : {}),
     },
   }));
 
@@ -126,11 +140,6 @@ export default async function Page() {
       />
 
       <h2>Season Category Totals</h2>
-      <p className="caption">
-        Each team&rsquo;s cumulative totals for the season, by category. GP is every game
-        played by everyone who was on that roster — sort by it to see who got the most out
-        of their roster spots.
-      </p>
       <SortableTable cols={catCols} rows={catRows} defaultKey="PTS" />
     </>
   );

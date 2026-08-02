@@ -1,64 +1,151 @@
 import Link from "next/link";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
-import { TrophyIcon, ChartIcon, TableIcon, BracketIcon } from "@/components/Icons";
+import {
+  TrophyIcon,
+  ChartIcon,
+  TableIcon,
+  BracketIcon,
+  ClipboardDataIcon,
+  CalendarIcon,
+  GraphUpIcon,
+  PersonBadgeIcon,
+  ShuffleIcon,
+} from "@/components/Icons";
 
 /**
- * Home / landing.
+ * Home / landing. Two entirely different pages behind one route.
  *
- * Desktop gets the centred hero + four descriptive cards; mobile gets a compact 2-up grid
- * of single-tap tiles sized to fit one phone screen without scrolling. Both are rendered
- * and shown/hidden by breakpoint — no width detection, no flash of the wrong layout.
+ * MOBILE is a launcher: a compact hero and a 3-up grid of single-tap tiles, matching the
+ * Streamlit phone layout tile for tile.
  *
- * The card set, order, copy and icons match the Streamlit home page deliberately: this is
- * the page the owner compares the migration against.
+ * DESKTOP is a project page — what this is, how it works, and what is in it — because on
+ * a laptop there is room to explain it to someone who has never seen it. It is written to
+ * be SCANNED, not read: figures first, one line per claim, three columns wide. An earlier
+ * version ran the same material as paragraphs in a 62-character column and read as an
+ * essay with half the screen empty.
+ *
+ * Both are rendered and shown/hidden by breakpoint — no width detection, no flash of the
+ * wrong layout.
  */
 
-const CARDS = [
-  {
-    href: "/season",
-    title: "Season Summary",
-    short: "Season",
-    desc: "Final standings, champion & all-play",
-    Icon: TrophyIcon,
-  },
-  {
-    href: "/scoreboard",
-    title: "Current Matchup",
-    short: "This Week",
-    desc: "Weekly matchup, win % & category sims",
-    Icon: ChartIcon,
-  },
-  {
-    href: "/league-stats",
-    title: "League Stats",
-    short: "League",
-    desc: "Team records & category totals",
-    Icon: TableIcon,
-  },
+/** The mobile tile grid — Streamlit's nine, in its order, with its Bootstrap glyphs. */
+const TILES = [
+  { href: "/season", label: "Season Summary", Icon: TrophyIcon },
+  { href: "/scoreboard", label: "Current Matchup", Icon: ChartIcon },
+  { href: "/season-stats", label: "Season Stats", Icon: ClipboardDataIcon },
+  { href: "/league-stats", label: "League Stats", Icon: TableIcon },
+  { href: "/playoffs", label: "Playoff Odds", Icon: BracketIcon },
+  { href: "/schedule", label: "Schedule", Icon: CalendarIcon },
+  { href: "/rankings", label: "Power Rankings", Icon: GraphUpIcon },
+  { href: "/player-value", label: "Player Value", Icon: PersonBadgeIcon },
+  { href: "/trade", label: "Trade Simulator", Icon: ShuffleIcon },
 ];
 
 /**
- * The fourth card is seasonal. While a season is running it is Playoff Odds — the
- * question everyone is actually asking. In the offseason that page is hidden from the
- * nav (see IN_SEASON_ONLY), so linking it here would be the one dead end on the landing
- * page; Power Rankings takes the slot instead, which keeps the grid at four and the
- * 2-up phone tiles square.
+ * What the site is for, as the four questions it answers.
+ *
+ * Deliberately jargon-free — no "Poisson-binomial", no "z-score". Someone who has never
+ * played fantasy basketball should finish this band knowing what the thing does. The
+ * technical vocabulary lives one section down, in the flow, where it belongs.
  */
-const PLAYOFF_CARD = {
-  href: "/playoffs",
-  title: "Playoff Odds",
-  short: "Playoffs",
-  desc: "Championship probabilities",
-  Icon: BracketIcon,
-};
+const ANSWERS: Array<[string, string, string, string]> = [
+  [
+    "Am I winning this week?",
+    "A real probability for the current matchup, category by category, updating as games finish rather than after they do.",
+    "/matchup",
+    "See the matchup",
+  ],
+  [
+    "Which pickup actually helps?",
+    "Every free agent scored against your exact matchup, not a generic ranking — the best add for this week is rarely the best player.",
+    "/streamers",
+    "Find a streamer",
+  ],
+  [
+    "Is this trade any good?",
+    "What a deal does to each category before you accept it, so a trade that looks even on names can be judged on effect.",
+    "/trade",
+    "Test a trade",
+  ],
+  [
+    "Was I good, or lucky?",
+    "An all-play record scores every team against every other team each week, separating a record you earned from one the schedule handed you.",
+    "/season",
+    "See the season",
+  ],
+];
 
-const RANKINGS_CARD = {
-  href: "/rankings",
-  title: "Power Rankings",
-  short: "Rankings",
-  desc: "All-play strength & weekly movement",
-  Icon: BracketIcon,
-};
+/**
+ * The four steps a decision passes through, each tagged with the technique it uses.
+ *
+ * The techniques used to sit in a separate row of pills under this. They read as filler
+ * detached from anything; naming each one against the step that uses it makes the same
+ * point and costs no extra space.
+ */
+const FLOW: Array<[string, string, string]> = [
+  [
+    "Read",
+    "ESPN rosters, box scores and the NBA schedule. Games remaining are counted injury-aware, under the league's ten-per-day cap.",
+    "ESPN API / schedule scraping",
+  ],
+  [
+    "Project",
+    "Each player's remaining production as a distribution rather than a point estimate: a mean and a variance per category.",
+    "Sum of independent normals",
+  ],
+  [
+    "Solve",
+    "Closed-form odds for all 15 categories, then the exact distribution of how many of them you win.",
+    "Poisson-binomial DP / delta method",
+  ],
+  [
+    "Decide",
+    "Every lineup, waiver and trade option ranked by how far it moves that number. This is the part that wins weeks.",
+    "9-cat z-scores / marginal value",
+  ],
+];
+
+/**
+ * The page directory, grouped as the header groups it. `inSeason` marks pages that are
+ * meaningless once the bracket is done — the same rule IN_SEASON_ONLY applies to the nav,
+ * so the directory can never advertise a dead end.
+ */
+const DIRECTORY: Array<{
+  section: string;
+  items: Array<{ href: string; name: string; desc: string; inSeason?: boolean }>;
+}> = [
+  {
+    section: "This Week",
+    items: [
+      { href: "/scoreboard", name: "Scoreboard", desc: "The matchup category by category, live from ESPN." },
+      { href: "/matchup", name: "Matchup", desc: "Win probability, score distribution, per-category projections." },
+      { href: "/streamers", name: "Streamers", desc: "Every pick-up-and-drop pair scored against this week." },
+      { href: "/bench", name: "Bench", desc: "Who to play, who to sit, and what each choice is worth." },
+      { href: "/roster", name: "Roster", desc: "Your players, games left, and per-game averages." },
+    ],
+  },
+  {
+    section: "Season",
+    items: [
+      { href: "/season", name: "Season Summary", desc: "Final standings, champion, all-play and schedule luck." },
+      { href: "/season-stats", name: "Season Stats", desc: "Category leaders and every player's line." },
+      { href: "/league-stats", name: "League Stats", desc: "Every team's totals and where each of them ranks." },
+      { href: "/schedule", name: "Schedule", desc: "Week-by-week results, opponents and margins." },
+    ],
+  },
+  {
+    section: "Tools",
+    items: [
+      { href: "/player", name: "Player Card", desc: "Profile, value, recent form, last ten games." },
+      { href: "/player-value", name: "Player Value", desc: "Rostered players and free agents by 9-cat value." },
+      { href: "/compare", name: "Compare", desc: "Two players side by side, category by category." },
+      { href: "/rankings", name: "Power Rankings", desc: "All-play strength, form and weekly movement." },
+      { href: "/playoffs", name: "Playoff Odds", desc: "Championship probabilities from a simulated bracket.", inSeason: true },
+      { href: "/trade", name: "Trade Simulator", desc: "What a trade does to your category strength." },
+      { href: "/agent", name: "Agent", desc: "Ask about the league in plain English." },
+    ],
+  },
+];
 
 export default async function Page() {
   const league = await loadLeague();
@@ -67,12 +154,97 @@ export default async function Page() {
   const yr = `${league.season - 1}–${String(league.season).slice(2)}`;
   const leagueName = league.leagueName?.trim() || "Your League";
   const status = league.seasonOver ? "Season complete" : "Season in progress";
-  const cards = [...CARDS, league.seasonOver ? RANKINGS_CARD : PLAYOFF_CARD];
+  const directory = DIRECTORY.map((g) => ({
+    ...g,
+    items: g.items.filter((i) => !i.inSeason || !league.seasonOver),
+  }));
 
   return (
     <>
-      {/* ---------------- desktop ---------------- */}
+      {/* ---------------- desktop: the project page ---------------- */}
       <div className="home-desktop">
+        <header className="lp-hero">
+          <div className="lp-eyebrow">
+            {leagueName} &middot; {status} &middot; {yr}
+          </div>
+          <h1 className="lp-title">Fantasy Basketball Simulator</h1>
+          <p className="lp-sub">
+            Turning a {league.teams.length}-team ESPN head-to-head category league into a
+            probability problem: what are my odds this week, and which move improves them
+            most? Built to answer that in the time it takes to click.
+          </p>
+        </header>
+
+        {/*
+          What the site is for, as the four questions it answers.
+          Plain language and no jargon — the technical half is the flow below, and this
+          band has to make sense to someone who has never played fantasy basketball.
+        */}
+        <section className="lp-ans-wrap">
+          <h2>What it answers</h2>
+          <div className="lp-ans">
+            {ANSWERS.map(([q, a, href, cta]) => (
+              <div className="lp-ans-item" key={q}>
+                <h3>{q}</h3>
+                <p>{a}</p>
+                <Link href={href}>{cta}</Link>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="lp-flow-wrap">
+          <h2>From data to decision</h2>
+          <div className="lp-flow">
+            {FLOW.map(([head, body, tech], i) => (
+              <div className="lp-step" key={head}>
+                <span className="lp-step-n mono">{i + 1}</span>
+                <h3>{head}</h3>
+                <p>{body}</p>
+                <span className="lp-step-tech mono">{tech}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="lp-inside">
+          <h2>What&rsquo;s inside</h2>
+          <div className="lp-dir">
+            {directory.map((g) => (
+              <div className="lp-dir-col" key={g.section}>
+                <h3>{g.section}</h3>
+                {g.items.map((i) => (
+                  <Link href={i.href} key={i.href} className="lp-dir-item">
+                    <span className="lp-dir-name">{i.name}</span>
+                    <span className="lp-dir-desc">{i.desc}</span>
+                  </Link>
+                ))}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <footer className="lp-foot">
+          <span>
+            Categories are modelled as independent and ratio categories use a first-order
+            approximation &mdash; together the source of the 0.44pp gap above.
+          </span>
+          <span>
+            Data via ESPN &middot; updated{" "}
+            {new Date(league.generatedAt).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })}
+            {standing
+              ? ` · ${me.name} finished ${standing.wins}-${standing.losses}-${standing.ties}`
+              : ""}
+          </span>
+        </footer>
+      </div>
+
+      {/* ---------------- mobile: the launcher ---------------- */}
+      <div className="home-mobile">
         <div className="home-hero">
           <div className="home-eyebrow">
             {leagueName} &middot; {status}
@@ -83,41 +255,11 @@ export default async function Page() {
             analyzing <strong>{me.name}</strong>.
           </p>
         </div>
-        <div className="home-cards">
-          {cards.map(({ href, title, desc, Icon }) => (
-            /* The whole cell is the link — the visible "Open" button is the affordance the
-               Streamlit page had, but the card above it is clickable too. */
-            <Link key={href} href={href} className="home-cell">
-              <span className="home-card">
-                <span className="home-card-icon">
-                  <Icon size={34} />
-                </span>
-                <span className="home-card-title">{title}</span>
-                <span className="home-card-desc">{desc}</span>
-              </span>
-              <span className="home-card-open">Open</span>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* ---------------- mobile ---------------- */}
-      <div className="home-mobile">
-        <div className="home-hero">
-          <div className="home-eyebrow">
-            {leagueName} &middot; {status}
-          </div>
-          <h1 className="home-title">{me.name}</h1>
-          <p className="home-sub">
-            {standing ? `${standing.wins}-${standing.losses}-${standing.ties} · ` : ""}
-            {yr} {league.seasonOver ? "complete" : `· matchup ${league.period}`}
-          </p>
-        </div>
         <div className="home-tiles">
-          {cards.map(({ href, short, Icon }) => (
+          {TILES.map(({ href, label, Icon }) => (
             <Link key={href} href={href} className="home-tile">
-              <Icon size={24} />
-              <span>{short}</span>
+              <Icon size={28} />
+              <span>{label}</span>
             </Link>
           ))}
         </div>

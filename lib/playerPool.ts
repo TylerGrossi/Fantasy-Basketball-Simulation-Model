@@ -82,7 +82,7 @@ export const TREND_COL: Record<ValueBasis, "trend" | "trend15"> = {
 
 /** The counting stats summed when a set of players is treated as one roster. */
 export const AGG_KEYS = [
-  "FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO", "PTS",
+  "FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO", "PTS", "DD",
 ] as const;
 
 export type Agg = Record<string, number>;
@@ -98,27 +98,51 @@ export function teamAgg(players: PoolPlayer[]): Agg {
 
 const pct = (s: Agg, made: string, att: string) => (s[att] ? s[made] / s[att] : 0);
 
+/** A ratio category and the two counting stats it is derived from. */
+const RATIO_OF: Record<string, [string, string]> = {
+  "FG%": ["FGM", "FGA"],
+  "FT%": ["FTM", "FTA"],
+  "3P%": ["3PM", "3PA"],
+};
+
 /**
- * 9-cat W-L-T for aggregate `a` vs aggregate `b`. Lower TO wins; the percentage
- * categories are derived from makes/attempts rather than averaged.
+ * Which of the league's scoring categories can be scored from the player pool.
+ *
+ * The pool carries no TW, so a 15-category league is compared over 14. Everything else —
+ * including the volume categories FGA and 3PA, which feel odd to "win" but are exactly
+ * how this league scores — is in.
  */
-export function cat9Record(a: Agg, b: Agg): [number, number, number] {
+export function scorableCategories(categories: string[]): string[] {
+  return categories.filter((c) => {
+    const pair = RATIO_OF[c];
+    if (pair) return AGG_KEYS.includes(pair[0] as never) && AGG_KEYS.includes(pair[1] as never);
+    return AGG_KEYS.includes(c as never);
+  });
+}
+
+/**
+ * Category W-L-T for roster aggregate `a` against `b`, over the league's OWN categories.
+ *
+ * Was a hardcoded 9-cat comparison, which is the convention behind a player's "value"
+ * z-score but not how this league scores — it plays 15 categories, so scoring 9 of them
+ * measured a game nobody is playing. The percentage categories are derived from
+ * makes/attempts rather than averaged, and `lowerIsBetter` (turnovers) inverts.
+ */
+export function categoryRecord(
+  a: Agg,
+  b: Agg,
+  categories: string[],
+  lowerIsBetter: string[] = ["TO"]
+): [number, number, number] {
+  const lower = new Set(lowerIsBetter);
   let win = 0;
   let loss = 0;
   let tie = 0;
-  const comps: Array<[string, number]> = [
-    ["PTS", 1], ["REB", 1], ["AST", 1], ["STL", 1], ["BLK", 1], ["3PM", 1], ["TO", -1],
-  ];
-  for (const [cat, dir] of comps) {
-    const x = (a[cat] ?? 0) * dir;
-    const y = (b[cat] ?? 0) * dir;
-    if (x > y) win++;
-    else if (x < y) loss++;
-    else tie++;
-  }
-  for (const [made, att] of [["FGM", "FGA"], ["FTM", "FTA"]]) {
-    const x = pct(a, made, att);
-    const y = pct(b, made, att);
+  for (const cat of categories) {
+    const pair = RATIO_OF[cat];
+    const dir = lower.has(cat) ? -1 : 1;
+    const x = (pair ? pct(a, pair[0], pair[1]) : (a[cat] ?? 0)) * dir;
+    const y = (pair ? pct(b, pair[0], pair[1]) : (b[cat] ?? 0)) * dir;
     if (x > y) win++;
     else if (x < y) loss++;
     else tie++;
@@ -126,13 +150,26 @@ export function cat9Record(a: Agg, b: Agg): [number, number, number] {
   return [win, loss, tie];
 }
 
-/** Your 9-cat record summed against every other team — all-play, so schedule luck is out. */
-export function allPlayCats(you: Agg, others: Agg[]): [number, number, number] {
+/**
+ * Your category record summed against every other team's roster.
+ *
+ * NOT the same statistic as the all-play record on the standings page. That one is the
+ * season as it actually happened — every real week, the totals those rosters actually
+ * produced. This is a snapshot: today's rosters, per-game averages. A team whose stars
+ * were hurt all year can grade out well here and still have finished 7th, which is
+ * exactly what Born In The Darkness does. Read the CHANGE, not the absolute.
+ */
+export function allPlayCats(
+  you: Agg,
+  others: Agg[],
+  categories: string[],
+  lowerIsBetter?: string[]
+): [number, number, number] {
   let w = 0;
   let l = 0;
   let t = 0;
   for (const o of others) {
-    const [a, b, c] = cat9Record(you, o);
+    const [a, b, c] = categoryRecord(you, o, categories, lowerIsBetter);
     w += a;
     l += b;
     t += c;

@@ -63,6 +63,25 @@ body {
   overflow-x: clip;
 }
 
+/*
+ * Reserve the scrollbar's width whether or not the page needs one.
+ *
+ * Without this, a short page (Season Summary) has no scrollbar and a tall one
+ * (Scoreboard) does, so the 15px gutter appears and disappears as you navigate — and
+ * because the header and content are CENTRED, everything jumps sideways by half of it
+ * (measured: 7.5px) on every such move. The gutter is now always there, so the centre
+ * line never moves.
+ *
+ * `scrollbar-gutter` rather than the old `overflow-y: scroll`: that also fixes the
+ * shift, but by forcing a permanently visible scrollbar track on every page, including
+ * ones with nothing to scroll. This reserves the SPACE without drawing a dead track.
+ * It is also a no-op on platforms with overlay scrollbars (macOS, phones), where
+ * scrollbars take no layout space and there is no shift to fix.
+ */
+html {
+  scrollbar-gutter: stable;
+}
+
 /* Every number in this app is a tabular figure. */
 .mono {
   font-family: var(--mono);
@@ -400,15 +419,53 @@ h2 {
   white-space: nowrap;
 }
 
-@media (max-width: 560px) {
+@media (max-width: 767px) {
+  /*
+   * STACKED on a phone, one team per row — the layout every sports app uses at this
+   * width, and the only one that fits a real team name.
+   *
+   * Side by side, two names plus two scores plus the status chip have to share ~360px,
+   * so "Hustle and Hart" became "Hustle an…". Truncating the opponent's name on the
+   * scoreboard is the one thing this panel must not do. Given a full row each, they fit
+   * outright and nothing is abbreviated.
+   *
+   * Ordered by nth-child because the five cells are positional: 1 your name, 2 your
+   * score, 3 the status chip, 4 their score, 5 their name. The chip goes on top as the
+   * row's heading, then each team gets name-left / score-right.
+   */
   .board {
-    padding: 0.85rem 0.9rem;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    row-gap: 0.4rem;
+    column-gap: 0.8rem;
+    padding: 0.8rem 1rem;
+  }
+  .board > :nth-child(3) {
+    order: 1;
+    grid-column: 1 / -1;
+    align-items: flex-start;
+  }
+  .board > :nth-child(1) { order: 2; }
+  .board > :nth-child(2) { order: 3; }
+  .board > :nth-child(5) { order: 4; }
+  .board > :nth-child(4) { order: 5; }
+  /* Both names read from the left now; the right-aligned variant was for the mirrored
+     desktop layout that no longer applies. */
+  .board-side,
+  .board-side-right {
+    text-align: left;
   }
   .board-team {
-    font-size: 1rem;
+    font-size: 1.05rem;
+    white-space: normal;
   }
   .board-score {
     font-size: 2rem;
+  }
+  .board-center {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.5rem;
   }
 }
 
@@ -494,61 +551,47 @@ h2 {
 .sb-bar {
   height: 7px;
 }
+/* Each bar is rounded on its OUTER end — the end that moves. Your bar sits in the left
+   half and grows leftward toward your own number, so it rounds on the left; the
+   opponent's grows right and rounds on the right. Swap these if the sides ever swap. */
 .sb-bar-you {
   background: var(--cobalt);
-  border-radius: 0 3px 3px 0;
+  border-radius: 3px 0 0 3px;
 }
 .sb-bar-opp {
   background: var(--clay);
-  border-radius: 3px 0 0 3px;
+  border-radius: 0 3px 3px 0;
 }
 
-/* ---- matchup recap: how all fifteen categories fell, in one band ------------
-   A completed week has one outcome, so the live page's probability visuals have
-   nothing to say. This replaces them: every category at once, coloured by who
-   took it, with the margin under it. Distinct from the Scoreboard's diverging
-   bars — that page ranks by magnitude, this one is a scannable result sheet. */
-.recap-strip {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 1px;
-  background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  overflow: hidden;
-  margin: 0.6rem 0 0.5rem;
-}
-.recap-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.5rem 0.6rem;
-  background: var(--card);
-  min-width: 0;
-  /* The result reads off the left edge even before the colour registers. */
-  border-left: 3px solid transparent;
-}
-.recap-cell.won { border-left-color: var(--good); }
-.recap-cell.lost { border-left-color: var(--bad); }
-.recap-cell.tied { border-left-color: var(--ink-3); }
-.recap-cat {
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+/* ---- matchup recap: tale of the tape --------------------------------------
+   Two seasons side by side. The label column is text, both team columns are
+   figures, so they get the same right-aligned mono treatment as any other sheet. */
+table.sheet.tape .tape-label {
   color: var(--ink-2);
+  white-space: nowrap;
 }
-.recap-margin { font-size: 0.95rem; font-weight: 700; }
-.recap-cell.won .recap-margin { color: var(--good); }
-.recap-cell.lost .recap-margin { color: var(--bad); }
-.recap-cell.tied .recap-margin { color: var(--ink-3); }
-
-@media (max-width: 900px) {
-  .recap-strip { grid-template-columns: repeat(3, 1fr); }
+table.sheet.tape th:first-child { width: 1%; }
+.tape-form {
+  display: inline-flex;
+  gap: 0.25rem;
+  justify-content: flex-end;
 }
-@media (max-width: 560px) {
-  .recap-strip { grid-template-columns: repeat(2, 1fr); }
+.tape-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35em;
+  height: 1.35em;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--sans);
+  color: var(--card);
 }
+.tape-chip.w { background: var(--good); }
+.tape-chip.l { background: var(--bad); }
+.tape-chip.t { background: var(--ink-3); }
+.tape-none { color: var(--ink-3); }
 
 /* ------------------------------------------------------------------ live badge */
 
@@ -665,6 +708,29 @@ h2 {
   }
 }
 
+@media (max-width: 767px) {
+  /* Eight leader cards at desktop proportions are four tall rows — roughly 370px, which
+     pushed the player table, the actual subject of the page, entirely below the fold.
+     Same eight facts, two thirds of the height. */
+  .leader-grid {
+    gap: 0.45rem;
+    margin: 0.5rem 0 1.1rem;
+  }
+  .leader {
+    padding: 0.5rem 0.6rem;
+  }
+  .leader .eyebrow {
+    font-size: 0.58rem;
+  }
+  .leader-name {
+    font-size: 0.92rem;
+    margin-top: 0.1rem;
+  }
+  .leader-detail {
+    font-size: 0.72rem;
+  }
+}
+
 
 /* ---- a table sized to be READ, not scanned sideways ------------------------
    The column groups keep this to nine columns at most, which fits the content
@@ -692,16 +758,47 @@ table.sheet.sheet-lg .cell-name {
 }
 
 @media (max-width: 767px) {
-  /* Still bigger than the 0.78rem sheets elsewhere, but tight enough that the
-     two narrow groups fit a phone without scrolling at all. */
+  /* Down to the same size as the roster sheet in This Week. The larger type was bought
+     on desktop by the column groups fitting outright; on a phone they don't, so the
+     table scrolls either way and the only thing extra size costs is columns per screen. */
   table.sheet.sheet-lg {
-    font-size: 0.88rem;
+    font-size: 0.78rem;
   }
   table.sheet.sheet-lg td {
-    padding: 0.5rem 0.55rem;
+    padding: 0.45rem 0.5rem;
   }
   table.sheet.sheet-lg .th-sort {
-    padding: 0.5rem 0.55rem;
+    padding: 0.45rem 0.5rem;
+  }
+  /*
+   * The player's name in FULL, and pinned.
+   *
+   * The desktop rule gives this column `width: 40%; max-width: 0` and lets it ellipsis,
+   * which is fine at 1100px and wrong on a phone: names truncated to "Brice Sensab…"
+   * and then scrolled out of sight entirely as soon as you moved sideways to read the
+   * stats. Nothing identifies the row you are reading. Sticky-left keeps the name
+   * against the edge while the numbers scroll under it — the one column you navigate
+   * the table by has to stay put.
+   */
+  table.sheet.sheet-lg .cell-name,
+  table.sheet.sheet-lg thead th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: auto;
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+  table.sheet.sheet-lg .cell-name {
+    background: var(--card);
+    /* A hairline so the pinned column reads as separate from what scrolls under it. */
+    box-shadow: inset -1px 0 0 var(--line-2);
+  }
+  table.sheet.sheet-lg thead th:first-child {
+    z-index: 3;
+    box-shadow: inset -1px 0 0 var(--line);
   }
 }
 
@@ -1407,6 +1504,8 @@ table.sheet.ss-standings td {
     /* Keep clear of the iOS home indicator. */
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
+  /* Sized to the Streamlit bar: a phone's primary navigation should read as a real bar,
+     not a thin strip. Bigger glyph, roomier label, taller target. */
   .bottom-link {
     flex: 1 1 0;
     min-width: 0;
@@ -1414,14 +1513,14 @@ table.sheet.ss-standings td {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.15rem;
-    padding: 0.5rem 0.2rem 0.45rem;
+    gap: 0.3rem;
+    padding: 0.7rem 0.2rem 0.65rem;
     color: var(--ink-3);
     text-decoration: none;
-    font-size: 0.64rem;
+    font-size: 0.7rem;
     font-weight: 600;
-    /* 44px minimum tap target. */
-    min-height: 44px;
+    /* Comfortably past the 44px minimum tap target. */
+    min-height: 58px;
     -webkit-tap-highlight-color: transparent;
   }
   .bottom-link span {
@@ -1482,6 +1581,265 @@ table.sheet.ss-standings td {
   font-size: 0.95rem;
 }
 .home-sub strong { color: var(--ink); font-weight: 700; }
+
+/* ===================== DESKTOP LANDING (the project page) =====================
+   Built to be SCANNED. Every band spans the full content column, claims are one
+   line each, and the figures come before the prose — the previous version ran the
+   same material as paragraphs in a 62-character measure and read as an essay with
+   half the screen empty. Desktop only; `.home-desktop` is hidden under 768px.
+   ============================================================================ */
+
+.lp-hero {
+  padding: 3rem 0 2.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.lp-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.lp-title {
+  font-size: 2.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0.5rem 0 0;
+}
+.lp-sub {
+  max-width: 68ch;
+  margin: 0.8rem 0 0;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+/* ===================== LINEUP OPTIMISER =====================
+   A roster table you can move players in and out of, with the category totals
+   for the current ten sitting above it.
+   ============================================================ */
+
+/* Every category on one band, so the cost of a swap is visible in one glance
+   rather than by scrolling a table sideways. */
+.lu-cats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 0.6rem 0 0.5rem;
+}
+.lu-cat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--card);
+  min-width: 0;
+}
+.lu-cat-l {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.lu-cat-v { font-size: 1rem; font-weight: 700; }
+.lu-cat-d { font-size: 0.72rem; }
+
+.lu-count {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+table.sheet.lu-table { font-size: 0.8rem; }
+table.sheet.lu-table .lu-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+table.sheet.lu-table .lu-name .tag { margin-left: 0.4rem; }
+table.sheet.lu-table .lu-pos {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+/* The move control is the row's whole purpose, so it reads as a button rather
+   than a link and keeps a 32px target even in a dense table. */
+.lu-move {
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lu-move:hover:not(:disabled) {
+  border-color: var(--cobalt);
+  color: var(--cobalt);
+}
+.lu-move:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  .lu-cats { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 560px) {
+  .lu-cats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---- what it answers: four questions, plain language ----------------------
+   The landing band. No jargon here on purpose — this has to land for someone who
+   has never played fantasy basketball; the technical vocabulary is in the flow
+   below it. Replaced an all-play chart which was a good chart but the wrong job
+   for a page whose only task is saying what the site is. */
+.lp-ans-wrap {
+  padding: 2.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.lp-ans-wrap > h2 {
+  font-size: 1.5rem;
+  margin: 0 0 1.6rem;
+}
+.lp-ans {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.6rem 2.6rem;
+}
+.lp-ans-item {
+  padding-left: 1.1rem;
+  border-left: 2px solid var(--line);
+}
+.lp-ans-item h3 {
+  font-size: 1.15rem;
+  margin: 0 0 0.4rem;
+  color: var(--ink);
+}
+.lp-ans-item p {
+  margin: 0 0 0.5rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.lp-ans-item a {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--cobalt);
+  text-decoration: none;
+}
+.lp-ans-item a:hover { text-decoration: underline; }
+.lp-ans-item a::after { content: " →"; }
+
+/* ---- how it decides: the pipeline, four steps across ----------------------
+   A numbered flow rather than prose. The point is the SHAPE of the decision —
+   read, project, solve, decide — which a reader takes in without reading. */
+.lp-flow-wrap {
+  padding: 2.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.lp-flow-wrap > h2 {
+  font-size: 1.5rem;
+  margin: 0 0 1.6rem;
+}
+.lp-flow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.6rem;
+}
+.lp-step {
+  position: relative;
+  padding-top: 1.1rem;
+  border-top: 2px solid var(--cobalt);
+}
+.lp-step-n {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--cobalt);
+}
+.lp-step h3 {
+  font-size: 1.05rem;
+  margin: 0.2rem 0 0.4rem;
+}
+.lp-step p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+
+/* The directory: three columns of real links, each a card-sized hit target. No
+   separate "Open" button — the row IS the link, which is what made the old cards
+   look bolted together. */
+.lp-inside { padding: 2.4rem 0 0; }
+.lp-inside h2 {
+  font-size: 1.5rem;
+  margin: 0 0 1.4rem;
+}
+.lp-dir {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2.4rem;
+}
+.lp-dir-col h3 {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+.lp-dir-item {
+  display: block;
+  padding: 0.6rem 0.7rem;
+  margin: 0 -0.7rem;
+  border-radius: 8px;
+  text-decoration: none;
+}
+.lp-dir-item:hover { background: var(--surface-2); }
+.lp-dir-name {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+.lp-dir-item:hover .lp-dir-name { color: var(--cobalt); }
+.lp-dir-desc {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.lp-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-top: 3rem;
+  padding: 1.2rem 0 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+@media (max-width: 1100px) {
+  .lp-flow,
+  .lp-dir { grid-template-columns: repeat(2, 1fr); gap: 1.8rem; }
+  .lp-ans { grid-template-columns: 1fr; gap: 1.3rem; }
+  .lp-title { font-size: 2.1rem; }
+  .lp-foot { flex-direction: column; gap: 0.6rem; }
+}
 
 /* Full content width — the cards are the page's main content, so they get all of it
    rather than sitting in a narrower inner column. */
@@ -1546,25 +1904,32 @@ table.sheet.ss-standings td {
 .home-cell:hover .home-card-open { filter: brightness(1.08); }
 .home-cell:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 3px; border-radius: 12px; }
 
+/* THREE across, matching the Streamlit phone grid. Nine tiles at 2-up is five rows and
+   a scroll; at 3-up it is three rows that fit the screen, which is the whole point of
+   the phone home. The labels wrap to two lines ("Season Summary"), so the tiles are
+   sized for that rather than for the longest word. */
 .home-tiles {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.7rem;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
 }
 .home-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.55rem;
   min-height: 104px;
+  padding: 0.6rem 0.35rem;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
   color: var(--ink);
   text-decoration: none;
+  text-align: center;
+  line-height: 1.2;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   -webkit-tap-highlight-color: transparent;
 }
 .home-tile svg { color: var(--cobalt); }
@@ -1642,16 +2007,48 @@ table.sheet.ss-standings td {
 
 @media (max-width: 767px) {
   .home-desktop { display: none; }
-  .home-mobile { display: block; }
+  /*
+   * The phone home is a SCREEN, not a document. A web page can end wherever its content
+   * ends; an app's home screen that stops two thirds down with dead space under it reads
+   * as broken. So the hero takes the space it needs and the tile grid takes ALL the rest,
+   * three equal rows — which also makes the tiles properly thumb-sized instead of the
+   * squat boxes they were at a fixed 104px.
+   *
+   * `dvh`, not `vh`: on a phone `vh` is the tallest the viewport ever gets, so with the
+   * browser's URL bar showing the grid would overflow by exactly the bar's height.
+   */
+  /*
+   * Tile proportions taken off the Streamlit screen at iPhone width: three columns of
+   * ~112px, rows ~144px tall, label under the glyph and free to wrap to two lines
+   * ("Season Summary", "Trade Simulator"). Fixed rows rather than stretching to fill:
+   * stretched, the tiles become tall slabs and the wrapped label floats in the middle of
+   * them, which is what stopped it reading like the original.
+   */
+  .home-mobile {
+    display: block;
+  }
+  .home-tiles {
+    grid-auto-rows: 134px;
+    gap: 0.85rem;
+  }
+  .home-tile {
+    min-height: 0;
+    gap: 0.75rem;
+    padding: 0.7rem 0.4rem;
+    border-radius: 14px;
+    font-size: 0.86rem;
+    font-weight: 700;
+  }
   .hero { margin: 0.6rem 0 1rem; }
   .hero-title { font-size: 1.4rem; }
   .hero-sub { font-size: 0.82rem; }
-  /* Compact hero so the tile grid still fits one phone screen without scrolling. The
-     title here is the team name — a proper noun, so it is not uppercased. */
-  .home-hero { padding: 0.7rem 0.5rem 0.6rem; }
+  /* The hero is given room to breathe, as it is in the Streamlit layout: the tiles start
+     around a fifth of the way down the screen, not jammed under the title. Squeezing it
+     to fit more in is what made this read as denser and busier than the original. */
+  .home-hero { padding: 1.6rem 0.6rem 1.3rem; }
   .home-eyebrow { font-size: 0.68rem; }
-  .home-title { font-size: 1.4rem; text-transform: none; margin-top: 0.15rem; }
-  .home-sub { font-size: 0.85rem; margin-top: 0.35rem; }
+  .home-title { font-size: 1.4rem; text-transform: none; margin-top: 0.3rem; }
+  .home-sub { font-size: 0.86rem; margin-top: 0.55rem; line-height: 1.5; }
   .stat-grid { grid-template-columns: 1fr; gap: 0; }
   .controls { gap: 0.6rem; }
   .field { min-width: 0; width: 100%; }
@@ -1962,6 +2359,70 @@ table.sheet.ss-standings td {
 .pv-gl-tbl th:nth-child(2),
 .pv-gl-tbl td:nth-child(2) { text-align: left; }
 
+/* -------- Injuries & missed games (Player Card) -------- */
+.inj-current {
+  border-left: 3px solid var(--clay);
+  background: var(--surface-2);
+  border-radius: 0 8px 8px 0;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.6rem;
+}
+.inj-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.inj-what { font-weight: 700; font-size: 0.92rem; }
+.inj-status {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--clay);
+  background: rgba(224, 106, 59, 0.14);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+}
+.inj-return {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-3);
+}
+.inj-comment {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  line-height: 1.5;
+  margin: 0.35rem 0 0;
+}
+.inj-summary {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin: 0.7rem 0 0.4rem;
+}
+.inj-summary strong {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+/* Only the games count is a figure; the dates and opponents are labels, so they read
+   left-aligned rather than as a column of right-aligned numbers. */
+.inj-tbl { max-width: 520px; }
+.inj-tbl th:nth-child(2),
+.inj-tbl td:nth-child(2) { text-align: right; }
+.inj-tbl th:nth-child(3),
+.inj-tbl td:nth-child(3) {
+  text-align: left;
+  color: var(--ink-3);
+}
+.inj-note {
+  font-size: 0.76rem;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin: 0.6rem 0 0;
+  max-width: 620px;
+}
+
 /* -------- Compare: head-to-head with bars diverging from the centre label --------
    [A value] [A bar >|] LABEL [|< B bar] [B value] */
 .pv-cmp-pickers { max-width: 920px; margin: 0 auto 0.8rem; }
@@ -2158,9 +2619,242 @@ table.sheet.ss-standings td {
 .trade-side { font-size: 1rem; margin: 0 0 0.4rem; }
 .trade-sell { color: var(--good); }
 .trade-buy { color: var(--cobalt); }
-.trade-line { padding: 0.5rem 0; border-bottom: 1px solid var(--line-2); font-size: 0.9rem; }
-/* The shift table is four narrow columns — full width would strand them across a desk. */
-.trade-shift { max-width: 560px; }
+.trade-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 0.9rem;
+}
+.trade-add { flex: 0 0 auto; }
+
+/* ---- the trade board: the two sides side by side, so you can see what you are
+   trading against what. The old version hid both rosters inside dropdowns. ---- */
+.trade-board {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1rem 0 0.9rem;
+  /* STRETCH, not start. The two panels are a matched pair — letting each size to its own
+     contents meant adding a player to one side made it taller than the other and shunted
+     everything below it, so the board jumped on every click. */
+  align-items: stretch;
+}
+.trade-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* A fixed height keeps the board still: the block and the list absorb their own
+     overflow instead of the panel growing. */
+  height: 30rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem 0.9rem 0.9rem;
+}
+/* Which way the value is moving, in the app's two team colours. */
+.trade-panel-out { border-top: 3px solid var(--clay); }
+.trade-panel-in { border-top: 3px solid var(--cobalt); }
+
+.tp-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.tp-sub {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-total {
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.1;
+  flex: 0 0 auto;
+}
+.trade-panel-out .tp-total { color: var(--clay); }
+.trade-panel-in .tp-total { color: var(--cobalt); }
+
+/* The block itself — what's currently on offer from this side. */
+/* The block scrolls at four-ish players rather than pushing the list off the panel. */
+.tp-slot {
+  flex: 0 0 auto;
+  min-height: 3.4rem;
+  max-height: 9.5rem;
+  overflow-y: auto;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  padding: 0.4rem;
+  margin-bottom: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.tp-empty {
+  margin: auto;
+  font-size: 0.82rem;
+  color: var(--ink-3);
+  text-align: center;
+}
+.tp-pick {
+  display: grid;
+  /* name | meta | value | remove — four children, four columns. With three the × wrapped
+     onto a line of its own and the row grew to double height. */
+  grid-template-columns: 1fr auto auto auto;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.tp-pick:hover { border-color: var(--bad); }
+.tp-pick-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-pick-meta { font-size: 0.7rem; color: var(--ink-3); white-space: nowrap; }
+.tp-pick-val { font-size: 0.85rem; font-weight: 700; }
+.tp-pick-x { color: var(--ink-3); font-size: 1rem; line-height: 1; }
+.tp-pick:hover .tp-pick-x { color: var(--bad); }
+.tp-clear {
+  align-self: flex-end;
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.2rem;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.tp-clear:hover { color: var(--bad); }
+
+.tp-controls {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.tp-controls .field { flex: 1 1 auto; min-width: 0; }
+.trade-team { flex: 0 1 40%; }
+
+/* A scroll box, not a wall: ~270 candidates on the other side. Takes whatever height the
+   panel has left, so the two lists always end at the same line. */
+.tp-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--line-2);
+}
+.tp-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  padding: 0.35rem 0.4rem;
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.tp-row:hover { background: var(--surface-2); }
+.tp-row-on { background: var(--cobalt-soft); }
+.tp-row-name {
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-row-on .tp-row-name { font-weight: 700; }
+.tp-row-meta {
+  font-size: 0.68rem;
+  color: var(--ink-3);
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-row-val { font-size: 0.8rem; font-weight: 600; }
+
+/* ---- the result: verdict beside the category shift, one card the width of the board ---- */
+.trade-result {
+  display: grid;
+  grid-template-columns: minmax(210px, 15rem) 1fr;
+  gap: 1.2rem;
+  /* The verdict column stretches to the table's height and spreads its facts down it —
+     top-aligned, the three lines left a block of empty card under them. */
+  align-items: stretch;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 0.5rem;
+}
+.trade-result-idle {
+  display: flex;
+  justify-content: center;
+  padding: 0.9rem 1.1rem;
+}
+.tr-verdict { display: flex; flex-direction: column; min-width: 0; }
+.tv-net-num { font-size: 2.4rem; font-weight: 700; line-height: 1.05; margin: 0.1rem 0 0.6rem; }
+/* Label over value, so the three facts line up as a column of figures. */
+.tr-facts {
+  margin: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  gap: 0.45rem;
+}
+.tr-facts div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-top: 1px solid var(--line-2);
+  padding-top: 0.4rem;
+}
+.tr-facts dt {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.tr-facts dd { margin: 0; font-size: 0.9rem; text-align: right; }
+.tr-count { color: var(--ink-3); font-size: 0.72rem; }
+/* The table fills the rest of the card, so nine short rows stop reading as a stub in a
+   field of white. */
+.tr-shift { min-width: 0; }
+.tr-shift .table-scroll { border: 0; border-radius: 0; background: none; }
+.tr-shift table.sheet th { background: none; }
+
+
+@media (max-width: 767px) {
+  /* One panel per row: two 190px-wide panels side by side on a phone are unusable. */
+  .trade-board { grid-template-columns: 1fr; gap: 0.7rem; }
+  .trade-panel { height: 24rem; }
+  .trade-result { grid-template-columns: 1fr; gap: 0.9rem; padding: 0.8rem 0.9rem; }
+  .tv-net-num { font-size: 1.9rem; }
+}
 
 @media (max-width: 767px) {
   /* Three tiles across is unreadable on a phone; the third wraps under, as elsewhere. */
@@ -2341,6 +3035,104 @@ body:has(.asst) .bottom-nav {
 }
 .asst-send:hover:not(:disabled) { filter: brightness(1.05); }
 .asst-send:disabled { opacity: 0.45; cursor: default; }
+/* Stop reads as a way out, not as the primary action. */
+.asst-stop { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+.asst-stop:hover { color: var(--bad); border-color: var(--bad); }
+
+/* -------- model bar: which model answered, and how each is doing today -------- */
+.asst-composer-wrap {
+  max-width: 680px;
+  width: 100%;
+  margin: 0.9rem auto 0.3rem;
+}
+.asst-composer-wrap .asst-composer { margin: 0; }
+.modelbar { position: relative; display: flex; justify-content: flex-end; margin-top: 0.3rem; }
+.modelbar-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  padding: 0.15rem 0.4rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.modelbar-trigger:hover { color: var(--ink-2); background: var(--surface-2); }
+.modelbar-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+  flex: 0 0 auto;
+}
+.modelbar-pin {
+  font-family: var(--sans);
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cobalt);
+}
+/* Opens UPWARD: the bar sits under a composer that is itself pinned to the bottom. */
+.modelbar-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.35rem);
+  z-index: 200;
+  width: min(23rem, calc(100vw - 2rem));
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(27, 29, 34, 0.12);
+  padding: 0.4rem;
+}
+.modelbar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.15rem 0.45rem 0.35rem;
+}
+.modelbar-note { font-size: 0.66rem; color: var(--ink-3); }
+.modelbar-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.modelbar-row:hover { background: var(--surface-2); }
+.modelbar-row-on { background: var(--cobalt-soft); }
+.modelbar-name { font-size: 0.82rem; display: inline-flex; align-items: baseline; gap: 0.4rem; }
+.modelbar-row-on .modelbar-name { font-weight: 700; }
+.modelbar-out { color: var(--ink-3); text-decoration: line-through; }
+.modelbar-tag {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--good);
+}
+.modelbar-meta { font-size: 0.68rem; color: var(--ink-3); white-space: nowrap; }
+.modelbar-foot {
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--ink-3);
+  margin: 0.35rem 0 0.1rem;
+  padding: 0.35rem 0.45rem 0;
+  border-top: 1px solid var(--line-2);
+}
 
 /* -------- conversation -------- */
 .asst-bar {
@@ -2393,7 +3185,7 @@ body:has(.asst) .bottom-nav {
 
 /* Once there is a conversation, the composer pins to the bottom and the thread scrolls
    above it — real-chatbot behaviour. */
-.asst:not(.asst-empty) .asst-composer {
+.asst:not(.asst-empty) .asst-composer-wrap {
   position: fixed;
   left: 0;
   right: 0;
@@ -2428,7 +3220,7 @@ body:has(.asst) .bottom-nav {
   .asst-hero p { font-size: 0.9rem; }
   .asst-input { font-size: 0.95rem; }
   /* Clear the fixed bottom icon bar. */
-  .asst:not(.asst-empty) .asst-composer {
+  .asst:not(.asst-empty) .asst-composer-wrap {
     margin-bottom: calc(var(--bottomnav-h) + 0.5rem);
   }
   .asst:not(.asst-empty) { padding-bottom: 10rem; }
@@ -2544,3 +3336,109 @@ body:has(.asst) .bottom-nav {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+
+/* -------- Season History: the weekly all-play bar -------- */
+.wk-bar {
+  display: inline-block;
+  vertical-align: middle;
+  width: 78px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.wk-fill { display: block; height: 100%; border-radius: 4px; }
+.wk-flag {
+  margin-left: 0.45rem;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.wk-robbed { color: var(--bad); }
+.wk-gifted { color: var(--clay); }
+
+/* ===================== WEEK RECAP (Scoreboard, past weeks) =====================
+   ESPN's box-score layout in the Analyst Sheet's clothes: the league's other matchups
+   across the top, then the head-to-head board and a category sheet with won cells shaded.
+   ============================================================================== */
+
+.rc-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0 0.4rem;
+}
+.rc-game {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.4rem 0.55rem;
+  min-width: 0;
+}
+/* Your own game, so it is findable without reading all five. */
+.rc-game-you {
+  border-color: var(--cobalt);
+  background: var(--row-highlight);
+}
+.rc-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--ink-3);
+  padding: 0.1rem 0;
+}
+.rc-row-won { color: var(--ink); font-weight: 700; }
+.rc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rc-score { flex: 0 0 auto; font-size: 0.74rem; }
+/* Record under each team name on the board. */
+.rc-meta {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-3);
+  margin-top: 0.15rem;
+}
+.board-side-right .rc-meta { text-align: left; }
+
+table.sheet.rc-sheet td,
+table.sheet.rc-sheet th { padding: 0.5rem 0.6rem; }
+table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
+/* A won category. Tinted rather than coloured text: fifteen green numbers in a row reads
+   as decoration, a shaded cell reads as a result. */
+table.sheet.rc-sheet .rc-win {
+  background: rgba(46, 125, 70, 0.12);
+  font-weight: 700;
+}
+
+@media (max-width: 767px) {
+  .rc-strip { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+  .rc-row { font-size: 0.72rem; }
+}
+
+/* -------- per-player box score under the recap -------- */
+.rc-box-title { font-size: 1rem; margin: 1.4rem 0 0.5rem; }
+table.sheet.rc-box { font-size: 0.74rem; }
+table.sheet.rc-box td,
+table.sheet.rc-box th { padding: 0.35rem 0.5rem; }
+table.sheet.rc-box .rc-player {
+  font-weight: 600;
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  background: var(--card);
+}
+/* The totals row has to equal the category sheet above it, so it reads as a rule. */
+table.sheet.rc-box .rc-totals td {
+  border-top: 2px solid var(--line-strong);
+  font-weight: 700;
+  background: var(--surface-2);
+}
+table.sheet.rc-box .rc-totals .rc-player { background: var(--surface-2); }

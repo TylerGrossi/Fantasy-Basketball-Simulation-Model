@@ -1,17 +1,27 @@
 import Scoreboard from "@/components/Scoreboard";
+import WeekRecap from "@/components/WeekRecap";
 import WeekSelect from "@/components/WeekSelect";
 import { periodLabel } from "@/lib/league";
 import type { Matchup } from "@/lib/league";
-import { loadLeague, myTeam, resolveMatchup, trimLeague } from "@/lib/loadLeague";
+import {
+  loadBoxScores,
+  loadLeague,
+  myTeam,
+  resolveMatchup,
+  trimLeague,
+} from "@/lib/loadLeague";
 
 /**
- * The week's NUMBERS — this week live, or any completed week via `?period=`. The
- * simulation analytics (win probability, distributions, projections) are the Matchup tab.
+ * THE week page. One picker, three states, decided by which week you choose:
  *
- * Every week renders through the SAME <Scoreboard>. A finished week is not a different
- * kind of page, it is the same board with zero games left: the totals become final and
- * the projection terms go to zero. Building a separate "past week" layout was the wrong
- * call — switching weeks should change the data, not the view.
+ *   past     a RECAP — the league's other matchups, the head-to-head, and the full
+ *            category sheet with each won category shaded (ESPN's box-score layout)
+ *   current  the LIVE board — banked totals, win probability, projections
+ *   future   a PREVIEW — nothing is banked yet, so it is projection only
+ *
+ * Matchup used to be a separate tab holding the analytics half. Splitting one week across
+ * two pages meant deciding which of them to open before knowing what you wanted; the week
+ * is the subject, and how far along it is decides what there is to say about it.
  *
  * `?demo=1` freezes the page on the build-time snapshot and skips the live fetch.
  */
@@ -33,8 +43,8 @@ export default async function Page({
   const slim = trimLeague(league, { matchupTeamId: me.id });
   const byId = new Map(league.teams.map((t) => [t.id, t]));
 
-  // ---- a completed week: same board, historical totals, no live fetch ----
-  if (isPast) {
+  // ---- a completed week: the recap ----
+  if (isPast && asked < league.period) {
     const game = league.periodResults
       ?.find((p) => p.period === asked)
       ?.games.find((g) => g.homeId === me.id || g.awayId === me.id);
@@ -69,22 +79,27 @@ export default async function Page({
     const isHome = game.homeId === me.id;
     const oppId = isHome ? game.awayId : game.homeId;
 
+    void matchup;
+    void isHome;
+    void oppId;
     return (
       <>
         <WeekSelect weeks={weeks} selected={asked} current={league.period} />
-        <Scoreboard
-          /* Remount when the week changes. useLiveTotals seeds its totals with
-             useState(snapshot), which only applies on mount — without a changing key
-             React reuses the instance and the previous week's numbers stick. */
-          key={asked}
-          live={false}
-          league={slim}
-          matchup={matchup}
-          isHome={isHome}
-          teamId={me.id}
-          youName={byId.get(me.id)?.name ?? "Your team"}
-          oppName={byId.get(oppId)?.name ?? "Opponent"}
-        />
+        <WeekRecap league={league} period={asked} teamId={me.id} box={await loadBoxScores()} />
+      </>
+    );
+  }
+
+  // ---- a week that has not started: projection only, nothing banked ----
+  if (isPast && asked > league.period) {
+    return (
+      <>
+        <WeekSelect weeks={weeks} selected={asked} current={league.period} />
+        <p className="notice">
+          {periodLabel(league, asked)} hasn&rsquo;t started. Projections appear once the
+          export covers it — the snapshot only carries rosters and games left for the
+          CURRENT period.
+        </p>
       </>
     );
   }
@@ -140,11 +155,11 @@ function weekOptions(
   const rows = league.seasonData?.schedules?.[String(teamId)] ?? [];
   const out = rows
     .filter((r) => played.has(r.period) && r.period !== league.period)
-    // "Playoff Round 1 (Mar 09 - Mar 22)" -> "Playoff Round 1"
-    .map((r) => ({
-      period: r.period,
-      label: (r.matchup || `Matchup ${r.period}`).replace(/\s*\(.*\)\s*$/, ""),
-    }));
+    // Named by periodLabel, NOT by the export's own `matchup` string. The export carries
+    // ESPN's wording with a date range ("Playoff Round 1 (Mar 09 - Mar 22)"), and mixing
+    // it with the app's naming for the current period is what put "Playoff Round 1" and
+    // "Playoffs · Round 2" in the same menu.
+    .map((r) => ({ period: r.period, label: periodLabel(league, r.period) }));
 
   // A playoff round spans two scoring periods, so the CURRENT period and the schedule's
   // row for the same round are one matchup under two numbers ("Playoff Round 2" / period

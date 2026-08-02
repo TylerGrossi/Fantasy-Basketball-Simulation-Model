@@ -1,0 +1,225 @@
+# Feature ideas
+
+A backlog of things this app could do, drawn from what the established fantasy
+basketball tools offer and filtered for what makes sense here: **one owner, one ESPN
+head-to-head category league, all maths in the browser, Analyst Sheet aesthetic.**
+
+Written 2026-08-01, revised the same day as items shipped. Nothing here is
+committed work — it is a menu. Strike items out as they land.
+
+## How to read the tags
+
+| Tag | Meaning |
+|-----|---------|
+| `SHIPS TODAY` | Everything it needs is already in `public/data/league.json`. Pure front-end work. |
+| `PIPELINE` | Needs new fields out of `scripts/build_data.py`. Still one scheduled export, no new infrastructure. |
+| `NEW DATA` | Needs a source the project does not have yet (multi-season archive, per-game player logs at scale, live NBA schedule in the export). |
+
+Effort is a rough t-shirt size for the front-end half.
+
+---
+
+## What already exists
+
+So nothing below duplicates it. Eighteen routes: Home, Scoreboard, Matchup, Roster,
+Streamers, Bench, Season Summary, Season Stats, League Stats, Schedule, Power Rankings,
+Playoff Odds, Player Value, Player Card, Compare, Trade Simulator, Agent, Settings.
+Parity with the Streamlit app is complete.
+
+The engine already does: closed-form category probabilities, Poisson-binomial exact
+score distribution, all-play records, luck, power rankings with rank history, playoff
+and championship odds, streamer sweeps, bench decisions, and 9-cat player values with
+30-day and 15-day trends.
+
+**Shipped since this list was written** (2026-08-01, same day — the doc aged fast):
+
+- **Trade Simulator rebuilt** as a two-panel board: both rosters visible and searchable,
+  a per-team filter, live per-side value totals, and a result card pairing the verdict
+  with the category shift. This closed **B4** and **D1** below, which are removed.
+- **Category record vs the league**, before → after a trade, over the league's own 14
+  scorable categories and each side's best ten — not the whole roster, which had let
+  bench depth decide it. Separate from the season all-play on the standings page, and
+  labelled so the two are not confused.
+- **Buy Low / Sell High** on the Trade Simulator, with the league's top 20 by value held
+  off the buy-low list — a slumping superstar is not a discount.
+- **Injuries & missed games** on the Player Card: current diagnosis plus every absence
+  this season, derived by diffing the game log against the team schedule.
+- **Agent tooling**: `find_players` (filtered search that returns names) and
+  `league_rosters`, a model picker with observed rate-limit state, and a stall watchdog.
+- **Season History** (`/history`) — **A1** below, now shipped and removed from the list.
+  Week-by-week all-play, the deserved record, and per-week "robbed / gifted" flags. Its
+  season total independently reproduces the standings' 68.1% all-play, computed a
+  completely different way, which is the check that the week-level numbers are right.
+
+---
+
+## The shortlist
+
+If only three things get built, these are the ones. All are `SHIPS TODAY`, all use
+`periodResults` — 22 weeks of final 14-stat totals for every team, which is the most
+under-used asset in the export.
+
+1. ~~**Weekly all-play**~~ — **shipped** at `/history`.
+2. **Punt analysis** (B1) — the defining question of a category league, and nothing in the app answers it.
+3. **League record book** (A3) — cheap, and it is the feature people actually come back for.
+
+`/history` is now the natural home for A3 and A4: the page already loads
+`periodResults` and reduces over it.
+
+---
+
+## A. Season history and recap
+
+`periodResults` carries every team's final totals for all 22 scoring periods, and
+`/history` now reads it. It supports this entire section with no pipeline work.
+
+**Known shape trap, learned building A1:** a playoff round spans TWO scoring periods and
+the export carries a row for each — this league's Round 2 appears as period 21 AND 22
+with byte-identical totals. Counted naively it is a phantom extra week (it added a win
+and 135 fake category comparisons). `dedupePlayoffEchoes` in `lib/history.ts` collapses
+them on same-opponent-and-identical-vector; anything else reducing over `periodResults`
+needs the same guard.
+
+### A2. Season timeline `SHIPS TODAY` · M
+A small-multiple chart per category: your weekly total vs the league median, across the
+season. Answers "when did my rebounding fall off a cliff" — invisible in season totals.
+Fits the no-charting-library rule; these are sparklines in inline SVG.
+
+### A3. League record book `SHIPS TODAY` · S
+Highest weekly total in every category and who owns it, biggest blowout, closest
+matchup, longest win streak, most categories won in a week, worst week. This is the
+core of [League Legacy](https://leaguelegacy.io/features/fantasy-league-history) and
+[Fantasy Record Book](https://fantasyrecordbook.com/features), and it is a couple of
+reductions over `periodResults`.
+
+### A4. Manager awards `SHIPS TODAY` · S
+Derived superlatives: luckiest and unluckiest (already computed), most consistent
+(lowest week-to-week variance), best closer (record in the last five weeks), most
+one-sided (average margin). Cheap, and it is what makes a recap shareable.
+
+### A5. Head-to-head history `SHIPS TODAY` · S
+Every meeting with a given opponent this season, the category splits, and the aggregate.
+Natural extension of the Tale of the Tape already on the Matchup recap.
+
+---
+
+## B. Category strategy
+
+This is the territory of [Basketball Monster](https://basketballmonster.com/) (Team
+Analysis, Trade Analysis, Punting) and
+[Hashtag Basketball](https://hashtagbasketball.com/). It is the biggest genuine gap in
+this app: it models matchups extremely well and says nothing about *build*.
+
+### B1. Punt analysis `SHIPS TODAY` · M
+Which categories did you effectively punt, and what would your record have been under
+each punt build? Recompute the season's matchups ignoring category *k* and report the
+record. Punting is the central strategic decision in a 9-cat league —
+[every guide](https://www.rotoballer.com/fantasy-basketball-punting-guide-strategies-values-sleepers-2025-2026/1712272)
+opens with it — and the app currently has no view of it.
+
+### B2. Team category strength `SHIPS TODAY` · S
+Z-score per category against the league, as a diverging bar. Basketball Monster's Team
+Analysis in one screen: where you are strong, where you are weak, and how balanced.
+
+### B3. Punt-aware player values `SHIPS TODAY` · M
+The existing 9-cat value assumes you want all nine. Recompute value excluding punted
+categories, so Player Value and Trade Simulator rank players for *your* build. This is
+the feature that makes B1 actionable rather than trivia.
+
+---
+
+## C. Schedule and streaming
+
+The genre standard — [SportsWZRD](https://www.sportswzrd.com/tools/nba-schedule-analyzer),
+FanScout, Hashtag all ship a schedule grid, because
+[game count is the biggest weekly lever](https://athlonsports.com/fantasy/nba-schedule-maximize-fantasy-games-played)
+in category leagues.
+
+### C1. NBA schedule grid `PIPELINE` · M
+All 30 teams by day for a chosen week, colour-coded, sorted by game count. `legacy/data.py`
+already scrapes team schedules (`get_team_schedule`, `prefetch_team_schedules_for_rosters`)
+for games-left counting — the grid is exporting what it already fetches.
+
+### C2. Back-to-back and rest flags `PIPELINE` · S
+Falls out of C1. Useful on Streamers, where a 4-game week with two back-to-backs is not
+the same as a clean 4-game week.
+
+### C3. Playoff-week planner `PIPELINE` · M
+Which of your players have the most games in the playoff weeks specifically. Matters
+disproportionately and is easy to overlook during the regular season.
+
+---
+
+## D. Player tools
+
+### D2. Player consistency `NEW DATA` · M
+Game-to-game volatility, not just the average — a 20-point floor is worth more in H2H
+than a boom-bust 20-point mean. The Player Card already pulls per-game logs from ESPN
+client-side, so the data path exists; doing it for the whole pool needs ~290 requests,
+which argues for a pipeline job rather than the browser.
+
+### D3. Usage shift after an injury `NEW DATA` · L
+Basketball Monster's "Usage Monster": when a starter goes down, who absorbs the touches.
+The highest-value waiver signal there is, and the hardest to source here.
+
+---
+
+## E. Draft prep for next season
+
+The season is over, so this is the timely category.
+
+### E1. Draft board with tiers `SHIPS TODAY` · M
+Rank the pool by 9-cat value with tier breaks at the natural gaps. Optionally
+punt-aware once B3 exists.
+
+### E2. Keeper value `NEW DATA` · S
+Value against draft cost. Needs draft position data, which is not in the export.
+
+---
+
+## F. Recap and sharing
+
+### F1. Auto-written season recap `SHIPS TODAY` · S
+The app already has `lib/gemini.ts` and an Agent page. Point it at the recap data and
+have it write the league newsletter — the whole product of
+[Recap My League](https://www.recapmyleague.com/). Given the awards in A4 and the record
+book in A3, the inputs already exist.
+
+### F2. Shareable recap card `SHIPS TODAY` · S
+A single self-contained image or page summarising the season for one team. Pairs with
+A3/A4.
+
+---
+
+## G. The structural gap
+
+### G1. Multi-season history `NEW DATA` · L
+Everything in section A is scoped to one season because the export is overwritten each
+run. Archiving `league.json` per season — even just committing a dated copy — turns the
+record book into a real one, and it is the thing every league-history product is
+actually selling. **Cheapest possible version: keep a dated copy of the export at the
+end of each season.** Worth doing before next season starts, because the data cannot be
+recovered afterwards.
+
+---
+
+## Deliberately not recommended
+
+- **Live draft tools.** ESPN's own draft room is where the draft happens; competing with it is a lot of work for one night a year.
+- **League chat / messaging.** Sleeper's strength, and pointless for a single-owner analysis tool.
+- **Points-league features.** This league is head-to-head categories. Supporting both would compromise the maths that makes the app fast.
+- **A charting library.** See the performance notes in AGENTS.md — Plotly cost 4.87 MB and was removed on purpose. Every chart idea above is inline SVG.
+
+---
+
+## Sources
+
+- [Basketball Monster](https://basketballmonster.com/) — Team Analysis, Trade Analysis, Projected Standings, Schedule Analyzer, Matchup Monster, Usage Monster
+- [Hashtag Basketball](https://hashtagbasketball.com/) — rankings, trade analyzer, schedule analysis, premium league tools
+- [Sleeper feature list](https://support.sleeper.com/en/articles/1951583-what-are-sleeper-s-unique-features) — GameDay experience, contextual box scores, custom playoffs
+- [League Legacy](https://leaguelegacy.io/features/fantasy-league-history) — league history hub, record book, weekly newsletters
+- [Fantasy Record Book](https://fantasyrecordbook.com/features) — per-season breakdowns, trophy case, career milestones
+- [Recap My League](https://www.recapmyleague.com/) — AI-written season recaps, superlatives, schedule-luck breakdown
+- [SportsWZRD schedule analyzer](https://www.sportswzrd.com/tools/nba-schedule-analyzer) — NBA schedule grid, back-to-backs, rest days
+- [RotoBaller punting guide](https://www.rotoballer.com/fantasy-basketball-punting-guide-strategies-values-sleepers-2025-2026/1712272) — punt-build strategy
+- [Athlon: schedule strategy](https://athlonsports.com/fantasy/nba-schedule-maximize-fantasy-games-played) — why game count dominates weekly category leagues

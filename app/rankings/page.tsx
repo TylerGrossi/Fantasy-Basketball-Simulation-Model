@@ -21,13 +21,6 @@ export default async function Page() {
   return (
     <>
       <h1>Power Rankings</h1>
-      <p className="caption">
-        Ranked by <strong>all-play win %</strong> — how each team would score against the
-        whole league every week, so schedule luck is stripped out. <strong>Move</strong> is
-        the change from last week, <strong>Form</strong> compares the last three weeks to
-        the season, and <strong>SoS</strong> is the average all-play strength of the
-        opponents faced.
-      </p>
 
       <div className="table-scroll">
         <table className="sheet">
@@ -73,9 +66,6 @@ export default async function Page() {
       </div>
 
       <h2>Rank movement</h2>
-      <p className="caption">
-        Weekly power-rank path. <strong>{me.name}</strong> is highlighted.
-      </p>
       <RankTrendChart weeks={pr.weeks} teams={pr.teams} yourTeamId={me.id} />
     </>
   );

@@ -85,6 +85,14 @@ export interface StandingRow {
   allPlayPct: number;
   /** Actual wins minus all-play expectation — schedule luck, not skill. */
   luck: number;
+  /**
+   * Roster churn for the season. Optional because exports built before these were added
+   * don't carry them — the column hides itself rather than printing zeros that would
+   * read as "this manager never touched their team".
+   */
+  acquisitions?: number;
+  drops?: number;
+  trades?: number;
   catTotals: Record<string, number>;
 }
 
@@ -198,7 +206,14 @@ export interface LeagueData extends LeagueMeta {
 }
 
 /**
- * What to call a matchup period: "Week 12", or "Playoffs · Round 2".
+ * What to call a matchup period: "Matchup 12", or "Playoff Round 2".
+ *
+ * THE ONLY PLACE A PERIOD GETS A NAME. The week menu used to label past weeks with the
+ * string ESPN wrote into the export ("Matchup 18", "Playoff Round 1") and the current
+ * week with this function, which then said "Playoffs · Round 2" — so one list held two
+ * naming schemes and the last two playoff entries looked like different kinds of thing.
+ * The wording here now matches ESPN's, which is what the Schedule page shows too; label
+ * every period through this function and the question can't come back.
  *
  * A playoff round spans TWO scoring periods, so the round is found by halving the
  * distance past the regular season — the same arithmetic as `resolve_view_window` in
@@ -214,10 +229,10 @@ export function periodLabel(league: LeagueData, period = league.period): string 
   const rounds = league.playoffRounds ?? 2;
   if (period > weeks) {
     const round = Math.floor((period - weeks - 1) / 2) + 1;
-    if (round >= 1 && round <= rounds) return `Playoffs · Round ${round}`;
+    if (round >= 1 && round <= rounds) return `Playoff Round ${round}`;
     return "Playoffs";
   }
-  return `Week ${period}`;
+  return `Matchup ${period}`;
 }
 
 /**

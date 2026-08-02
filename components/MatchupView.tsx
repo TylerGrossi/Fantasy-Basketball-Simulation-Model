@@ -16,11 +16,31 @@ import WinProbabilityGauge from "./WinProbabilityGauge";
 import CategoryAnalysis from "./CategoryAnalysis";
 import ScoreDistribution from "./ScoreDistribution";
 
+/** One team's season, for the completed-matchup "tale of the tape". */
+export interface TapeSide {
+  name: string;
+  record: string;
+  winPct: number;
+  allPlayPct: number;
+  luck: number;
+  powerRank: number | null;
+  finish: number;
+  /** Results of the five matchups BEFORE this one, oldest first. */
+  form: string[];
+}
+
+export interface Tape {
+  you: TapeSide;
+  opp: TapeSide;
+}
+
 interface Props {
   league: LeagueData;
   matchup: Matchup;
   isHome: boolean;
   teamId: number;
+  /** Season context for the recap. Built server-side; null if unavailable. */
+  tape?: Tape | null;
   /** false = freeze on the snapshot, never fetch (?demo=1). */
   live?: boolean;
   /** Numbers are synthetic (mid-week preview) — disclosed in the badge. */
@@ -44,6 +64,7 @@ export default function MatchupView({
   simulated = false,
   youName,
   oppName,
+  tape = null,
 }: Props) {
   const you = isHome ? matchup.home : matchup.away;
   const opp = isHome ? matchup.away : matchup.home;
@@ -88,6 +109,7 @@ export default function MatchupView({
         oppName={oppName}
         youVec={live.you}
         oppVec={live.opp}
+        tape={tape}
         badge={
           <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
         }
@@ -159,6 +181,7 @@ function Recap({
   oppName,
   youVec,
   oppVec,
+  tape,
   badge,
 }: {
   league: LeagueData;
@@ -166,6 +189,7 @@ function Recap({
   oppName: string;
   youVec: number[];
   oppVec: number[];
+  tape: Tape | null;
   badge: ReactNode;
 }) {
   const rows = scoreboardRows(league, youVec, oppVec);
@@ -217,22 +241,7 @@ function Recap({
         />
       </div>
 
-      <h2>How it finished</h2>
-      <div className="recap-strip">
-        {rows.map((r) => (
-          <div
-            key={r.cat}
-            className={`recap-cell ${r.youWins ? "won" : r.oppWins ? "lost" : "tied"}`}
-          >
-            <span className="recap-cat">{r.cat}</span>
-            <span className="recap-margin mono">{r.marginStr}</span>
-          </div>
-        ))}
-      </div>
-      <p className="caption">
-        Each category as it finished, in the league&rsquo;s own order. The margin is
-        relative to the two totals, so a category is comparable with the ones beside it.
-      </p>
+      {tape && <TaleOfTheTape tape={tape} />}
 
       <h2>Final totals</h2>
       <div className="table-scroll">
@@ -272,6 +281,113 @@ function Recap({
         </table>
       </div>
     </>
+  );
+}
+
+/**
+ * The two seasons side by side, so the result has context: was this the better team
+ * winning, or an upset? Every row is a season-long fact, which is why it belongs on the
+ * finished view and not the live one — mid-week these numbers are still moving.
+ *
+ * The better side of each row is emphasised, using each row's own sense of "better":
+ * lower is better for the rank, and luck is closest-to-zero rather than highest, since
+ * a big positive luck figure means a kind schedule, not a good team.
+ */
+function TaleOfTheTape({ tape }: { tape: Tape }) {
+  const { you, opp } = tape;
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+
+  const rows: Array<{ label: string; a: string; b: string; win: -1 | 0 | 1 }> = [
+    { label: "Record", a: you.record, b: opp.record, win: cmp(you.winPct, opp.winPct) },
+    { label: "Win %", a: pct(you.winPct), b: pct(opp.winPct), win: cmp(you.winPct, opp.winPct) },
+    {
+      label: "All-play %",
+      a: pct(you.allPlayPct),
+      b: pct(opp.allPlayPct),
+      win: cmp(you.allPlayPct, opp.allPlayPct),
+    },
+    {
+      label: "Power rank",
+      a: you.powerRank ? `#${you.powerRank}` : "—",
+      b: opp.powerRank ? `#${opp.powerRank}` : "—",
+      // Lower is better.
+      win:
+        you.powerRank && opp.powerRank ? cmp(opp.powerRank, you.powerRank) : 0,
+    },
+    {
+      label: "Luck",
+      a: signed(you.luck),
+      b: signed(opp.luck),
+      // Neither sign is "good" — the less schedule-dependent record is.
+      win: cmp(Math.abs(opp.luck), Math.abs(you.luck)),
+    },
+    {
+      label: "Season finish",
+      a: ordinal(you.finish),
+      b: ordinal(opp.finish),
+      win: cmp(opp.finish, you.finish),
+    },
+  ];
+
+  return (
+    <>
+      <h2>Tale of the tape</h2>
+      <div className="table-scroll">
+        <table className="sheet tape">
+          <thead>
+            <tr>
+              <th />
+              <th className="num">{you.name}</th>
+              <th className="num">{opp.name}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td className="tape-label">{r.label}</td>
+                <td className={`num ${r.win === 1 ? "sb-win" : "sb-lose"}`}>{r.a}</td>
+                <td className={`num ${r.win === -1 ? "sb-win" : "sb-lose"}`}>{r.b}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="tape-label">Form into the week</td>
+              <td className="num">
+                <Form results={you.form} />
+              </td>
+              <td className="num">
+                <Form results={opp.form} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+/** -1 = second value better, 1 = first better, 0 = level. Higher wins. */
+function cmp(a: number, b: number): -1 | 0 | 1 {
+  return a > b ? 1 : a < b ? -1 : 0;
+}
+
+function ordinal(n: number): string {
+  if (!n) return "—";
+  const r = n % 100;
+  if (r >= 11 && r <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+}
+
+function Form({ results }: { results: string[] }) {
+  if (!results.length) return <span className="tape-none">—</span>;
+  return (
+    <span className="tape-form">
+      {results.map((r, i) => (
+        <span key={i} className={`tape-chip ${r === "W" ? "w" : r === "L" ? "l" : "t"}`}>
+          {r}
+        </span>
+      ))}
+    </span>
   );
 }
 

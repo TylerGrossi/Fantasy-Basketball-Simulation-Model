@@ -44,13 +44,25 @@ ESPN_SEASON_YEAR = 2026
 # chatbot offline. Ordered quality-first, ending with the 500-req/day lite as a big safety
 # net (~560 free requests/day total across the chain). All IDs verified against the key.
 GEMINI_MODELS = [
-    "gemini-3.6-flash",        # primary: newest/best flash (~20/day)
-    "gemini-3.5-flash",        # (~20/day)
-    "gemini-3-flash-preview",  # (~20/day)
-    "gemini-2.5-flash",        # (~20/day)
-    "gemini-3.5-flash-lite",   # workhorse fallback, newest lite (~500/day)
-    "gemini-3.1-flash-lite",   # workhorse fallback (~500/day)
-    "gemini-2.5-flash-lite",   # extra safety net (~20/day)
+    # Every flagship is 20 requests/DAY and 5/minute on the free tier — the whole chain
+    # is worth ~1080 requests a day, and the top of it is worth 80. Heavy days land on
+    # the lites, which is why their order matters as much as the flagships'.
+    "gemini-3.6-flash",        # primary: newest/best flash (20 RPD, 5 RPM)
+    "gemini-3.5-flash",        # (20 RPD, 5 RPM)
+    "gemini-2.5-flash",        # (20 RPD, 5 RPM)
+    # Ordered by "cost when it answers", not by version — and kept IDENTICAL to
+    # DEFAULT_MODELS in lib/gemini.ts, since make_env.py copies this list into the web
+    # app's .env.local. A 429 from an exhausted model costs ~0.15s to discover; a slow
+    # model costs its full latency on EVERY round-trip of the turn, so the slow one goes
+    # last. `gemini-3-flash-preview` was third and measured ~13s per call, which is what
+    # made a turn take half a minute once the flagship quota was spent.
+    # Caps below are READ OFF the AI Studio rate-limit dashboard, not guessed. The lites
+    # are NOT interchangeable: 2.5-flash-lite is a 20/day model like the flagships, so it
+    # sits after the two genuine 500/day workhorses rather than beside them.
+    "gemini-3.5-flash-lite",   # workhorse: 500 RPD, 15 RPM
+    "gemini-3.1-flash-lite",   # workhorse: 500 RPD, 15 RPM
+    "gemini-2.5-flash-lite",   # only 20 RPD, 10 RPM — a safety net, not a workhorse
+    "gemini-3-flash-preview",  # last resort: 20 RPD and ~13s/call, the slowest measured
 ]  # ~1100 free requests/day total; each turn resets to the top (assistant.py), so a busy
    # model is retried next turn and per-minute load is spread across the whole chain.
 GEMINI_MODEL = GEMINI_MODELS[0]  # kept for any single-model reference

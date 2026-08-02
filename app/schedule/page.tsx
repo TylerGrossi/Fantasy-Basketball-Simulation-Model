@@ -1,7 +1,16 @@
 import Link from "next/link";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { weeklyAllPlay } from "@/lib/history";
+import { periodLabel } from "@/lib/league";
 
-/** Your season, matchup by matchup. Completed weeks show the category score. */
+/**
+ * Your season, matchup by matchup — what happened, and what would have happened against
+ * the whole league.
+ *
+ * The all-play columns live HERE rather than on a page of their own: they are the same
+ * twenty-one rows this table already lists, and a second page repeating the schedule to
+ * add three columns is two places to look for one story.
+ */
 export default async function Page() {
   const league = await loadLeague();
   const me = await myTeam(league);
@@ -15,6 +24,25 @@ export default async function Page() {
       </>
     );
   }
+
+  // Week-by-week all-play, keyed by period so it can join onto the schedule rows.
+  const history = weeklyAllPlay(league, me.id);
+  const byPeriod = new Map(history.weeks.map((h) => [h.period, h]));
+
+  /**
+   * What to print in the # column. A playoff round's period number (20, 22) means
+   * nothing to a reader — "R1" and "R2" are how the league talks about those weeks.
+   */
+  const weekTag = (period: number) => {
+    const round = /^Playoff Round (\d+)$/.exec(periodLabel(league, period));
+    return round ? `R${round[1]}` : String(period);
+  };
+
+  /**
+   * The export writes "Matchup 16 (Feb 03 - Feb 09)" — the label is already the # column
+   * and the row's own position, so only the date range is worth a column.
+   */
+  const dates = (matchup: string) => /\(([^)]+)\)/.exec(matchup ?? "")?.[1] ?? "";
 
   const w = rows.filter((r) => r.result === "W").length;
   const l = rows.filter((r) => r.result === "L").length;
@@ -32,62 +60,66 @@ export default async function Page() {
     [0, 0, 0] as [number, number, number]
   );
 
-  // Best opponent, measured in CATEGORIES rather than matchups — beating someone 12-3
-  // twice says more than edging them 8-7 twice, and with only two or three meetings per
-  // opponent a matchup record is too coarse to separate anyone.
-  // Names arrive as "@ Team Name (140-143-2)": strip the away marker and their record.
-  const byOpp = new Map<string, [number, number, number]>();
-  for (const r of rows) {
-    const m = /^(\d+)-(\d+)-(\d+)$/.exec((r.score || "").trim());
-    if (!m) continue;
-    const name = (r.opponent || "")
-      .replace(/^@\s*/, "")
-      .replace(/\s*\([^)]*\)\s*$/, "")
-      .trim();
-    if (!name) continue;
-    const rec = byOpp.get(name) ?? [0, 0, 0];
-    byOpp.set(name, [rec[0] + +m[1], rec[1] + +m[2], rec[2] + +m[3]]);
-  }
-  // Best category win rate; ties broken by the bigger sample, so one lucky week does not
-  // outrank a team you beat repeatedly.
-  const best = [...byOpp.entries()].sort((a, b) => {
-    const rate = (x: [number, number, number]) => {
-      const n = x[0] + x[1] + x[2];
-      return n ? (x[0] + x[2] / 2) / n : 0;
-    };
-    return rate(b[1]) - rate(a[1]) ||
-      (b[1][0] + b[1][1] + b[1][2]) - (a[1][0] + a[1][1] + a[1][2]);
-  })[0];
-
   return (
     <>
       <h1>Schedule</h1>
-      <p className="caption">
-        {me.name}&rsquo;s season. Completed matchups show the category score (W-L-T) —
-        click any row to open that week.
-      </p>
 
       <div className="metrics">
         <Metric label="Total record" value={cats.join("-")} />
         <Metric label="Record" value={`${w}-${l}-${t}`} />
-        <Metric label="Win rate" value={played ? `${((w / played) * 100).toFixed(0)}%` : "—"} />
         <Metric
-          label="Best opponent"
-          value={best ? best[1].join("-") : "—"}
-          sub={best ? best[0] : undefined}
+          label="Expected record"
+          value={`${history.expected.win}-${history.expected.loss}`}
+        />
+        {/* What the draw was worth: the record you got minus the one your all-play rate
+            says you earned. The "best opponent" tile it replaces was a curiosity; this
+            answers the question the table below is actually about. */}
+        <Metric
+          label="Schedule swing"
+          value={`${history.actual.win - history.expected.win >= 0 ? "+" : ""}${history.actual.win - history.expected.win}`}
+          tone={
+            history.actual.win > history.expected.win
+              ? "good"
+              : history.actual.win < history.expected.win
+                ? "bad"
+                : undefined
+          }
         />
       </div>
+
+      {(history.luckyWeeks.length > 0 || history.unluckyWeeks.length > 0) && (
+        <p className="caption">
+          {history.unluckyWeeks.length > 0 && (
+            <>
+              <strong>{history.unluckyWeeks.length}</strong>{" "}
+              {history.unluckyWeeks.length === 1 ? "week was" : "weeks were"} lost while
+              beating most of the league (
+              {history.unluckyWeeks.map((x) => x.label).join(", ")}).{" "}
+            </>
+          )}
+          {history.luckyWeeks.length > 0 && (
+            <>
+              <strong>{history.luckyWeeks.length}</strong>{" "}
+              {history.luckyWeeks.length === 1 ? "week was" : "weeks were"} won on the draw
+              ({history.luckyWeeks.map((x) => x.label).join(", ")}).
+            </>
+          )}
+        </p>
+      )}
 
       <div className="table-scroll">
         <table className="sheet">
           <thead>
             <tr>
               <th className="num">#</th>
-              <th>Matchup</th>
+              <th>Dates</th>
               <th>Opponent</th>
               <th>Manager</th>
               <th>Result</th>
               <th className="num">Score</th>
+              <th className="num">All-play</th>
+              <th className="num">Beat</th>
+              <th>vs the field</th>
             </tr>
           </thead>
           <tbody>
@@ -98,10 +130,10 @@ export default async function Page() {
               <tr key={r.period} className="row-link">
                 <td className="num">
                   <Link href={`/scoreboard?period=${r.period}`} className="row-link-a">
-                    {r.period}
+                    {weekTag(r.period)}
                   </Link>
                 </td>
-                <td>{r.matchup}</td>
+                <td>{dates(r.matchup)}</td>
                 <td>{r.opponent}</td>
                 <td>{r.manager}</td>
                 <td>
@@ -120,6 +152,7 @@ export default async function Page() {
                   </span>
                 </td>
                 <td className="num">{r.score || r.winPct || "—"}</td>
+                <ScheduleAllPlay week={byPeriod.get(r.period)} />
               </tr>
             ))}
           </tbody>
@@ -129,19 +162,71 @@ export default async function Page() {
   );
 }
 
+/**
+ * The three all-play cells for one week: the record against everyone, the rate, and a
+ * bar flagging the weeks that ran against the draw.
+ */
+function ScheduleAllPlay({ week }: { week?: ReturnType<typeof weeklyAllPlay>["weeks"][number] }) {
+  if (!week) {
+    // A scheduled-but-unplayed week has no totals to score against the league.
+    return (
+      <>
+        <td className="num">—</td>
+        <td className="num">—</td>
+        <td />
+      </>
+    );
+  }
+  return (
+    <>
+      <td className="num">
+        {week.allPlay.win}-{week.allPlay.loss}-{week.allPlay.tie}
+      </td>
+      {/* Share of the LEAGUE beaten that week, not share of categories won — the
+          two differ a lot, and this is the one the bar and the flags encode. */}
+      <td className="num">{(week.beat * 100).toFixed(0)}%</td>
+      <td>
+        <span className="wk-bar" aria-hidden="true">
+          <span
+            className="wk-fill"
+            style={{
+              width: `${(week.beat * 100).toFixed(0)}%`,
+              background:
+                week.luck === -1
+                  ? "var(--bad)"
+                  : week.luck === 1
+                    ? "var(--clay)"
+                    : "var(--cobalt)",
+            }}
+          />
+        </span>
+        {week.luck === -1 && <span className="wk-flag wk-robbed">robbed</span>}
+        {week.luck === 1 && <span className="wk-flag wk-gifted">gifted</span>}
+      </td>
+    </>
+  );
+}
+
 function Metric({
   label,
   value,
   sub,
+  tone,
 }: {
   label: string;
   value: string;
   sub?: string;
+  tone?: "good" | "bad";
 }) {
   return (
     <div className="metric">
       <div className="eyebrow">{label}</div>
-      <div className="metric-value mono">{value}</div>
+      <div
+        className="metric-value mono"
+        style={tone ? { color: tone === "good" ? "var(--good)" : "var(--bad)" } : undefined}
+      >
+        {value}
+      </div>
       {sub && <div className="metric-sub">{sub}</div>}
     </div>
   );

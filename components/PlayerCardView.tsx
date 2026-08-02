@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
 import GameLog from "./GameLog";
+import InjuryLog from "./InjuryLog";
 import { headshotUrl, playerStatus, stocks } from "@/lib/playerPool";
 
 /**
  * Global player search → the full profile: bio header, the season / 30D / 15D value
- * tiles with league rank, a two-column season-averages sheet, and the last-10 game log.
+ * tiles with league rank, a two-column season-averages sheet, the last-10 game log, and
+ * the injury / missed-games record.
  *
  * The bio (jersey, height/weight, age, experience, draft, birthplace) is NOT in the
  * export — it is one ESPN athlete lookup per player and there are ~290 of them, so like
@@ -69,7 +71,7 @@ export default function PlayerCardView({ league }: { league: LeagueData }) {
         </button>
       </div>
 
-      {p && <PlayerDetail p={p} pool={pool} bio={bio} />}
+      {p && <PlayerDetail p={p} pool={pool} bio={bio} season={league.season} />}
     </>
   );
 }
@@ -130,10 +132,13 @@ function PlayerDetail({
   p,
   pool,
   bio,
+  season,
 }: {
   p: PoolPlayer;
   pool: PoolPlayer[];
   bio: Bio;
+  /** The export's season YEAR — ESPN keys its athlete/schedule records by it. */
+  season: number;
 }) {
   const [code, sev] = playerStatus(p.status);
   const shot = headshotUrl(p.playerId);
@@ -226,6 +231,11 @@ function PlayerDetail({
 
       <div className="pd-log">
         <GameLog key={p.playerId ?? p.name} playerId={p.playerId} />
+        <InjuryLog
+          key={`inj-${p.playerId ?? p.name}`}
+          playerId={p.playerId}
+          season={season}
+        />
       </div>
     </div>
   );

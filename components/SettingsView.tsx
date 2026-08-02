@@ -13,7 +13,14 @@ import { TEAM_COOKIE } from "@/lib/teamCookie";
  * ESPN credentials are deliberately NOT here. They are server-side environment variables,
  * exactly as in the original.
  */
-export default function SettingsView({ league }: { league: LeagueData }) {
+export default function SettingsView({
+  league,
+  poolSize,
+}: {
+  league: LeagueData;
+  /** Counted server-side: this page's `league` is trimmed, so the pool isn't in it. */
+  poolSize: number;
+}) {
   const [settings, update, loaded] = useSettings();
   const router = useRouter();
 
@@ -105,7 +112,7 @@ export default function SettingsView({ league }: { league: LeagueData }) {
             <Row label="Teams" value={String(league.teams.length)} />
             <Row
               label="Players in pool"
-              value={String(league.seasonData.playerPool?.length ?? 0)}
+              value={String(poolSize)}
             />
           </tbody>
         </table>
