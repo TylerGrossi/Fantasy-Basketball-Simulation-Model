@@ -76,18 +76,24 @@ export const SEASON_PAGES = [
   { label: "Schedule", href: "/schedule" },
 ];
 
+/**
+ * Mobile Tools sub-row, in owner-specified order. The FIRST entry is what the Tools icon
+ * opens to (see SECTIONS below) — keep `landing` pointing at it. Lineup and Playoff Odds
+ * weren't in that ordering, so they keep the tail; Playoff Odds is dropped entirely in the
+ * offseason by navFor. Agent used to lead this row, but it earns its own bottom-bar icon
+ * now (see SECTIONS) — Settings lives on the Home tile grid instead of here.
+ */
 export const TOOLS_PAGES = [
-  { label: "Lineup", href: "/lineup" },
-  { label: "Player Card", href: "/player" },
   { label: "Player Value", href: "/player-value" },
+  { label: "Trade", href: "/trade" },
+  { label: "Player Card", href: "/player" },
   { label: "Compare", href: "/compare" },
   { label: "Rankings", href: "/rankings" },
+  { label: "Lineup", href: "/lineup" },
   { label: "Playoff Odds", href: "/playoffs" },
-  { label: "Trade", href: "/trade" },
-  { label: "Agent", href: "/agent" },
 ];
 
-export type SectionKey = "home" | "week" | "season" | "tools" | "settings";
+export type SectionKey = "home" | "week" | "season" | "tools" | "agent";
 
 export interface Section {
   key: SectionKey;
@@ -103,13 +109,13 @@ export const SECTIONS: Section[] = [
   // This Week opens on the Scoreboard — the fast "current numbers" view.
   { key: "week", label: "This Week", landing: "/scoreboard", pages: WEEK_PAGES },
   { key: "season", label: "Season", landing: "/season", pages: SEASON_PAGES },
+  // Opens on Player Value — the first entry of TOOLS_PAGES, so the sub-row's first tab is
+  // the one already showing rather than a tab you have to go back to.
   { key: "tools", label: "Tools", landing: "/player-value", pages: TOOLS_PAGES },
-  {
-    key: "settings",
-    label: "Settings",
-    landing: "/settings",
-    pages: [{ label: "Settings", href: "/settings" }],
-  },
+  // Agent gets the 5th icon rather than sharing a row with Tools or Settings — it's the
+  // page you go to with a question, not one you browse to among others. Settings, which
+  // used to hold this slot, moved to a tile on the Home launcher instead (app/page.tsx).
+  { key: "agent", label: "Agent", landing: "/agent", pages: [{ label: "Agent", href: "/agent" }] },
 ];
 
 /**

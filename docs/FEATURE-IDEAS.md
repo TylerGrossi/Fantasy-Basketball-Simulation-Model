@@ -7,6 +7,10 @@ head-to-head category league, all maths in the browser, Analyst Sheet aesthetic.
 Written 2026-08-01, revised the same day as items shipped. Nothing here is
 committed work — it is a menu. Strike items out as they land.
 
+The one exception to "one owner, one league" is **section H**, which is the idea of
+opening the app to anybody with an ESPN league. It is documented, deliberately not
+scheduled, and it is the only item that changes the premise every other item rests on.
+
 ## How to read the tags
 
 | Tag | Meaning |
@@ -14,6 +18,7 @@ committed work — it is a menu. Strike items out as they land.
 | `SHIPS TODAY` | Everything it needs is already in `public/data/league.json`. Pure front-end work. |
 | `PIPELINE` | Needs new fields out of `scripts/build_data.py`. Still one scheduled export, no new infrastructure. |
 | `NEW DATA` | Needs a source the project does not have yet (multi-season archive, per-game player logs at scale, live NBA schedule in the export). |
+| `PLATFORM` | Changes what the app *is*, not what it shows. New infrastructure — a database, accounts, per-user data. Only section H. |
 
 Effort is a rough t-shirt size for the front-end half.
 
@@ -200,6 +205,90 @@ record book into a real one, and it is the thing every league-history product is
 actually selling. **Cheapest possible version: keep a dated copy of the export at the
 end of each season.** Worth doing before next season starts, because the data cannot be
 recovered afterwards.
+
+---
+
+## H. Open it to anybody `PLATFORM` · XL
+
+**Status: documented, not scheduled.** Recorded 2026-08-02 so the shape is written down
+before anything is built. Nothing in this section should be started as a side effect of
+another task.
+
+The idea: anyone arrives, connects their own ESPN league, picks their team, and gets the
+analytics this app already computes — power rankings, category probabilities, playoff
+odds, player values, the Agent. Accounts hang off that, and everything per-person
+(saved chats, settings, favourite team) hangs off the account.
+
+This inverts the premise at the top of this file. Every other item here assumes **one
+owner, one league**; those assumptions are load-bearing in the code, and this section is
+the work of removing them. It is a rewrite of the data layer, not a feature.
+
+### H1. Per-league data on demand
+
+**The big one — everything else is easy next to it.** Today
+[scripts/build_data.py](../scripts/build_data.py) runs on a schedule with the credentials
+in [config.py](../config.py) and writes ONE static `public/data/league.json`; every page
+reads that file. There is no code path that fetches a league the build didn't know about.
+
+Multi-tenant means fetching and computing per league, at request time, with a cache —
+new server work, a per-league cache keyed by league + season, and a story for the first
+visit (a cold league is a slow ESPN crawl, not a file read). The simulation maths stays
+in the browser, which is the one thing that makes this tractable: the server fetches and
+shapes, it doesn't simulate.
+
+### H2. Connecting a league
+
+Two tiers, and the split matters because it decides how much of this needs accounts:
+
+- **Public leagues** need only a league ID. No login, no credentials, nothing stored —
+  paste an ID, see the analytics. This alone is a real product and the natural first
+  milestone.
+- **Private leagues** need the user's `SWID` and `espn_s2` cookies. Those are **real
+  credentials to someone's ESPN account**, not an API key scoped to fantasy. Accepting
+  them means encryption at rest, a plain explanation of what they are and how to revoke
+  them, and never logging them. Do not build this tier casually. ESPN has no public,
+  documented fantasy API and no OAuth for this — there is no clean way to ask for
+  narrower access.
+
+### H3. Accounts
+
+Auth.js with Google sign-in over a hosted Postgres (Neon, Supabase, Vercel Postgres).
+Straightforward on its own — the effort here is not the auth, it is that everything
+currently stored per-browser becomes per-user: the team choice is a cookie
+([lib/team.ts](../lib/team.ts)), the display settings are localStorage
+([lib/useSettings.ts](../lib/useSettings.ts)). Those move to rows.
+
+### H4. Saved chats
+
+`users → chats → messages`, with a history rail on the Agent page and "New chat" where
+Clear now sits. Cheap **once H3 exists**; see the note below for the version that needs
+none of this.
+
+### H5. What a second user costs
+
+Not a feature, but the thing that decides whether this ships:
+
+- **Gemini.** One shared server key on a free tier that is already rate-limited for one
+  person (see the rate-limit handling in [ModelBar](../components/ModelBar.tsx)).
+  Real users need per-user quotas, a paid key, or bring-your-own-key.
+- **Hosting.** [render.yaml](../render.yaml) is Render free — 0.1 CPU, 15-minute
+  spin-down. Vercel's free tier has an ephemeral filesystem, so nothing can be written
+  to disk and any persistence needs the database from H3 regardless.
+- **ESPN.** Many users means many crawls of an undocumented endpoint. Cache hard, and
+  expect to be rate-limited eventually.
+
+### Suggested order, if it ever starts
+
+1. Public leagues, no login (H1 + the public half of H2). Proves the data layer, which
+   is the only genuinely hard part, and is useful on its own.
+2. Accounts + saved leagues + saved chats (H3, H4).
+3. Private leagues (the credential half of H2), last, once there is something worth
+   handing credentials over for.
+
+**Not blocked on any of this:** saving chats to `localStorage` with a history rail is an
+afternoon's work, needs no account and no database, and the UI it produces is the same
+one H4 would use — only the storage swaps. If saved chats are the actual want, do that
+and leave this section alone.
 
 ---
 

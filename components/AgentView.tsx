@@ -221,6 +221,13 @@ export default function AgentView({
     setStreaming(false);
   }
 
+  /** Back to the empty state — the greeting, chips and centred composer. */
+  const reset = () => {
+    setMessages([]);
+    setReply("");
+    setStatus("");
+  };
+
   const composer = (
     <div className="asst-composer-wrap">
       <form
@@ -271,13 +278,31 @@ export default function AgentView({
         </button>
       )}
       </form>
-      {configured && (
-        <ModelBar
-          active={activeModel}
-          preferred={preferred}
-          onPreferred={choose}
-          usage={usage}
-        />
+      {/* Footer row under the composer. Because the composer is pinned once a
+          conversation exists, anything here is reachable from any scroll position —
+          which is exactly what the old top-right Clear chip was not. "New chat" rather
+          than "Clear": same action, named for the intent instead of the destruction. */}
+      {(configured || Boolean(messages.length)) && (
+        <div className="asst-foot">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              className="asst-newchat"
+              onClick={reset}
+              disabled={streaming}
+            >
+              New chat
+            </button>
+          )}
+          {configured && (
+            <ModelBar
+              active={activeModel}
+              preferred={preferred}
+              onPreferred={choose}
+              usage={usage}
+            />
+          )}
+        </div>
       )}
     </div>
   );
@@ -325,21 +350,6 @@ export default function AgentView({
 
   return (
     <div className="asst">
-      <div className="asst-bar">
-        <button
-          type="button"
-          className="chip"
-          onClick={() => {
-            setMessages([]);
-            setReply("");
-            setStatus("");
-          }}
-          disabled={streaming}
-        >
-          Clear
-        </button>
-      </div>
-
       <div className="asst-thread">
         {messages.map((m, i) =>
           m.role === "user" ? (

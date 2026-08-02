@@ -8,6 +8,10 @@ export const metadata: Metadata = {
   title: "Fantasy Basketball",
   description:
     "Monte Carlo simulation and live category win probability for an ESPN fantasy basketball league.",
+  // iOS "Add to Home Screen" reads the label from apple-mobile-web-app-title (NOT <title>,
+  // and not the manifest — Safari ignores that for the home-screen name) and the icon from
+  // app/apple-icon.png. Android takes both from app/manifest.ts; keep the two in sync.
+  appleWebApp: { capable: true, title: "FBB Sim", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

@@ -4,12 +4,12 @@ import {
   TrophyIcon,
   ChartIcon,
   TableIcon,
-  BracketIcon,
   ClipboardDataIcon,
   CalendarIcon,
   GraphUpIcon,
   PersonBadgeIcon,
   ShuffleIcon,
+  SettingsIcon,
 } from "@/components/Icons";
 
 /**
@@ -28,17 +28,34 @@ import {
  * wrong layout.
  */
 
-/** The mobile tile grid — Streamlit's nine, in its order, with its Bootstrap glyphs. */
+/**
+ * The mobile tile grid — nine tiles, and the grid is 3-up, so each ROW is a group:
+ *
+ *   1. where things stand     Season Summary · Current Matchup · Schedule
+ *   2. the numbers            Season Stats · League Stats · Power Rankings
+ *   3. things you act with    Player Value · Trade Simulator · Settings
+ *
+ * Playoff Odds is deliberately NOT here. It is a forecast with nothing left to forecast
+ * (the same reason IN_SEASON_ONLY drops it from the nav), and a launcher tile is exactly
+ * the kind of standing link that gets a 50/50 number read as a verdict on a finished
+ * bracket.
+ *
+ * Agent has no tile here — it leads the bottom nav instead (see SECTIONS in lib/nav.ts),
+ * so it's one tap from anywhere rather than a launcher stop. Settings took its old slot:
+ * giving Settings a whole bottom-bar icon spent one of five precious slots on a page
+ * visited rarely, and folding it into Tools buried it a level deep. A tile costs nothing
+ * extra and puts it one tap from Home like everything else here.
+ */
 const TILES = [
   { href: "/season", label: "Season Summary", Icon: TrophyIcon },
   { href: "/scoreboard", label: "Current Matchup", Icon: ChartIcon },
+  { href: "/schedule", label: "Schedule", Icon: CalendarIcon },
   { href: "/season-stats", label: "Season Stats", Icon: ClipboardDataIcon },
   { href: "/league-stats", label: "League Stats", Icon: TableIcon },
-  { href: "/playoffs", label: "Playoff Odds", Icon: BracketIcon },
-  { href: "/schedule", label: "Schedule", Icon: CalendarIcon },
   { href: "/rankings", label: "Power Rankings", Icon: GraphUpIcon },
   { href: "/player-value", label: "Player Value", Icon: PersonBadgeIcon },
   { href: "/trade", label: "Trade Simulator", Icon: ShuffleIcon },
+  { href: "/settings", label: "Settings", Icon: SettingsIcon },
 ];
 
 /**

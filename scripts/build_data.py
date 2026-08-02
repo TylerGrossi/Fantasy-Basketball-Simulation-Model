@@ -28,7 +28,9 @@ import os
 import sys
 import time
 from datetime import date, datetime
+from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 # The engine still lives with the Streamlit app. Importing it here rather than copying it
@@ -212,10 +214,19 @@ def build_player_pool(app):
         return []
     out = []
     for p in pool:
+        # EligibleSlots comes back as a plain list from build_stat_df, except when the
+        # column was missing entirely (an older cached frame) - pandas fills that as
+        # NaN, which fails `isinstance(..., list)`. Fall back to the single Position in
+        # that case, same as the front end does for data exported before this field
+        # existed.
+        elig = p.get("EligibleSlots")
+        if not isinstance(elig, list):
+            elig = [p["Position"]] if p.get("Position") else []
         row = {
             "name": p.get("Player", ""),
             "nbaTeam": p.get("NBA_Team", ""),
             "position": p.get("Position", ""),
+            "eligibleSlots": elig,
             "owner": p.get("Owner", ""),
             "status": p.get("Status", ""),
             "playerId": int(p["PlayerId"]) if p.get("PlayerId") == p.get("PlayerId") and p.get("PlayerId") is not None else None,
@@ -266,7 +277,61 @@ def score_vs(a, b):
     return w, l, t
 
 
-def player_lines(lineup):
+@lru_cache(maxsize=64)
+def _team_schedule_labels(team_abbrev, year):
+    """
+    Game-day opponent labels for one NBA team in one season: `{date: "Tor"}` or
+    `{date: "@Wsh"}` when away. Mirrors legacy `data.get_team_schedule_game_labels`, but
+    takes an explicit `year` — the site API defaults to whatever season is CURRENT right
+    now, which in the offseason is next year's barely-populated schedule (4 preseason
+    games), not the season that was just played. Confirmed: `?season=2026` returns the
+    full 82-game 2025-26 slate; the bare endpoint returns 4.
+
+    Cached for the life of the process (`lru_cache`, not `st.cache_data` — this runs
+    outside a Streamlit runtime) and goes through `D.HTTP`, the one pooled session, never
+    a bare `requests.get` (see AGENTS.md on the SSLContext cost of skipping it).
+    """
+    team_abbrev = D.normalize_team(team_abbrev)
+    if not team_abbrev or team_abbrev not in D.NBA_TEAM_MAP:
+        return {}
+    slug = D.NBA_TEAM_MAP[team_abbrev]
+    url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{slug}/schedule"
+    try:
+        r = D.HTTP.get(url, params={"season": year}, timeout=10)
+        if r.status_code != 200:
+            return {}
+        events = r.json().get("events", [])
+    except Exception:  # noqa: BLE001
+        return {}
+
+    eastern = ZoneInfo("America/New_York")
+    labels = {}
+    for event in events:
+        try:
+            d = datetime.fromisoformat(event["date"].replace("Z", "+00:00")).astimezone(eastern).date()
+            comp = (event.get("competitions") or [{}])[0]
+            competitors = comp.get("competitors") or []
+            if len(competitors) < 2:
+                continue
+            my_side, opp_abbr = None, None
+            for c in competitors:
+                t = c.get("team") or {}
+                ab = D.normalize_team(t.get("abbreviation"))
+                if not ab:
+                    continue
+                if ab == team_abbrev:
+                    my_side = c.get("homeAway")
+                else:
+                    opp_abbr = t.get("abbreviation") or ab
+            if my_side is None or not opp_abbr:
+                continue
+            labels[d] = f"@{str(opp_abbr).strip()}" if my_side == "away" else str(opp_abbr).strip()
+        except Exception:  # noqa: BLE001
+            continue
+    return labels
+
+
+def player_lines(lineup, window=None, year=None):
     """
     One team's players for one matchup period, from ESPN's own box score.
 
@@ -282,7 +347,13 @@ def player_lines(lineup):
     every line here reproduces the team's category totals EXACTLY (verified at 1688.0 PTS
     for period 20), which means ESPN only lists players whose stats counted. There is no
     bench to separate.
+
+    `window`/`year`, when given, add `opp`: the player's NBA team's game-day opponents
+    within the period's date range ("GAMES: OPPONENTS" in ESPN's own box score) —
+    every day their team played in that window, not just days this player individually
+    logged a stat line, matching what ESPN shows.
     """
+    start, end = window if window else (None, None)
     out = []
     for bp in lineup or []:
         bd = getattr(bp, "points_breakdown", None) or {}
@@ -296,11 +367,99 @@ def player_lines(lineup):
         # ~40 bytes per player per week across 22 weeks and says nothing gp doesn't.
         if gp:
             row["v"] = [_round(bd.get(stat, 0) or 0, 2) for stat in STATS]
+        if start and end and year:
+            team = getattr(bp, "proTeam", "") or ""
+            labels = _team_schedule_labels(team, year)
+            opp = [labels[d] for d in sorted(labels) if start <= d <= end]
+            if opp:
+                row["opp"] = opp
         out.append(row)
     return out
 
 
-def build_period_results(league, schedules, box_out=None):
+def matchup_period_id_for(app_period, regular_season_weeks):
+    """
+    ESPN's own matchupPeriodId for an app period.
+
+    The app (and `periodLabel` in lib/league.ts) numbers a playoff round with TWO
+    consecutive period integers — the round spans two scoring periods — while ESPN's
+    `matchupPeriodId` uses ONE integer per round (AGENTS.md: app period 23 is ESPN
+    matchupPeriodId 21). Same halving arithmetic as `periodLabel`; keep them in lockstep.
+    """
+    if app_period <= regular_season_weeks:
+        return app_period
+    round_n = (app_period - regular_season_weeks - 1) // 2 + 1
+    return regular_season_weeks + round_n
+
+
+def fetch_acquisition_totals(league):
+    """
+    Raw per-team, per-ESPN-matchup-period acquisition counts, plus the league's declared
+    per-scoring-period cap — together, "Matchup Acquisition Limit (Used/Max)" on ESPN's
+    own box score page.
+
+    One `mTeam` request covers every team's counts for the whole season; `mSettings` has
+    the cap once. `matchupAcquisitionLimit` (1.0 in this league) applies PER SCORING
+    PERIOD, and this league scores daily, so days-in-window IS scoring-periods-in-window —
+    confirmed against a real 14-day playoff round reading exactly the ESPN-shown 14.
+
+    Returns `(totals, limit_per_day)`; `totals` is `{team_id: {matchupPeriodId: used}}`.
+    `limit_per_day` is `None` when the setting can't be read, and every caller treats that
+    as "omit the acquisition line" rather than guessing a cap.
+    """
+    totals = {}
+    try:
+        raw = league.espn_request.league_get(params={"view": "mTeam"})
+        for tm in raw.get("teams", []):
+            tid = tm.get("id")
+            mat = (tm.get("transactionCounter") or {}).get("matchupAcquisitionTotals") or {}
+            if tid is not None:
+                totals[int(tid)] = {int(k): int(v) for k, v in mat.items()}
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! acquisition totals failed: {exc}")
+
+    limit_per_day = None
+    try:
+        raw2 = league.espn_request.league_get(params={"view": "mSettings"})
+        acq = (raw2.get("settings") or {}).get("acquisitionSettings") or {}
+        limit = acq.get("matchupAcquisitionLimit")
+        if limit and float(limit) > 0:
+            limit_per_day = float(limit)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! acquisition limit setting failed: {exc}")
+
+    return totals, limit_per_day
+
+
+def acquisition_summary(team_id, app_period, window, totals, limit_per_day, regular_season_weeks):
+    """
+    `{"used": int, "max": int}` for one team's allowance in one matchup, or `None` when
+    any input needed to compute it is missing (an old export, a bye, a window that
+    couldn't be resolved) — the frontend just omits the line rather than showing a zero
+    that would read as "no acquisitions" instead of "unknown".
+    """
+    if limit_per_day is None or regular_season_weeks is None:
+        return None
+    start, end = window if window else (None, None)
+    if start is None or end is None:
+        return None
+    # ESPN's own counter is SPARSE: a team with zero acquisitions in a period gets no key
+    # at all, not a 0 - confirmed against the raw response (a heavy-waiver team's dict had
+    # no gaps; a quiet team's had several). So a MISSING team is "can't compute" (omit),
+    # but a missing PERIOD for a team we DO have data for is a real zero, not unknown -
+    # matching ESPN's own box score, which always prints a number, never a blank.
+    team_totals = totals.get(team_id)
+    if team_totals is None:
+        return None
+    mpid = matchup_period_id_for(app_period, regular_season_weeks)
+    used = team_totals.get(mpid, 0)
+    days = (end - start).days + 1
+    return {"used": int(used), "max": int(round(limit_per_day * days))}
+
+
+def build_period_results(
+    league, schedules, box_out=None, year=None, regular_season_weeks=None, extra_periods=None
+):
     """
     Final category totals for every completed matchup period.
 
@@ -318,10 +477,35 @@ def build_period_results(league, schedules, box_out=None):
     rides along HERE because this loop already pays for `league.box_scores(...)` on every
     period - fetching them separately would double ~22 round trips for data we are
     already holding.
+
+    `year`/`regular_season_weeks`, when given, add two things ESPN's own box score shows
+    and this export previously didn't: each player's GAMES: OPPONENTS
+    (`player_lines`' `opp`) and each team's Matchup Acquisition Limit (`homeAcq`/
+    `awayAcq`) on the game row. Both degrade to simply absent when the inputs needed to
+    compute them aren't available - never a guess.
+
+    `extra_periods` covers a gap the schedule table has: a playoff ROUND logs only its
+    FIRST scoring period there (20, not 21, for round 1), while `league.period` - what
+    /scoreboard actually renders as "the current week" - resolves to the SECOND (21).
+    Without this, the period /scoreboard shows for a just-finished season has no exported
+    box lines at all. Pass the exporter's own `period` here so it always gets one.
     """
-    wanted = sorted({int(r["period"]) for rows in schedules.values() for r in rows})
+    wanted = sorted(
+        {int(r["period"]) for rows in schedules.values() for r in rows}
+        | {int(p) for p in (extra_periods or [])}
+    )
     if not wanted:
         return []
+
+    try:
+        import streamlit_app as app  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! could not import the legacy app for period windows: {exc}")
+        app = None
+
+    acq_totals, acq_limit_per_day = ({}, None)
+    if regular_season_weeks is not None:
+        acq_totals, acq_limit_per_day = fetch_acquisition_totals(league)
 
     out = []
     for p in range(1, max(wanted) + 1):
@@ -330,6 +514,15 @@ def build_period_results(league, schedules, box_out=None):
         except Exception as exc:  # noqa: BLE001
             print(f"  ! period {p}: {exc}", flush=True)
             continue
+
+        window = (None, None)
+        if app is not None and year is not None:
+            try:
+                w_start, w_end, _, _ = app.resolve_view_window(p, year)
+                window = (w_start, w_end)
+            except Exception:  # noqa: BLE001
+                pass
+
         rows = []
         for m in games:
             home, away = m.home_team, m.away_team
@@ -338,14 +531,32 @@ def build_period_results(league, schedules, box_out=None):
             h, a = stat_vector(m.home_stats), stat_vector(m.away_stats)
             if not any(h) and not any(a):
                 continue  # unplayed week
-            rows.append({
+            row = {
                 "homeId": int(home.team_id), "awayId": int(away.team_id),
                 "home": h, "away": a,
-            })
+            }
+            if regular_season_weeks is not None:
+                h_acq = acquisition_summary(
+                    int(home.team_id), p, window, acq_totals, acq_limit_per_day,
+                    regular_season_weeks,
+                )
+                a_acq = acquisition_summary(
+                    int(away.team_id), p, window, acq_totals, acq_limit_per_day,
+                    regular_season_weeks,
+                )
+                if h_acq:
+                    row["homeAcq"] = h_acq
+                if a_acq:
+                    row["awayAcq"] = a_acq
+            rows.append(row)
             if box_out is not None:
                 teams = box_out.setdefault(str(p), {})
-                teams[str(int(home.team_id))] = player_lines(getattr(m, "home_lineup", None))
-                teams[str(int(away.team_id))] = player_lines(getattr(m, "away_lineup", None))
+                teams[str(int(home.team_id))] = player_lines(
+                    getattr(m, "home_lineup", None), window, year
+                )
+                teams[str(int(away.team_id))] = player_lines(
+                    getattr(m, "away_lineup", None), window, year
+                )
         if rows:
             out.append({"period": p, "games": rows})
     print(f"  period results: {len(out)} periods", flush=True)
@@ -650,13 +861,16 @@ def main():
 
     print("season-wide data:", flush=True)
     season = build_season(league, injury)
+    season_shape = _season_shape()
 
     # Per-player weekly lines go in their OWN file. They are several times the size of
     # everything else put together, and only the week-recap view reads them — keeping
     # them out of league.json means every other page's server render stays cheap.
     box_scores = {}
     period_results = build_period_results(
-        league, season.get("schedules") or {}, box_out=box_scores
+        league, season.get("schedules") or {}, box_out=box_scores,
+        year=yr, regular_season_weeks=season_shape.get("regularSeasonWeeks"),
+        extra_periods=[period],
     )
     mapping_problems = check_period_results(period_results, season.get("schedules") or {})
 
@@ -674,7 +888,7 @@ def main():
         # The season's shape, so the browser can name a period ("Week 12",
         # "Playoffs · Round 2") with the SAME arithmetic resolve_view_window uses
         # rather than a second copy of these numbers in TypeScript.
-        **_season_shape(),
+        **season_shape,
         "stats": STATS,              # the 14 counting stats, in canonical order
         "statIds": espn_stat_ids(),  # ESPN's numeric id per stat (see espn_stat_ids)
         "categories": list(config.CATEGORIES),   # the 15 SCORED categories

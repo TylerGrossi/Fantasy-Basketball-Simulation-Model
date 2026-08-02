@@ -135,5 +135,5 @@ export const SECTION_ICONS = {
   week: WeekIcon,
   season: SeasonIcon,
   tools: ToolsIcon,
-  settings: SettingsIcon,
+  agent: AgentIcon,
 } as const;

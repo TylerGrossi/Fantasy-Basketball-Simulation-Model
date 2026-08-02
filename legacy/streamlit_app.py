@@ -1156,8 +1156,8 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
         lambda s: ",".join(str(x) for x in s) if isinstance(s, (list, tuple)) else str(s or ""))
     season_df["PlayerId"] = season_df["Player"].map(pid)
 
-    keep = (["Player", "NBA_Team", "Position", "Owner", "Status", "PlayerId", "Value", "Recent", "Trend",
-             "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD"] + _AGG_KEYS)
+    keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId", "Value",
+             "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD"] + _AGG_KEYS)
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))
     return season_df[keep].to_dict("records")
 

@@ -41,12 +41,25 @@ export interface Matchup {
   away: TeamSide;
 }
 
+/** Used/max for one team's "Matchup Acquisition Limit" — ESPN's own box-score line. */
+export interface AcquisitionSummary {
+  used: number;
+  max: number;
+}
+
 /** One finished matchup: final banked totals only, no rosters. */
 export interface PeriodGame {
   homeId: number;
   awayId: number;
   home: StatVector;
   away: StatVector;
+  /**
+   * Acquisitions used against this matchup's allowance. Optional: absent when the
+   * exporter couldn't resolve the ESPN matchupPeriodId, the date window, or the raw
+   * transaction counter for that team — never a guessed number.
+   */
+  homeAcq?: AcquisitionSummary;
+  awayAcq?: AcquisitionSummary;
 }
 
 export interface PeriodResult {
@@ -140,6 +153,13 @@ export interface PoolPlayer {
   name: string;
   nbaTeam: string;
   position: string;
+  /**
+   * Every position ESPN considers this player eligible for ("PG/SG" players carry
+   * both), not just the single default `position` above. Optional because exports
+   * built before this field existed won't have it — callers that need it should fall
+   * back to `[position]`.
+   */
+  eligibleSlots?: string[];
   /** Fantasy team that owns them, or "" / "Waivers" when free. */
   owner: string;
   status: string;

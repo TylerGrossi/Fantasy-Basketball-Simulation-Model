@@ -585,6 +585,14 @@ def get_current_totals(matchup, team_id):
     return build_totals(your_stats), build_totals(opp_stats)
 
 
+# Real basketball positions a player can be slotted at. espn-api's `eligibleSlots` also
+# reports roster-mechanics entries that are not positions at all - UT (utility), BE
+# (bench), IR - which would otherwise leak into "position" displays as if they were ways
+# to play the player. G/F are kept: ESPN genuinely lists guard/forward-eligible players
+# that way, and it is real eligibility information, not a slot mechanic.
+_REAL_POSITIONS = {"PG", "SG", "SF", "PF", "C", "G", "F"}
+
+
 def build_stat_df(roster, period_key, label, fantasy_team_name, year):
     """Build per-game stats dataframe from ESPN roster data."""
     rows = []
@@ -609,6 +617,11 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
             "Player": p.name,
             "NBA_Team": p.proTeam,
             "Position": getattr(p, "position", "") or "",
+            # Every position ESPN considers this player eligible for, not just the
+            # single default one - what the Lineup board's position pills are built
+            # from ("PG/SG" instead of just "PG"). List, not a joined string, so it
+            # survives the DataFrame -> dict round trip as real JSON on export.
+            "EligibleSlots": [s for s in (getattr(p, "eligibleSlots", None) or []) if s in _REAL_POSITIONS],
             "Team": fantasy_team_name,
             "FGM": fgm, "FGA": fga,
             "FG%": fgm / fga if fga > 0 else 0,

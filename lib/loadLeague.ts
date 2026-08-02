@@ -30,6 +30,13 @@ export interface BoxLine {
   min: number;
   /** Totals in `stats` order. Absent when the player did not play. */
   v?: number[];
+  /**
+   * "GAMES: OPPONENTS" — the player's NBA team's opponent on each game day within the
+   * period's window ("Tor", "@Wsh", …), in date order. Every day their team played, not
+   * just days this player logged a line, matching ESPN's own box score. Absent when the
+   * exporter couldn't resolve the team's schedule or the period's date window.
+   */
+  opp?: string[];
 }
 
 export interface BoxScores {

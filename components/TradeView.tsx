@@ -359,11 +359,6 @@ export default function TradeView({
           )}
         </div>
       </div>
-      <p className="caption">
-        The league&rsquo;s top {ELITE_COUNT} by value are held off the buy-low list. A
-        slumping star is not a discount — his owner knows what he has, and a two-for-one
-        offer for one would simply be turned down.
-      </p>
     </>
   );
 }

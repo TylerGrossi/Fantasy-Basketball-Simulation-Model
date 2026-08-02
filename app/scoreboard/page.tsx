@@ -1,8 +1,9 @@
+import { PlayerBoxTable } from "@/components/BoxScoreSheet";
 import Scoreboard from "@/components/Scoreboard";
-import WeekRecap from "@/components/WeekRecap";
+import ScoreboardTabs from "@/components/ScoreboardTabs";
+import { buildWeekRecap } from "@/components/WeekRecap";
 import WeekSelect from "@/components/WeekSelect";
 import { periodLabel } from "@/lib/league";
-import type { Matchup } from "@/lib/league";
 import {
   loadBoxScores,
   loadLeague,
@@ -14,14 +15,17 @@ import {
 /**
  * THE week page. One picker, three states, decided by which week you choose:
  *
- *   past     a RECAP — the league's other matchups, the head-to-head, and the full
- *            category sheet with each won category shaded (ESPN's box-score layout)
- *   current  the LIVE board — banked totals, win probability, projections
+ *   past     a RECAP — ESPN's own box-score layout: the head-to-head category sheet, the
+ *            acquisition line, and a per-player table for each side
+ *   current  the same layout, LIVE — banked totals fetched fresh, projections untouched
  *   future   a PREVIEW — nothing is banked yet, so it is projection only
  *
- * Matchup used to be a separate tab holding the analytics half. Splitting one week across
- * two pages meant deciding which of them to open before knowing what you wanted; the week
- * is the subject, and how far along it is decides what there is to say about it.
+ * Every state renders through the SAME three panels (your box score / the head-to-head /
+ * their box score) via `ScoreboardTabs` — a mobile segmented control, a continuous stacked
+ * page on desktop. The model (win probability, score distribution, per-category
+ * projection) lives on /matchup and this page does not touch it — that split was a
+ * deliberate call: this page is what a raw ESPN box score shows, /matchup is what the
+ * simulation adds on top of it.
  *
  * `?demo=1` freezes the page on the build-time snapshot and skips the live fetch.
  */
@@ -42,14 +46,15 @@ export default async function Page({
 
   const slim = trimLeague(league, { matchupTeamId: me.id });
   const byId = new Map(league.teams.map((t) => [t.id, t]));
+  const abbrev = (id: number) => byId.get(id)?.abbrev || byId.get(id)?.name.slice(0, 4) || "";
 
   // ---- a completed week: the recap ----
   if (isPast && asked < league.period) {
-    const game = league.periodResults
-      ?.find((p) => p.period === asked)
-      ?.games.find((g) => g.homeId === me.id || g.awayId === me.id);
+    const recap = buildWeekRecap({
+      league, period: asked, teamId: me.id, box: await loadBoxScores(),
+    });
 
-    if (!game) {
+    if (!recap) {
       return (
         <>
           <WeekSelect weeks={weeks} selected={asked} current={league.period} />
@@ -61,31 +66,16 @@ export default async function Page({
       );
     }
 
-    // A finished week has no games remaining, so the projection terms are zero and
-    // `current` carries the whole story. That is exactly the shape Scoreboard expects.
-    const zero = league.stats.map(() => 0);
-    const side = (current: number[]) => ({
-      players: [],
-      projMu: zero,
-      projVar: zero,
-      current,
-    });
-    const matchup: Matchup = {
-      homeId: game.homeId,
-      awayId: game.awayId,
-      home: side(game.home),
-      away: side(game.away),
-    };
-    const isHome = game.homeId === me.id;
-    const oppId = isHome ? game.awayId : game.homeId;
-
-    void matchup;
-    void isHome;
-    void oppId;
     return (
       <>
         <WeekSelect weeks={weeks} selected={asked} current={league.period} />
-        <WeekRecap league={league} period={asked} teamId={me.id} box={await loadBoxScores()} />
+        <ScoreboardTabs
+          mineLabel={abbrev(me.id)}
+          oppLabel={abbrev(recap.oppId)}
+          mine={recap.mine}
+          matchup={recap.matchup}
+          opp={recap.opp}
+        />
       </>
     );
   }
@@ -117,18 +107,54 @@ export default async function Page({
     );
   }
 
+  // Same box lines / acquisition data the recap uses, for THIS period — populated because
+  // the exporter always includes the currently-active period even when the schedule table
+  // only logs the first half of a playoff round under it (see build_period_results).
+  const box = await loadBoxScores();
+  const currentGame = league.periodResults
+    ?.find((p) => p.period === league.period)
+    ?.games.find((g) => g.homeId === me.id || g.awayId === me.id);
+  const youAcq = currentGame && (r.isHome ? currentGame.homeAcq : currentGame.awayAcq);
+  const oppAcq = currentGame && (r.isHome ? currentGame.awayAcq : currentGame.homeAcq);
+  const lines = (id: number) => box?.periods[String(league.period)]?.[String(id)] ?? [];
+  const label = periodLabel(league);
+
   return (
     <>
       <WeekSelect weeks={weeks} selected={league.period} current={league.period} />
-      <Scoreboard
-        key={league.period}
-        live={!demo}
-        league={slim}
-        matchup={r.matchup}
-        isHome={r.isHome}
-        teamId={me.id}
-        youName={r.youName}
-        oppName={r.oppName}
+      <ScoreboardTabs
+        mineLabel={abbrev(me.id)}
+        oppLabel={abbrev(r.oppId)}
+        mine={
+          <PlayerBoxTable
+            title={`${r.youName} box score`}
+            caption={label}
+            stats={box?.stats ?? league.stats}
+            lines={lines(me.id)}
+          />
+        }
+        matchup={
+          <Scoreboard
+            key={league.period}
+            live={!demo}
+            league={slim}
+            matchup={r.matchup}
+            isHome={r.isHome}
+            teamId={me.id}
+            youName={r.youName}
+            oppName={r.oppName}
+            youAcq={youAcq}
+            oppAcq={oppAcq}
+          />
+        }
+        opp={
+          <PlayerBoxTable
+            title={`${r.oppName} box score`}
+            caption={label}
+            stats={box?.stats ?? league.stats}
+            lines={lines(r.oppId)}
+          />
+        }
       />
     </>
   );

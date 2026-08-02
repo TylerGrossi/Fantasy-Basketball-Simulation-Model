@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
 import GameLog from "./GameLog";
-import { headshotUrl, playerStatus, stocks } from "@/lib/playerPool";
+import { headshotUrl, playerStatus } from "@/lib/playerPool";
 
 /**
  * Head-to-head of any two players: 9-cat Value plus the season per-game line, each row a
@@ -86,7 +86,11 @@ function Comparison({ a, b }: { a: PoolPlayer; b: PoolPlayer }) {
     { label: "PTS", a: a.PTS, b: b.PTS, higherIsBetter: true },
     { label: "REB", a: a.REB, b: b.REB, higherIsBetter: true },
     { label: "AST", a: a.AST, b: b.AST, higherIsBetter: true },
-    { label: "STOCKS", a: stocks(a), b: stocks(b), higherIsBetter: true },
+    // Steals and blocks are two SEPARATE scoring categories in this league, and a
+    // combined "stocks" figure hid which one a player actually provides — a 2.0/0.2 guard
+    // and a 0.2/2.0 centre read as identical rows and win opposite categories.
+    { label: "STL", a: a.STL, b: b.STL, higherIsBetter: true },
+    { label: "BLK", a: a.BLK, b: b.BLK, higherIsBetter: true },
     { label: "FG%", a: a.fgPct * 100, b: b.fgPct * 100, higherIsBetter: true },
     { label: "FT%", a: a.ftPct * 100, b: b.ftPct * 100, higherIsBetter: true },
     { label: "3P%", a: a.tpPct * 100, b: b.tpPct * 100, higherIsBetter: true },
@@ -139,10 +143,10 @@ function Comparison({ a, b }: { a: PoolPlayer; b: PoolPlayer }) {
       </div>
 
       <div className="pv-cmp-logs">
-        <div>
+        <div className="pv-cmp-log">
           <GameLog key={a.playerId ?? a.name} playerId={a.playerId} />
         </div>
-        <div>
+        <div className="pv-cmp-log">
           <GameLog key={b.playerId ?? b.name} playerId={b.playerId} />
         </div>
       </div>

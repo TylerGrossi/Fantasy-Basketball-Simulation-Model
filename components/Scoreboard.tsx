@@ -1,11 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import type { LeagueData, Matchup } from "@/lib/league";
-import { categoryRecord, scoreboardRows, winProbability } from "@/lib/league";
+import { AcquisitionLine, CategorySheet, tally } from "./BoxScoreSheet";
+import type { AcquisitionSummary, LeagueData, Matchup } from "@/lib/league";
 import { useLiveTotals } from "@/lib/useLiveTotals";
 import LiveBadge from "./LiveBadge";
-import WinProbabilityGauge from "./WinProbabilityGauge";
 
 interface Props {
   league: LeagueData;
@@ -16,8 +15,20 @@ interface Props {
   live?: boolean;
   youName: string;
   oppName: string;
+  youAcq?: AcquisitionSummary;
+  oppAcq?: AcquisitionSummary;
 }
 
+/**
+ * The "Matchup" panel for the CURRENT week: ESPN's own box-score head-to-head, live.
+ *
+ * Deliberately just the board + category sheet + acquisition line — the model (win
+ * probability, score distribution, category-by-category projection) lives on /matchup,
+ * which this page does not touch. `CategorySheet`/`AcquisitionLine` are shared with the
+ * completed-week recap (WeekRecap.tsx) so the two never drift into different column sets;
+ * only the DATA differs — this component's vectors come from `useLiveTotals`, recap's
+ * from a static export.
+ */
 export default function Scoreboard({
   league,
   matchup,
@@ -26,6 +37,8 @@ export default function Scoreboard({
   live: liveEnabled = true,
   youName,
   oppName,
+  youAcq,
+  oppAcq,
 }: Props) {
   const you = isHome ? matchup.home : matchup.away;
   const opp = isHome ? matchup.away : matchup.home;
@@ -38,15 +51,7 @@ export default function Scoreboard({
     liveEnabled
   );
 
-  const rows = useMemo(
-    () => scoreboardRows(league, live.you, live.opp),
-    [league, live.you, live.opp]
-  );
-  const rec = categoryRecord(rows);
-  const outcome = useMemo(
-    () => winProbability(league, you, opp, live.you, live.opp),
-    [league, you, opp, live.you, live.opp]
-  );
+  const rec = useMemo(() => tally(league, live.you, live.opp), [league, live.you, live.opp]);
   const hasGamesLeft =
     you.projVar.some((v) => v > 0) || opp.projVar.some((v) => v > 0);
 
@@ -65,12 +70,6 @@ export default function Scoreboard({
         <div className={`board-score ${rec.win >= rec.loss ? "sb-win" : "sb-lose"}`}>
           {rec.win}
         </div>
-        {/*
-          Ties are a third outcome, not a third score. A tied category belongs to
-          neither side, so it is held out of both numbers and stated once underneath —
-          10 and 5 plus "1 tie" accounts for all 15 categories. Hidden when there are
-          none, which is the usual case, rather than printing a dead "-0".
-        */}
         <div className="board-center">
           <span className="board-status">{hasGamesLeft ? "In progress" : "Final"}</span>
           {rec.tie > 0 && (
@@ -89,58 +88,15 @@ export default function Scoreboard({
 
       <LiveBadge {...live} generatedAt={league.generatedAt} />
 
-      {/* Nothing stands in for the gauge once the matchup is done — the board says
-          FINAL and the rows are self-evidently the finished totals. */}
-      {hasGamesLeft && <WinProbabilityGauge percent={outcome.win * 100} />}
+      <CategorySheet
+        league={league}
+        youName={youName}
+        oppName={oppName}
+        youVec={live.you}
+        oppVec={live.opp}
+      />
 
-      <div>
-        {rows.map((r) => (
-          <div className="sb-row" key={r.cat}>
-            <div className={`sb-val ${r.youWins ? "sb-win" : "sb-lose"}`}>{r.youStr}</div>
-            <div className="sb-mid">
-              <div className="sb-label">
-                <span className="sb-cat">{r.cat}</span>
-                <span
-                  className="sb-margin"
-                  style={{
-                    color:
-                      r.margin === 0
-                        ? "var(--ink-3)"
-                        : r.margin > 0
-                          ? "var(--cobalt)"
-                          : "var(--clay)",
-                  }}
-                >
-                  {r.marginStr}
-                </span>
-              </div>
-              {/*
-                The bar grows toward the side that WINS the category — your lead points
-                left, at your own number, and the opponent's points right at theirs. The
-                first version had it backwards: your number sat on the left while the bar
-                for a category you were winning shot right, across the opponent's name,
-                which reads as them leading.
-              */}
-              <div className="sb-track">
-                <div className="sb-half sb-half-left">
-                  {r.margin > 0 && (
-                    <div className="sb-bar sb-bar-you" style={{ width: `${r.width}%` }} />
-                  )}
-                </div>
-                <div className="sb-axis" />
-                <div className="sb-half sb-half-right">
-                  {r.margin < 0 && (
-                    <div className="sb-bar sb-bar-opp" style={{ width: `${r.width}%` }} />
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className={`sb-val sb-val-right ${r.oppWins ? "sb-win" : "sb-lose"}`}>
-              {r.oppStr}
-            </div>
-          </div>
-        ))}
-      </div>
+      <AcquisitionLine youName={youName} oppName={oppName} youAcq={youAcq} oppAcq={oppAcq} />
     </>
   );
 }
