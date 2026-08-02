@@ -616,6 +616,12 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
         rows.append({
             "Player": p.name,
             "NBA_Team": p.proTeam,
+            # Games in THIS split's window. Every per-game figure below is a rate over
+            # this many games, so it is the sample size behind them - the draft
+            # projection regresses a small sample toward its position, and cannot do
+            # that without knowing how small it is. Nothing else reads it; it is
+            # ignored by NUMERIC_COLS and so never enters a blend or a simulation.
+            "GP": gp,
             "Position": getattr(p, "position", "") or "",
             # Every position ESPN considers this player eligible for, not just the
             # single default one - what the Lineup board's position pills are built

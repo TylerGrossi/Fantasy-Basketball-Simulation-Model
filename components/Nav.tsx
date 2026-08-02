@@ -112,7 +112,7 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
               className="bottom-link"
               aria-current={section === s.key ? "page" : undefined}
             >
-              <Icon size={24} />
+              <Icon size={28} />
               <span>{s.label}</span>
             </Link>
           );

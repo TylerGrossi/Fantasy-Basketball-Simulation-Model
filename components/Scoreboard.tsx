@@ -17,6 +17,9 @@ interface Props {
   oppName: string;
   youAcq?: AcquisitionSummary;
   oppAcq?: AcquisitionSummary;
+  /** Total games played so far this period, summed from the box lines. */
+  youGp?: number;
+  oppGp?: number;
 }
 
 /**
@@ -39,6 +42,8 @@ export default function Scoreboard({
   oppName,
   youAcq,
   oppAcq,
+  youGp,
+  oppGp,
 }: Props) {
   const you = isHome ? matchup.home : matchup.away;
   const opp = isHome ? matchup.away : matchup.home;
@@ -86,6 +91,17 @@ export default function Scoreboard({
         </div>
       </div>
 
+      {/* Directly under the board: these are per-side facts about the same scoreline,
+          so they belong with it rather than after the category detail. */}
+      <AcquisitionLine
+        youName={youName}
+        oppName={oppName}
+        youAcq={youAcq}
+        oppAcq={oppAcq}
+        youGp={youGp}
+        oppGp={oppGp}
+      />
+
       <LiveBadge {...live} generatedAt={league.generatedAt} />
 
       <CategorySheet
@@ -95,8 +111,6 @@ export default function Scoreboard({
         youVec={live.you}
         oppVec={live.opp}
       />
-
-      <AcquisitionLine youName={youName} oppName={oppName} youAcq={youAcq} oppAcq={oppAcq} />
     </>
   );
 }

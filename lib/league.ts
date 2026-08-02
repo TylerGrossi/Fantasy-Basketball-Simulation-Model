@@ -176,6 +176,20 @@ export interface PoolPlayer {
   PTS: number; REB: number; AST: number; STL: number; BLK: number;
   "3PM": number; TO: number; FGM: number; FGA: number; FTM: number;
   FTA: number; "3PA": number; DD: number;
+  /**
+   * The three fields below exist for the draft projection (`lib/projection.ts`) and are
+   * all OPTIONAL, because an export built before they were added must degrade rather
+   * than crash — and because two of them can genuinely be missing for a real player.
+   */
+  /** Games behind the season line above: its sample size. */
+  gp?: number;
+  /** Age and NBA seasons completed, from ESPN's NBA rosters. Absent for a player not
+   *  on one (retired, overseas, two-way churn) — the projection treats that as "peak". */
+  age?: number;
+  exp?: number;
+  /** The last-30-day window's own per-game line, plus its `gp`. Absent when the player
+   *  had no games in that window — which is NOT the same as a line of zeros. */
+  last30?: Partial<Record<string, number>> & { gp?: number };
 }
 
 export interface SeasonPlayerLine {

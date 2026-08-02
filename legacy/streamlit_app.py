@@ -1148,6 +1148,18 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     season_df["Recent15"] = season_df["Recent15"].fillna(season_df["Value"])
     season_df["Trend15"] = season_df["Recent15"] - season_df["Value"]
 
+    # Draft-projection inputs: the last-30 window's OWN per-game line, carried alongside
+    # the season line instead of being collapsed into the Recent z-score. `Trend` says a
+    # player finished hot; only the raw last-30 categories say in what, and a next-season
+    # projection blends categories, not a single number. Prefixed so they can never
+    # collide with the season columns. Read by scripts/build_data.py -> the draft board;
+    # nothing in this app uses them.
+    if not last30_df.empty:
+        l30 = last30_df.drop_duplicates("Player", keep="first").set_index("Player")
+        for c in _AGG_KEYS + ["DD", "FG%", "FT%", "3P%", "GP"]:
+            if c in l30.columns:
+                season_df[f"L30_{c}"] = season_df["Player"].map(l30[c])
+
     season_df["Owner"] = season_df["Player"].map(owner).fillna("FA")
     # Raw injuryStatus can be a list on some API responses - stringify so it stays cache-
     # serializable; the display/severity mapping happens in the page via _player_status().
@@ -1157,7 +1169,8 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     season_df["PlayerId"] = season_df["Player"].map(pid)
 
     keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId", "Value",
-             "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD"] + _AGG_KEYS)
+             "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD", "GP"] + _AGG_KEYS
+            + [c for c in season_df.columns if c.startswith("L30_")])
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))
     return season_df[keep].to_dict("records")
 

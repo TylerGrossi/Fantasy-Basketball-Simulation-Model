@@ -56,6 +56,9 @@ export function buildWeekRecap({
   const oppScore = { win: score.loss, loss: score.win, tie: score.tie };
   const label = periodLabel(league, period);
 
+  const linesFor = (id: number) => box?.periods[String(period)]?.[String(id)] ?? [];
+  const gp = (id: number) => linesFor(id).reduce((a, l) => a + (l.gp || 0), 0);
+
   const matchup = (
     <>
       {/* Every matchup in the league that week — the strip ESPN puts above the box score,
@@ -107,19 +110,23 @@ export function buildWeekRecap({
         </div>
       </div>
 
+      {/* Directly under the board: these are per-side facts about the same scoreline,
+          so they belong with it rather than after the category detail. */}
+      <AcquisitionLine
+        youName={name(teamId)}
+        oppName={name(oppId)}
+        youAcq={youAcq}
+        oppAcq={oppAcq}
+        youGp={gp(teamId)}
+        oppGp={gp(oppId)}
+      />
+
       <CategorySheet
         league={league}
         youName={name(teamId)}
         oppName={name(oppId)}
         youVec={you}
         oppVec={opp}
-      />
-
-      <AcquisitionLine
-        youName={name(teamId)}
-        oppName={name(oppId)}
-        youAcq={youAcq}
-        oppAcq={oppAcq}
       />
 
       <p className="caption">Final totals for {label}. A shaded cell is a category won.</p>

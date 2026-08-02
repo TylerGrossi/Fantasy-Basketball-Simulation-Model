@@ -198,6 +198,66 @@ def config_blend():
 PLAYER_POOL_STATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO",
                      "FGM", "FGA", "FTM", "FTA", "3PA", "DD"]
 
+# ESPN's public site API, same host the Player Card's bio already reads client-side.
+_NBA_TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
+_NBA_ROSTER_URL = ("https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
+                   "/teams/{team_id}/roster")
+
+
+def fetch_player_ages():
+    """
+    ``{playerId: {"age": int, "exp": int}}`` for every player on an NBA roster.
+
+    The draft projection needs age: a 22-year-old's line and a 34-year-old's identical
+    line are not worth the same thing next season, and nothing in the fantasy export
+    carries a birthday. ESPN's per-team roster endpoint returns age and experience for a
+    whole roster in one response, so the whole league costs **31 requests** (one team
+    list + 30 rosters) rather than the ~290 the per-athlete bio endpoint would - the
+    same reason the Player Card fetches bios one at a time on open instead.
+
+    The athlete `id` here is the SAME id space as the fantasy `playerId` (it is what the
+    headshot URLs are built from), so no name matching is involved.
+
+    Returns ``{}`` on any failure. Age is an input the projection degrades without, not
+    one it requires - see `ageMultiplier` in lib/projection.ts, which treats a missing
+    age as "at peak" and so applies no adjustment at all.
+    """
+    try:
+        # D.HTTP, never requests.get - a bare get rebuilds an SSLContext per call at
+        # ~0.25s of CPU each. See the performance notes in AGENTS.md.
+        teams = D.HTTP.get(_NBA_TEAMS_URL, timeout=20).json()
+        ids = [t["team"]["id"]
+               for t in teams["sports"][0]["leagues"][0]["teams"]]
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! NBA team list failed: {exc}")
+        return {}
+
+    out = {}
+    failed = 0
+    for team_id in ids:
+        try:
+            roster = D.HTTP.get(_NBA_ROSTER_URL.format(team_id=team_id), timeout=20).json()
+        except Exception:  # noqa: BLE001
+            failed += 1
+            continue
+        for a in roster.get("athletes", []) or []:
+            try:
+                pid = int(a["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            age = a.get("age")
+            exp = (a.get("experience") or {}).get("years")
+            row = {}
+            if isinstance(age, (int, float)) and age > 0:
+                row["age"] = int(age)
+            if isinstance(exp, (int, float)) and exp >= 0:
+                row["exp"] = int(exp)
+            if row:
+                out[pid] = row
+    if failed:
+        print(f"  ! {failed}/{len(ids)} NBA rosters failed; ages partial")
+    return out
+
 
 def build_player_pool(app):
     """
@@ -212,6 +272,7 @@ def build_player_pool(app):
     except Exception as exc:  # noqa: BLE001
         print(f"  ! player pool failed: {exc}")
         return []
+    ages = fetch_player_ages()
     out = []
     for p in pool:
         # EligibleSlots comes back as a plain list from build_stat_df, except when the
@@ -241,6 +302,32 @@ def build_player_pool(app):
         }
         for s in PLAYER_POOL_STATS:
             row[s] = _round(p.get(s, 0), 2)
+
+        # --- Draft-projection inputs (read only by lib/projection.ts) -------------
+        # Games played is the SAMPLE SIZE behind every per-game figure above. Without
+        # it a 9-game line and a 74-game line look equally certain, and the projection
+        # has no basis on which to regress one harder than the other.
+        row["gp"] = int(_round(p.get("GP", 0), 0) or 0)
+        bio = ages.get(row["playerId"]) or {}
+        if "age" in bio:
+            row["age"] = bio["age"]
+        if "exp" in bio:
+            row["exp"] = bio["exp"]
+
+        # The last-30 line as its own per-game categories. Omitted entirely for a player
+        # with no last-30 window (didn't play): an absent key reads as "no recent
+        # sample" downstream, whereas zeros would read as "played and produced nothing"
+        # and drag the blend toward zero.
+        l30 = {}
+        for s in PLAYER_POOL_STATS:
+            v = p.get(f"L30_{s}")
+            if v is not None and v == v:  # NaN != NaN
+                l30[s] = _round(v, 2)
+        l30_gp = p.get("L30_GP")
+        if l30 and l30_gp is not None and l30_gp == l30_gp and l30_gp > 0:
+            l30["gp"] = int(_round(l30_gp, 0))
+            row["last30"] = l30
+
         out.append(row)
     out.sort(key=lambda r: -r["value"])
     return out

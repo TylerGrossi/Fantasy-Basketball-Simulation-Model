@@ -117,6 +117,7 @@ export default async function Page({
   const youAcq = currentGame && (r.isHome ? currentGame.homeAcq : currentGame.awayAcq);
   const oppAcq = currentGame && (r.isHome ? currentGame.awayAcq : currentGame.homeAcq);
   const lines = (id: number) => box?.periods[String(league.period)]?.[String(id)] ?? [];
+  const gp = (id: number) => lines(id).reduce((a, l) => a + (l.gp || 0), 0);
   const label = periodLabel(league);
 
   return (
@@ -145,6 +146,8 @@ export default async function Page({
             oppName={r.oppName}
             youAcq={youAcq}
             oppAcq={oppAcq}
+            youGp={gp(me.id)}
+            oppGp={gp(r.oppId)}
           />
         }
         opp={

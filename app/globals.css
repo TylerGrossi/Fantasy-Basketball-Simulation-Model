@@ -34,7 +34,7 @@
   --mono: ui-monospace, "SF Mono", "Consolas", "Liberation Mono", monospace;
 
   --nav-h: 3.9rem;
-  --bottomnav-h: 5rem;
+  --bottomnav-h: 5.6rem;
   --content-max: 1180px;
   --page-pad: clamp(1rem, 4vw, 2.5rem);
 }
@@ -111,16 +111,44 @@ html {
   top: 0;
   z-index: 100;
   background: var(--header-bg);
-  /* `scrollbar-gutter: stable` (below) reserves scrollbar-width space at the true right
-     edge of the viewport. `.nav`'s own box stops short of that reserved sliver — it's
-     sized to `body`'s gutter-reduced width — so on a page with no actual scrollbar
-     thumb, the sliver shows `--paper` (off-white) instead of the nav's white, and the
-     header visibly doesn't reach the edge. Bleeding the BACKGROUND out via a spread
-     shadow (clipped by html's overflow-x: clip, same trick as the wide-table guard
-     above) covers that gap without widening the box itself — which matters, because
-     nav-inner's centering has to keep lining up with `.page` beneath it. */
-  box-shadow: 0 0 0 100vmax var(--header-bg);
   border-bottom: 1px solid var(--line);
+}
+/*
+ * Bleed the header background past `.nav`'s own box, HORIZONTALLY ONLY.
+ *
+ * Why the bleed exists: `scrollbar-gutter: stable` (below) reserves scrollbar-width space
+ * at the true right edge of the viewport. `.nav`'s box stops short of that reserved
+ * sliver — it's sized to `body`'s gutter-reduced width — so on a page with no actual
+ * scrollbar thumb the sliver shows `--paper` (off-white) instead of the nav's white, and
+ * the header visibly doesn't reach the edge. Widening the box itself is not an option:
+ * `.nav-inner`'s centering has to keep lining up with `.page` beneath it.
+ *
+ * This WAS `box-shadow: 0 0 0 100vmax var(--header-bg)`, and that shadow is why every
+ * desktop page rendered BLANK below the header. A spread shadow grows in all four
+ * directions, so a 100vmax spread painted an opaque white slab ~1400px DOWN the page as
+ * well as sideways — and since `.nav` is `z-index: 100` while page content is the default
+ * z-index, the slab painted on top of everything. The content was always in the DOM and
+ * still hit-tested (shadows don't capture pointer events), which is exactly what made it
+ * look like a rendering bug rather than a paint-order one. Mobile was unaffected only
+ * because `.nav` is `display: none` under 768px.
+ *
+ * A pseudo-element can only bleed on the axis you give it, so the failure mode can't
+ * recur: `top/bottom: 0` pins it to the header's own band, `left/right` do the bleeding,
+ * and `z-index: -1` keeps it behind the nav's own content (it stays inside `.nav`'s
+ * stacking context, so it can't slip behind the page). The horizontal overhang is clipped
+ * by html's `overflow-x: clip`, same as before.
+ */
+.nav::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -100vmax;
+  right: -100vmax;
+  background: var(--header-bg);
+  border-bottom: inherit;
+  z-index: -1;
+  pointer-events: none;
 }
 /* Brand, links and gear span the SAME content column as the page body, so the header's
    left and right edges line up with the content beneath it. `.nav-inner` and `.page`
@@ -1522,14 +1550,14 @@ table.sheet.ss-standings td {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.34rem;
-    padding: 0.95rem 0.2rem 0.9rem;
+    gap: 0.4rem;
+    padding: 1.15rem 0.2rem 1.05rem;
     color: var(--ink-3);
     text-decoration: none;
-    font-size: 0.72rem;
+    font-size: 0.76rem;
     font-weight: 600;
     /* Comfortably past the 44px minimum tap target. */
-    min-height: 72px;
+    min-height: 88px;
     -webkit-tap-highlight-color: transparent;
   }
   .bottom-link span {
@@ -3570,6 +3598,72 @@ table.sheet.lu-table .lu-pos {
 table.sheet.rc-sheet td,
 table.sheet.rc-sheet th { padding: 0.5rem 0.6rem; }
 table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
+
+/* -------- the same head-to-head, vertical, for phones --------
+   Three columns: YOUR number, the category, THEIR number. The category label sits
+   between the two figures it belongs to, so a row reads as one comparison. No bars and
+   no colour — just the numbers, with the winning side shaded a heavier grey. The wide
+   sheet is the desktop form; only one of the two is displayed at a time. */
+.cs-vert { display: none; }
+@media (max-width: 767px) {
+  .cs-horiz { display: none; }
+  .cs-vert {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 0.6rem 0;
+  }
+  .cs-vert-row {
+    display: grid;
+    /* The middle column is sized to the label, so both numbers get equal room and the
+       two value columns stay symmetric about it. */
+    grid-template-columns: 1fr 5.2rem 1fr;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.7rem;
+    background: var(--card);
+    border-top: 1px solid var(--line-2);
+  }
+  .cs-vert-row:first-child { border-top: 0; }
+  .cs-vert-head {
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .cs-vert-team {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cs-vert-cat {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    text-align: center;
+  }
+  .cs-vert-v {
+    font-size: 0.88rem;
+    font-weight: 600;
+    text-align: center;
+    /* Shading is a cell state, so it needs the cell's own padding to sit in. */
+    padding: 0.2rem 0.35rem;
+    border-radius: 4px;
+  }
+  /* The winner, in grey rather than green: this sheet is a comparison, not a verdict,
+     and fifteen coloured cells read as decoration. Deliberately darker than
+     --surface-2, which the header row already uses, so a win is never confused with
+     ordinary chrome. */
+  .cs-vert .cs-vert-win {
+    background: #e4e0d6;
+    color: var(--ink);
+    font-weight: 700;
+  }
+}
 /* A won category. Tinted rather than coloured text: fifteen green numbers in a row reads
    as decoration, a shaded cell reads as a result. */
 table.sheet.rc-sheet .rc-win {
@@ -3609,6 +3703,12 @@ table.sheet.rc-box .rc-opp {
   max-width: 220px;
   white-space: normal;
 }
+/* On a phone this column alone can run wider than every stat column combined — a list
+   of up to ~14 opponent codes next to single-digit rebounds. The stat line is the part
+   worth the width there; opponents-per-game is a desktop-only extra. */
+@media (max-width: 767px) {
+  table.sheet.rc-box .rc-opp { display: none; }
+}
 
 /* -------- Matchup Acquisition Limit -------- */
 .acq-line {
@@ -3622,17 +3722,41 @@ table.sheet.rc-box .rc-opp {
   border-radius: 8px;
   font-size: 0.72rem;
 }
-.acq-side { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+/* `min-width: 0` alone isn't enough to stop a nowrap child from forcing the column wider
+   than its share — the flex base has to be pinned too, or the two sides overlap. */
+.acq-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 0;
+}
 .acq-side-right { text-align: right; align-items: flex-end; }
 .acq-name { font-weight: 700; color: var(--ink); }
-.acq-label { color: var(--ink-3); }
+/* Each fact on its own line — acquisitions and GP are unrelated numbers, and running
+   them together with a separator made both wrap mid-figure on a phone. */
+.acq-label { color: var(--ink-3); white-space: nowrap; }
+
+@media (max-width: 767px) {
+  /*
+   * STACKED on a phone. Side by side, two "Acquisitions (Used/Max): 14/14" labels can't
+   * both fit in ~360px, and because .acq-label is nowrap they didn't shrink — they ran
+   * straight through each other, printing one string on top of the other. Each side gets
+   * its own full-width row instead, so the labels keep their nowrap (a figure like 14/14
+   * must never break mid-number) without ever competing for the same line.
+   */
+  .acq-line { flex-direction: column; gap: 0.5rem; }
+  .acq-side-right { text-align: left; align-items: flex-start; }
+}
 
 /* -------- Scoreboard three-way tabs (You / Matchup / Opponent) --------
    Mobile: a segmented control, one panel visible. Desktop: the pills disappear and
    every panel renders stacked — the same content, just not tabbed, matching ESPN's own
    continuous box-score page. */
 .sbx-tabs {
-  display: flex;
+  /* Desktop-first, matching .sbx-panel below: hidden by default, shown only under the
+     mobile media query. */
+  display: none;
   gap: 0.3rem;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -3662,11 +3786,22 @@ table.sheet.rc-box .rc-opp {
   color: var(--ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
-.sbx-panel { display: none; }
-.sbx-panel-active { display: block; }
+/*
+ * DESKTOP-FIRST on purpose: the base rules leave every panel visible and stacked, and
+ * ONLY the mobile media query hides the inactive two. The reverse (base = hidden, desktop
+ * media query un-hides) was tried first and went blank on real desktop Edge/Chrome — three
+ * `display:none` panels, each holding a sticky-header table, all flipping to `block`
+ * simultaneously at a media-query boundary, painted nothing until something else forced a
+ * repaint (resizing the window fixed it, which is what pointed at a paint bug rather than
+ * a layout one). Panels defaulting to visible sidesteps that transition entirely — there
+ * is no none-to-block flip for a wide viewport to trigger.
+ */
+.sbx-panels { display: flex; flex-direction: column; gap: 0.4rem; }
+.sbx-panel { display: block; }
 
-@media (min-width: 768px) {
-  .sbx-tabs { display: none; }
-  .sbx-panel { display: block; }
-  .sbx-panels { display: flex; flex-direction: column; gap: 0.4rem; }
+@media (max-width: 767px) {
+  .sbx-tabs { display: flex; }
+  .sbx-panels { display: block; }
+  .sbx-panel { display: none; }
+  .sbx-panel-active { display: block; }
 }
