@@ -183,8 +183,11 @@ function ScheduleAllPlay({ week }: { week?: ReturnType<typeof weeklyAllPlay>["we
         {week.allPlay.win}-{week.allPlay.loss}-{week.allPlay.tie}
       </td>
       {/* Share of the LEAGUE beaten that week, not share of categories won — the
-          two differ a lot, and this is the one the bar and the flags encode. */}
-      <td className="num">{(week.beat * 100).toFixed(0)}%</td>
+          two differ a lot, and this is the one the bar and the flags encode.
+          One decimal: in a 10-team league the denominator is 9 opponents, so the
+          raw values are ninths (88.9%, 77.8%) and rounding to whole numbers made
+          distinct weeks print as the same 89%. */}
+      <td className="num">{(week.beat * 100).toFixed(1)}%</td>
       <td>
         <span className="wk-bar" aria-hidden="true">
           <span

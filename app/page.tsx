@@ -103,22 +103,22 @@ const FLOW: Array<[string, string, string]> = [
   [
     "Read",
     "ESPN rosters, box scores and the NBA schedule. Games remaining are counted injury-aware, under the league's ten-per-day cap.",
-    "ESPN API / schedule scraping",
+    "ESPN API + schedule scrape",
   ],
   [
     "Project",
     "Each player's remaining production as a distribution rather than a point estimate: a mean and a variance per category.",
-    "Sum of independent normals",
+    "Gaussian moment matching",
   ],
   [
     "Solve",
     "Closed-form odds for all 15 categories, then the exact distribution of how many of them you win.",
-    "Poisson-binomial DP / delta method",
+    "Poisson-binomial DP",
   ],
   [
     "Decide",
     "Every lineup, waiver and trade option ranked by how far it moves that number. This is the part that wins weeks.",
-    "9-cat z-scores / marginal value",
+    "9-cat marginal value",
   ],
 ];
 
@@ -167,7 +167,6 @@ const DIRECTORY: Array<{
 export default async function Page() {
   const league = await loadLeague();
   const me = await myTeam(league);
-  const standing = league.seasonData?.standings?.find((s) => s.teamId === me.id);
   const yr = `${league.season - 1}–${String(league.season).slice(2)}`;
   const leagueName = league.leagueName?.trim() || "Your League";
   const status = league.seasonOver ? "Season complete" : "Season in progress";
@@ -241,22 +240,11 @@ export default async function Page() {
           </div>
         </section>
 
+        {/* The legacy app's footer, verbatim: one line of text, nothing else. The
+            methodology note and the updated/record line that used to live here were
+            two more things to read at the bottom of a page whose job was already done. */}
         <footer className="lp-foot">
-          <span>
-            Categories are modelled as independent and ratio categories use a first-order
-            approximation &mdash; together the source of the 0.44pp gap above.
-          </span>
-          <span>
-            Data via ESPN &middot; updated{" "}
-            {new Date(league.generatedAt).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })}
-            {standing
-              ? ` · ${me.name} finished ${standing.wins}-${standing.losses}-${standing.ties}`
-              : ""}
-          </span>
+          <span>Fantasy Basketball Simulator &middot; Data via ESPN</span>
         </footer>
       </div>
 

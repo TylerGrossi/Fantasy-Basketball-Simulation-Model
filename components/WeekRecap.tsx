@@ -84,7 +84,10 @@ export function buildWeekRecap({
         })}
       </div>
 
-      {/* The head-to-head, in the app's own board rather than a copy of ESPN's chrome. */}
+      {/* The head-to-head, in the app's own board rather than a copy of ESPN's chrome.
+          Board, acquisition/GP line and category sheet share ONE panel on desktop — see
+          the note in Scoreboard.tsx. */}
+      <div className="sb-panel">
       <div className="board">
         <div className="board-side">
           <span className="board-team board-you">{name(teamId)}</span>
@@ -128,6 +131,7 @@ export function buildWeekRecap({
         youVec={you}
         oppVec={opp}
       />
+      </div>
 
       <p className="caption">Final totals for {label}. A shaded cell is a category won.</p>
     </>
@@ -141,7 +145,6 @@ export function buildWeekRecap({
     mine: (
       <PlayerBoxTable
         title={`${name(teamId)} box score`}
-        caption={label}
         stats={box?.stats ?? league.stats}
         lines={lines(teamId)}
       />
@@ -149,7 +152,6 @@ export function buildWeekRecap({
     opp: (
       <PlayerBoxTable
         title={`${name(oppId)} box score`}
-        caption={label}
         stats={box?.stats ?? league.stats}
         lines={lines(oppId)}
       />

@@ -132,4 +132,11 @@ NBA_TEAM_MAP = {
 }
 
 TEAM_FIXES = {"PHL": "PHI", "PHO": "PHX", "GS": "GSW", "WSH": "WAS",
-              "NO": "NOP", "SA": "SAS", "NY": "NYK"}
+              "NO": "NOP", "SA": "SAS", "NY": "NYK",
+              # ESPN's site-API schedule endpoint uses "UTAH" (4 letters) for Utah's own
+              # abbreviation, unlike every other team and unlike the fantasy API's "UTA" -
+              # left unmapped, a Jazz player's OWN schedule fetch could never match its
+              # home team against either competitor, so every game silently dropped out
+              # of _team_schedule_labels (scripts/build_data.py) and the recap showed no
+              # opponents for any Utah player.
+              "UTAH": "UTA"}

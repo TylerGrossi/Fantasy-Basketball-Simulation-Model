@@ -50,22 +50,28 @@ export default function ScoreboardTabs({
           </button>
         ))}
       </div>
+      {/*
+        DOM order is mine / matchup / opp because that is the tab order on mobile, where
+        only one panel shows at a time. On desktop, where all three stack, CSS `order`
+        floats the matchup panel to the top — the scoreboard is the thing you came for,
+        and it was sitting between the two box-score tables.
+      */}
       <div className="sbx-panels">
         <section
           role="tabpanel"
-          className={`sbx-panel ${active === "mine" ? "sbx-panel-active" : ""}`}
+          className={`sbx-panel sbx-panel-mine ${active === "mine" ? "sbx-panel-active" : ""}`}
         >
           {mine}
         </section>
         <section
           role="tabpanel"
-          className={`sbx-panel ${active === "matchup" ? "sbx-panel-active" : ""}`}
+          className={`sbx-panel sbx-panel-matchup ${active === "matchup" ? "sbx-panel-active" : ""}`}
         >
           {matchup}
         </section>
         <section
           role="tabpanel"
-          className={`sbx-panel ${active === "opp" ? "sbx-panel-active" : ""}`}
+          className={`sbx-panel sbx-panel-opp ${active === "opp" ? "sbx-panel-active" : ""}`}
         >
           {opp}
         </section>

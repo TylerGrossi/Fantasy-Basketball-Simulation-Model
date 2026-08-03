@@ -54,6 +54,7 @@ export const FLAT_NAV: NavEntry[] = [
     kind: "menu",
     label: "Tools",
     items: [
+      { label: "Draft Guide", href: "/draft" },
       { label: "Lineup", href: "/lineup" },
       { label: "Player Card", href: "/player" },
       { label: "Player Value", href: "/player-value" },
@@ -90,6 +91,7 @@ export const TOOLS_PAGES = [
   { label: "Compare", href: "/compare" },
   { label: "Rankings", href: "/rankings" },
   { label: "Lineup", href: "/lineup" },
+  { label: "Draft", href: "/draft" },
   { label: "Playoff Odds", href: "/playoffs" },
 ];
 
@@ -131,7 +133,17 @@ export const SECTIONS: Section[] = [
 export const IN_SEASON_ONLY = ["/playoffs"];
 
 /**
- * The nav for a given moment in the season: in the offseason, minus the forecast pages.
+ * The mirror image of IN_SEASON_ONLY: pages the offseason should lead with rather than
+ * hide. The Draft Guide is the only Tools page whose subject is ahead of you instead of
+ * behind you, so from April to October it is the reason to open the app — it moves to
+ * the front of the Tools row and becomes what the Tools icon opens to. In season it
+ * stays where it is, because then the timely page is the one about this week.
+ */
+const OFFSEASON_FIRST = "/draft";
+
+/**
+ * The nav for a given moment in the season: in the offseason, minus the forecast pages
+ * and led by the draft board.
  *
  * `sectionFor` deliberately keeps using the UNFILTERED sections, so /playoffs still
  * resolves to Tools when someone opens it directly in the offseason — the page is hidden
@@ -140,13 +152,24 @@ export const IN_SEASON_ONLY = ["/playoffs"];
 export function navFor(seasonOver: boolean): { flat: NavEntry[]; sections: Section[] } {
   if (!seasonOver) return { flat: FLAT_NAV, sections: SECTIONS };
   const keep = (href: string) => !IN_SEASON_ONLY.includes(href);
+  const first = <T extends { href: string }>(pages: T[]): T[] => [
+    ...pages.filter((p) => p.href === OFFSEASON_FIRST),
+    ...pages.filter((p) => p.href !== OFFSEASON_FIRST),
+  ];
   return {
     flat: FLAT_NAV.flatMap<NavEntry>((e) => {
       if (e.kind === "link") return keep(e.href) ? [e] : [];
       const items = e.items.filter((i) => keep(i.href));
-      return items.length ? [{ ...e, items }] : [];
+      return items.length ? [{ ...e, items: first(items) }] : [];
     }),
-    sections: SECTIONS.map((s) => ({ ...s, pages: s.pages.filter((p) => keep(p.href)) })),
+    sections: SECTIONS.map((s) => {
+      const pages = first(s.pages.filter((p) => keep(p.href)));
+      // The landing has to follow the reorder, or the Tools icon opens a page that is no
+      // longer the first tab in the row it just opened.
+      const landing =
+        s.key === "tools" && pages[0]?.href === OFFSEASON_FIRST ? OFFSEASON_FIRST : s.landing;
+      return { ...s, pages, landing };
+    }),
   };
 }
 

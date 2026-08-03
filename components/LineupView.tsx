@@ -11,8 +11,11 @@ export interface LineupPlayer {
   position: string;
   /** Every position ESPN considers this player eligible for; falls back to [position]. */
   eligibleSlots: string[];
-  /** 9-cat value, for ranking the bench. */
+  /** 9-cat value over the whole season. */
   value: number;
+  /** Same score over the last 30 / last 15 days. See VALUE_MODES. */
+  recent: number;
+  recent15: number;
   gamesLeft: number;
   injured: boolean;
   status: string;
@@ -36,8 +39,52 @@ const SHOOTING: Array<[string, string, string]> = [
 ];
 const COUNTING = ["REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"];
 
+/**
+ * Which 9-cat number the board ranks and totals by.
+ *
+ * The same three the Streamlit app offered (`VMAP` in streamlit_app.py): season-long
+ * value, or the same score recomputed over the last 30 / 15 days. They answer different
+ * questions — "who is better" vs "who is hot right now" — and a lineup decision made in
+ * March usually wants the second.
+ */
+const VALUE_MODES = [
+  { key: "value", label: "Season" },
+  { key: "recent", label: "30D" },
+  { key: "recent15", label: "15D" },
+] as const;
+type ValueMode = (typeof VALUE_MODES)[number]["key"];
+
+/**
+ * The starting lineup's shape, in ESPN's own order.
+ *
+ * `slots` from the caller is the COUNT (ten); this is what those ten are. If a league
+ * ever reports a different count the layout is trimmed or padded with UTIL, so the board
+ * can never disagree with the cap the rest of the page enforces.
+ */
+const SLOT_LAYOUT = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "UTIL", "UTIL"];
+
 /** Backcourt -> frontcourt, not alphabetical — matches how a depth chart reads. */
 const POSITION_ORDER = ["PG", "SG", "SF", "PF", "C", "G", "F"];
+
+/**
+ * Can this player fill this slot?
+ *
+ * G/F/UTIL are the combination slots ESPN uses: G takes either guard, F takes either
+ * forward, UTIL takes anyone. Eligibility is read from `eligibleSlots` (every position
+ * ESPN lists a player at), never from the single default `position` — a "PG/SG" player
+ * is legal in three different slots and treating them as PG-only would block real moves.
+ */
+function eligibleFor(p: LineupPlayer, slot: string): boolean {
+  if (slot === "UTIL") return true;
+  const e = new Set(
+    (p.eligibleSlots.length ? p.eligibleSlots : p.position ? [p.position] : []).map((s) =>
+      s.trim().toUpperCase()
+    )
+  );
+  if (slot === "G") return e.has("PG") || e.has("SG") || e.has("G");
+  if (slot === "F") return e.has("SF") || e.has("PF") || e.has("F");
+  return e.has(slot);
+}
 
 /** "PG/SG", not the single default position — what the pipeline's eligibleSlots is for. */
 function positionLabel(p: LineupPlayer): string {
@@ -52,19 +99,47 @@ function positionLabel(p: LineupPlayer): string {
 }
 
 /**
- * Interactive lineup builder — a board of starters and a board of bench, drag a card
- * from one to the other (or onto a specific card, to swap) with a click-to-toggle
- * fallback on every card for touch and keyboard. Category totals for the current ten
- * sit in a rail that stays on screen while the board scrolls, so the cost of a swap is
- * visible the instant you make it rather than after scrolling back up to a table header.
+ * Fill the slots greedily: best available player who is LEGAL in each slot, working
+ * through the layout in order.
+ *
+ * Position-locked slots come first in SLOT_LAYOUT, which matters — filling UTIL first
+ * would let a guard occupy it and leave PG empty with nobody eligible left. Healthy
+ * players outrank injured ones at equal value, since a slot filled by someone who won't
+ * play is worth nothing.
+ */
+function autoFill(players: LineupPlayer[], layout: string[], val: (p: LineupPlayer) => number) {
+  const ranked = [...players].sort((a, b) => {
+    if (a.injured !== b.injured) return a.injured ? 1 : -1;
+    return val(b) - val(a);
+  });
+  const taken = new Set<string>();
+  return layout.map((slot) => {
+    const pick = ranked.find((p) => !taken.has(p.name) && eligibleFor(p, slot));
+    if (pick) taken.add(pick.name);
+    return pick?.name ?? null;
+  });
+}
+
+/**
+ * Interactive lineup builder — ESPN's own board: one row per named slot (PG…UTIL), drag
+ * a bench player onto a slot to fill or swap it, with a click-to-select fallback on every
+ * row for touch and keyboard. Category totals for the current ten sit in a rail that stays
+ * on screen while the board scrolls, so the cost of a swap is visible the instant you make
+ * it rather than after scrolling back up to a table header.
+ *
+ * Slots are ENFORCED, unlike the earlier free-form version: a drop is refused when the
+ * player isn't eligible there. That is what makes the board mean anything — a lineup that
+ * ignores positions isn't one ESPN would accept.
  *
  * Totals are PER GAME, not projected-to-end-of-week. That is deliberate: the projection
  * multiplies by games left, and once a season is over every player has zero of those, so
  * a projected view would read as a column of noughts forever. Per-game production is the
  * thing a lineup decision is actually made on and it is defined in any week.
  *
- * The comparison line is against your best possible ten by 9-cat value — not against the
- * whole roster, which would compare ten players with thirteen and always look worse.
+ * The comparison line is against the best legal ten by the SELECTED value mode — not
+ * against the whole roster, which would compare ten players with thirteen and always look
+ * worse. Switching mode re-benchmarks both sides, so the delta always compares like ten
+ * with like ten.
  */
 export default function LineupView({
   players,
@@ -79,72 +154,95 @@ export default function LineupView({
     return m;
   }, [stats]);
 
-  /** Best `slots` by value, healthy first — the lineup the app would pick for you. */
-  const best = useMemo(() => {
-    const ranked = [...players].sort((a, b) => {
-      if (a.injured !== b.injured) return a.injured ? 1 : -1;
-      return b.value - a.value;
-    });
-    return new Set(ranked.slice(0, slots).map((p) => p.name));
-  }, [players, slots]);
+  const [mode, setMode] = useState<ValueMode>("value");
+  const valueOf = useMemo(() => (p: LineupPlayer) => p[mode] ?? 0, [mode]);
 
-  const [starting, setStarting] = useState<Set<string>>(best);
+  /** The layout, reconciled with the caller's slot COUNT. */
+  const layout = useMemo(() => {
+    if (slots === SLOT_LAYOUT.length) return SLOT_LAYOUT;
+    if (slots < SLOT_LAYOUT.length) return SLOT_LAYOUT.slice(0, slots);
+    return [...SLOT_LAYOUT, ...Array(slots - SLOT_LAYOUT.length).fill("UTIL")];
+  }, [slots]);
+
+  /** The lineup the app would pick for you, under the current value mode. */
+  const best = useMemo(
+    () => autoFill(players, layout, valueOf),
+    [players, layout, valueOf]
+  );
+
+  const [assigned, setAssigned] = useState<(string | null)[]>(() =>
+    autoFill(players, layout, (p) => p.value)
+  );
   // Which card is mid-drag, so a drop target can style itself as "will land here" and so
   // Firefox — which doesn't reliably surface dataTransfer payloads on dragover — always
   // has a fallback source for the name.
   const [dragName, setDragName] = useState<string | null>(null);
+  // Click-to-move fallback: tap a player, then tap a slot. Drag-and-drop does not exist
+  // on touch, and this page is otherwise unusable on a phone.
+  const [picked, setPicked] = useState<string | null>(null);
 
-  const starters = players.filter((p) => starting.has(p.name));
-  const bench = players.filter((p) => !starting.has(p.name));
-  const full = starters.length === slots;
-
-  const toggle = (name: string) => {
-    setStarting((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else if (next.size < slots) next.add(name);
-      return next;
-    });
-  };
+  const byName = useMemo(() => new Map(players.map((p) => [p.name, p])), [players]);
+  const starters = assigned
+    .map((n) => (n ? byName.get(n) : undefined))
+    .filter((p): p is LineupPlayer => !!p);
+  const startingNames = new Set(starters.map((p) => p.name));
+  const bench = players.filter((p) => !startingNames.has(p.name));
+  const filled = starters.length;
+  const full = filled === layout.length;
 
   /**
-   * Drop `fromName`'s card onto `targetName`'s card. Same side is a no-op — there is no
-   * meaningful order within a board — different sides swap: whichever one was benched
-   * takes the other's spot.
+   * Put `name` in slot `i`. Refused when they aren't eligible there.
+   *
+   * If they were already starting elsewhere the two slots SWAP — moving a player must
+   * never silently bench whoever they displaced, and the displaced player is by
+   * definition legal in the slot being vacated only if they came from it, so the swap is
+   * checked in both directions and abandoned if either half is illegal.
    */
-  const swapOnto = (fromName: string, targetName: string) => {
-    if (fromName === targetName) return;
-    setStarting((prev) => {
-      const fromStarting = prev.has(fromName);
-      const targetStarting = prev.has(targetName);
-      if (fromStarting === targetStarting) return prev;
-      const next = new Set(prev);
-      if (fromStarting) {
-        next.delete(fromName);
-        next.add(targetName);
-      } else {
-        next.delete(targetName);
-        next.add(fromName);
-      }
+  const place = (name: string, i: number): boolean => {
+    const p = byName.get(name);
+    if (!p || !eligibleFor(p, layout[i])) return false;
+    const from = assigned.indexOf(name);
+    if (from === i) return false;
+    const displaced = assigned[i];
+    if (from >= 0 && displaced) {
+      // Both are starters: a straight swap, only if the displaced player is legal in the
+      // slot being vacated. Checked BEFORE committing, so a refused half can't leave the
+      // board in a state where one player moved and the other didn't.
+      const d = byName.get(displaced);
+      if (!d || !eligibleFor(d, layout[from])) return false;
+    }
+    setAssigned((prev) => {
+      const next = [...prev];
+      if (from >= 0) next[from] = displaced ?? null;
+      next[i] = name;
       return next;
     });
+    setPicked(null);
+    return true;
   };
 
-  /** Drop `fromName` on open board space rather than on another card. */
-  const dropOnZone = (fromName: string, zone: "starters" | "bench") => {
-    setStarting((prev) => {
-      const isStarting = prev.has(fromName);
-      if (zone === "starters" && !isStarting) {
-        if (prev.size >= slots) return prev;
-        return new Set(prev).add(fromName);
-      }
-      if (zone === "bench" && isStarting) {
-        const next = new Set(prev);
-        next.delete(fromName);
-        return next;
-      }
-      return prev;
+  /** Empty slot `i` — the player goes back to the bench. */
+  const clearSlot = (i: number) => {
+    setAssigned((prev) => {
+      if (!prev[i]) return prev;
+      const next = [...prev];
+      next[i] = null;
+      return next;
     });
+    setPicked(null);
+  };
+
+  /** Bench a starter by name, wherever they are. */
+  const benchPlayer = (name: string) => {
+    const i = assigned.indexOf(name);
+    if (i >= 0) clearSlot(i);
+  };
+
+  /** First slot this bench player is legal AND free in, or -1. */
+  const firstOpenSlotFor = (name: string) => {
+    const p = byName.get(name);
+    if (!p) return -1;
+    return assigned.findIndex((occupant, i) => !occupant && eligibleFor(p, layout[i]));
   };
 
   /** Per-game category totals for a set of players. */
@@ -155,67 +253,222 @@ export default function LineupView({
     return out;
   };
 
+  const bestPlayers = best
+    .map((n) => (n ? byName.get(n) : undefined))
+    .filter((p): p is LineupPlayer => !!p);
+
   const totals = useMemo(() => totalsFor(starters), [starters, stats, categories]);
-  const bestTotals = useMemo(
-    () => totalsFor(players.filter((p) => best.has(p.name))),
-    [players, best, stats, categories]
-  );
+  const bestTotals = useMemo(() => totalsFor(bestPlayers), [bestPlayers, stats, categories]);
 
   const lower = new Set(lowerIsBetter);
-  const valueSum = starters.reduce((a, p) => a + p.value, 0);
-  const bestValue = players
-    .filter((p) => best.has(p.name))
-    .reduce((a, p) => a + p.value, 0);
+  const valueSum = starters.reduce((a, p) => a + valueOf(p), 0);
+  const bestValue = bestPlayers.reduce((a, p) => a + valueOf(p), 0);
   const injuredStarting = starters.filter((p) => p.injured).length;
 
   const pair = (p: LineupPlayer, made: string, att: string) =>
     `${(p.avg[idx[made]] ?? 0).toFixed(1)}/${(p.avg[idx[att]] ?? 0).toFixed(1)}`;
 
+  const nameFrom = (e: DragEvent) => e.dataTransfer.getData("text/plain") || dragName;
+
   return (
     <div className="lu-layout">
       <div className="lu-main">
-        <Board
-          zone="starters"
-          title="Starters"
-          note="Drag a bench player here, or click Bench on a card to open a spot."
-          players={starters}
-          openSlots={slots - starters.length}
-          idx={idx}
-          dragName={dragName}
-          setDragName={setDragName}
-          onToggle={toggle}
-          onSwap={swapOnto}
-          onDropZone={dropOnZone}
-        />
-        <Board
-          zone="bench"
-          title="Bench"
-          note={
-            full
-              ? "Lineup is full — drop or click a starter to open a spot first."
-              : "Drag a starter here, or click Start on a card."
-          }
-          players={bench}
-          idx={idx}
-          dragName={dragName}
-          setDragName={setDragName}
-          onToggle={toggle}
-          onSwap={swapOnto}
-          onDropZone={dropOnZone}
-        />
+        <div className="lu-toolbar">
+          <div className="controls lu-modes" role="group" aria-label="Value basis">
+            <span className="lu-modes-l">Value</span>
+            {VALUE_MODES.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                className={`chip${mode === m.key ? " chip-on" : ""}`}
+                aria-pressed={mode === m.key}
+                onClick={() => setMode(m.key)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {picked && (
+            <span className="lu-picked">
+              Moving <strong>{picked}</strong> — pick a slot, or{" "}
+              <button type="button" className="linkish" onClick={() => setPicked(null)}>
+                cancel
+              </button>
+            </span>
+          )}
+        </div>
+
+        <h2>
+          Starters <span className="lu-count">{filled} / {layout.length}</span>
+        </h2>
+        <div className="table-scroll">
+          <table className="sheet lu-slots">
+            <thead>
+              <tr>
+                <th className="lu-slot-h">Slot</th>
+                <th>Player</th>
+                <th className="num">Value</th>
+                <th className="num">GL</th>
+                <th className="num">PTS</th>
+                <th className="num">REB</th>
+                <th className="num">AST</th>
+                <th className="num">STL</th>
+                <th className="num">BLK</th>
+                <th className="num">TO</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {layout.map((slot, i) => {
+                const name = assigned[i];
+                const p = name ? byName.get(name) : undefined;
+                const pickedP = picked ? byName.get(picked) : undefined;
+                // A slot lights up only when the held player could actually land there,
+                // so an illegal target never looks droppable.
+                const candidate = dragName ? byName.get(dragName) : pickedP;
+                const openTo = candidate ? eligibleFor(candidate, slot) : false;
+                return (
+                  <SlotRow
+                    key={`${slot}-${i}`}
+                    slot={slot}
+                    player={p}
+                    idx={idx}
+                    mode={mode}
+                    highlight={openTo}
+                    dragging={!!p && dragName === p.name}
+                    onDragStartPlayer={(n) => setDragName(n)}
+                    onDragEnd={() => setDragName(null)}
+                    onDropHere={(e) => {
+                      // dataTransfer, NOT the `dragName` closure: dragstart/dragover/drop
+                      // can fire faster than React re-renders between them, so the inline
+                      // callback can still hold the PREVIOUS render's `dragName` — null on
+                      // the first drag of a session. dataTransfer is never stale.
+                      const from = nameFrom(e);
+                      if (from) place(from, i);
+                      setDragName(null);
+                    }}
+                    onClickSlot={() => {
+                      // A REFUSED move must not leave you still holding the old player —
+                      // the next tap would then be silently swallowed too, which reads as
+                      // the board being broken. Falling through to "pick whoever is in
+                      // the slot you just tapped" is what a second tap means anyway.
+                      if (picked && place(picked, i)) return;
+                      setPicked(p ? p.name : null);
+                    }}
+                    onBench={() => clearSlot(i)}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="caption">
+          Drag a bench player onto a slot, or tap a player then tap a slot. A slot only
+          accepts players eligible for it; G takes either guard, F either forward, UTIL
+          anyone.
+        </p>
+
+        <h2>
+          Bench <span className="lu-count">{bench.length}</span>
+        </h2>
+        <div
+          className="table-scroll"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const from = nameFrom(e);
+            if (from) benchPlayer(from);
+            setDragName(null);
+          }}
+        >
+          <table className="sheet lu-slots">
+            <thead>
+              <tr>
+                <th className="lu-slot-h">Pos</th>
+                <th>Player</th>
+                <th className="num">Value</th>
+                <th className="num">GL</th>
+                <th className="num">PTS</th>
+                <th className="num">REB</th>
+                <th className="num">AST</th>
+                <th className="num">STL</th>
+                <th className="num">BLK</th>
+                <th className="num">TO</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {bench.length === 0 && (
+                <tr>
+                  <td colSpan={11} className="lu-empty-note">
+                    Everyone is starting.
+                  </td>
+                </tr>
+              )}
+              {bench
+                .slice()
+                .sort((a, b) => valueOf(b) - valueOf(a))
+                .map((p) => {
+                  const open = firstOpenSlotFor(p.name);
+                  return (
+                    <SlotRow
+                      key={p.name}
+                      slot={positionLabel(p)}
+                      player={p}
+                      idx={idx}
+                      mode={mode}
+                      bench
+                      dragging={dragName === p.name}
+                      onDragStartPlayer={(n) => setDragName(n)}
+                      onDragEnd={() => setDragName(null)}
+                      onDropHere={(e) => {
+                        const from = nameFrom(e);
+                        if (from) benchPlayer(from);
+                        setDragName(null);
+                      }}
+                      onClickSlot={() => setPicked(picked === p.name ? null : p.name)}
+                      // "Start" only when there is a legal empty slot; otherwise the move
+                      // has to be an explicit swap, which the drag/tap flow handles.
+                      onBench={open >= 0 ? () => place(p.name, open) : undefined}
+                      benchActionLabel={open >= 0 ? "Start" : undefined}
+                      selected={picked === p.name}
+                    />
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+        <p className="caption">
+          Ranked by the selected value basis. &ldquo;Start&rdquo; appears when a legal slot
+          is open; otherwise drag them onto the starter you want to replace.
+        </p>
 
         <h2>Full stats</h2>
-        <p className="caption">Every column, for when the cards above aren&rsquo;t enough.</p>
-        <DetailTable title="Starters" players={starters} stats={stats} idx={idx} pair={pair} />
-        <DetailTable title="Bench" players={bench} stats={stats} idx={idx} pair={pair} />
+        <p className="caption">Every column, for when the rows above aren&rsquo;t enough.</p>
+        <DetailTable
+          title="Starters"
+          players={starters}
+          stats={stats}
+          idx={idx}
+          pair={pair}
+          mode={mode}
+        />
+        <DetailTable
+          title="Bench"
+          players={bench}
+          stats={stats}
+          idx={idx}
+          pair={pair}
+          mode={mode}
+        />
       </div>
 
       <aside className="lu-rail">
         <div className="lu-rail-tiles">
           <RailTile
             label="Starters"
-            value={`${starters.length} / ${slots}`}
-            sub={full ? "lineup full" : `${slots - starters.length} slot(s) open`}
+            value={`${filled} / ${layout.length}`}
+            sub={full ? "lineup full" : `${layout.length - filled} slot(s) open`}
             warn={!full}
           />
           <RailTile
@@ -257,15 +510,19 @@ export default function LineupView({
           })}
         </div>
         <p className="caption">
-          Per-game totals for the ten you have starting, vs. the best ten your roster
-          could field by 9-cat value. Turnovers count down.
+          Per-game totals for the ten you have starting, vs. the best legal ten your roster
+          could field by the selected value basis. Turnovers count down.
         </p>
 
         <div className="controls lu-rail-controls">
-          <button type="button" className="chip" onClick={() => setStarting(new Set(best))}>
+          <button type="button" className="chip" onClick={() => setAssigned(best)}>
             Reset to best ten
           </button>
-          <button type="button" className="chip" onClick={() => setStarting(new Set())}>
+          <button
+            type="button"
+            className="chip"
+            onClick={() => setAssigned(layout.map(() => null))}
+          >
             Clear lineup
           </button>
         </div>
@@ -274,178 +531,118 @@ export default function LineupView({
   );
 }
 
-function Board({
-  zone,
-  title,
-  note,
-  players,
-  openSlots = 0,
+/** One row of the board: a named slot and whoever is in it (or an empty drop target). */
+function SlotRow({
+  slot,
+  player,
   idx,
-  dragName,
-  setDragName,
-  onToggle,
-  onSwap,
-  onDropZone,
-}: {
-  zone: "starters" | "bench";
-  title: string;
-  note: string;
-  players: LineupPlayer[];
-  openSlots?: number;
-  idx: Record<string, number>;
-  dragName: string | null;
-  setDragName: (n: string | null) => void;
-  onToggle: (name: string) => void;
-  onSwap: (fromName: string, targetName: string) => void;
-  onDropZone: (fromName: string, zone: "starters" | "bench") => void;
-}) {
-  const nameFrom = (e: DragEvent) => e.dataTransfer.getData("text/plain") || dragName;
-
-  return (
-    <>
-      <h2>
-        {title} <span className="lu-count">{players.length}</span>
-      </h2>
-      <div
-        className="lu-board"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          const from = nameFrom(e);
-          if (from) onDropZone(from, zone);
-          setDragName(null);
-        }}
-      >
-        {players.length === 0 && openSlots === 0 && (
-          <p className="caption lu-empty-note">
-            {zone === "starters" ? "No one starting — drag someone up." : "Everyone is starting."}
-          </p>
-        )}
-        {players.map((p) => (
-          <PlayerCard
-            key={p.name}
-            p={p}
-            zone={zone}
-            idx={idx}
-            dragging={dragName === p.name}
-            onToggle={onToggle}
-            onDragStart={(name) => {
-              setDragName(name);
-            }}
-            onDragEnd={() => setDragName(null)}
-            onDrop={(e, target) => {
-              // dataTransfer, NOT the `dragName` closure: dragstart/dragover/drop can
-              // fire faster than React re-renders between them (every browser does this
-              // on a real drag, and a scripted one guarantees it), so the inline
-              // callback here can still be holding the PREVIOUS render's `dragName` —
-              // which for the very first drag of a session is `null`. dataTransfer is
-              // the browser's own channel for this and is never stale.
-              const from = nameFrom(e);
-              if (from) onSwap(from, target);
-              setDragName(null);
-            }}
-          />
-        ))}
-        {Array.from({ length: Math.max(0, openSlots) }).map((_, i) => (
-          <div
-            key={`open-${i}`}
-            className="lu-slot-empty"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const from = nameFrom(e);
-              if (from) onDropZone(from, "starters");
-              setDragName(null);
-            }}
-          >
-            Open slot
-          </div>
-        ))}
-      </div>
-      <p className="caption">{note}</p>
-    </>
-  );
-}
-
-function PlayerCard({
-  p,
-  zone,
-  idx,
+  mode,
+  bench,
+  highlight,
   dragging,
-  onToggle,
-  onDragStart,
+  selected,
+  onDragStartPlayer,
   onDragEnd,
-  onDrop,
+  onDropHere,
+  onClickSlot,
+  onBench,
+  benchActionLabel,
 }: {
-  p: LineupPlayer;
-  zone: "starters" | "bench";
+  slot: string;
+  player?: LineupPlayer;
   idx: Record<string, number>;
-  dragging: boolean;
-  onToggle: (name: string) => void;
-  onDragStart: (name: string) => void;
+  mode: ValueMode;
+  bench?: boolean;
+  highlight?: boolean;
+  dragging?: boolean;
+  selected?: boolean;
+  onDragStartPlayer: (name: string) => void;
   onDragEnd: () => void;
-  onDrop: (e: DragEvent<HTMLDivElement>, targetName: string) => void;
+  onDropHere: (e: DragEvent<HTMLTableRowElement>) => void;
+  onClickSlot: () => void;
+  onBench?: () => void;
+  benchActionLabel?: string;
 }) {
-  const [code, sev] = playerStatus(p.status);
-  const shot = headshotUrl(p.playerId);
-  const stat = (c: string) => (p.avg[idx[c]] ?? 0).toFixed(1);
+  const stat = (c: string) => (player ? (player.avg[idx[c]] ?? 0).toFixed(1) : "—");
+  const [code, sev] = player ? playerStatus(player.status) : ["", ""];
+  const shot = player ? headshotUrl(player.playerId) : null;
+  const v = player ? (player[mode] ?? 0) : 0;
+
+  const cls = [
+    "lu-slot-row",
+    highlight ? "lu-slot-open" : "",
+    dragging ? "lu-slot-dragging" : "",
+    selected ? "lu-slot-picked" : "",
+    player?.injured ? "row-muted" : "",
+    !player ? "lu-slot-empty-row" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div
-      className={`lu-card${dragging ? " lu-card-drag" : ""}${p.injured ? " lu-card-injured" : ""}`}
-      draggable
+    <tr
+      className={cls}
+      draggable={!!player}
       onDragStart={(e) => {
-        e.dataTransfer.setData("text/plain", p.name);
+        if (!player) return;
+        e.dataTransfer.setData("text/plain", player.name);
         e.dataTransfer.effectAllowed = "move";
-        onDragStart(p.name);
+        onDragStartPlayer(player.name);
       }}
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
-        onDrop(e, p.name);
+        onDropHere(e);
       }}
+      onClick={onClickSlot}
     >
-      {shot ? (
-        <div className="lu-card-shot" style={{ backgroundImage: `url('${shot}')` }} />
-      ) : (
-        <div className="lu-card-shot lu-card-shot-blank" />
-      )}
-      <div className="lu-card-body">
-        <div className="lu-card-top">
-          <span className="lu-card-name">{p.name}</span>
-          <span className="lu-card-value mono">
-            {p.value >= 0 ? "+" : ""}
-            {p.value.toFixed(1)}
+      <td className={bench ? "lu-pos" : "lu-slot-tag"}>{slot}</td>
+      <td className="lu-name">
+        {player ? (
+          <span className="lu-name-cell">
+            {shot ? (
+              <span className="lu-row-shot" style={{ backgroundImage: `url('${shot}')` }} />
+            ) : (
+              <span className="lu-row-shot lu-card-shot-blank" />
+            )}
+            <span className="lu-name-text">
+              <span className="lu-name-n">{player.name}</span>
+              <span className="lu-name-sub">
+                {player.nbaTeam} · {positionLabel(player)}
+                {code && <span className={`pv-badge ${sev}`}>{code}</span>}
+              </span>
+            </span>
           </span>
-        </div>
-        <div className="lu-card-sub">
-          <span>
-            {p.nbaTeam} · {positionLabel(p)}
-          </span>
-          {code && <span className={`pv-badge ${sev}`}>{code}</span>}
-        </div>
-        <div className="lu-card-stats mono">
-          <span>
-            <b>{stat("PTS")}</b> PTS
-          </span>
-          <span>
-            <b>{stat("REB")}</b> REB
-          </span>
-          <span>
-            <b>{stat("AST")}</b> AST
-          </span>
-        </div>
-      </div>
-      <button
-        type="button"
-        className="lu-card-move"
-        onClick={() => onToggle(p.name)}
-        aria-label={`${zone === "starters" ? "Bench" : "Start"} ${p.name}`}
-      >
-        {zone === "starters" ? "Bench" : "Start"}
-      </button>
-    </div>
+        ) : (
+          <span className="lu-slot-empty-text">Empty — drop a player here</span>
+        )}
+      </td>
+      <td className="num">
+        {player ? `${v >= 0 ? "+" : ""}${v.toFixed(1)}` : "—"}
+      </td>
+      <td className="num">{player ? player.gamesLeft : "—"}</td>
+      <td className="num">{stat("PTS")}</td>
+      <td className="num">{stat("REB")}</td>
+      <td className="num">{stat("AST")}</td>
+      <td className="num">{stat("STL")}</td>
+      <td className="num">{stat("BLK")}</td>
+      <td className="num">{stat("TO")}</td>
+      <td className="lu-row-action">
+        {player && onBench && (
+          <button
+            type="button"
+            className="lu-card-move"
+            onClick={(e) => {
+              e.stopPropagation();
+              onBench();
+            }}
+          >
+            {benchActionLabel ?? "Bench"}
+          </button>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -455,12 +652,14 @@ function DetailTable({
   stats,
   idx,
   pair,
+  mode,
 }: {
   title: string;
   players: LineupPlayer[];
   stats: string[];
   idx: Record<string, number>;
   pair: (p: LineupPlayer, made: string, att: string) => string;
+  mode: ValueMode;
 }) {
   const pct = (p: LineupPlayer, made: string, att: string) => {
     const a = p.avg[idx[att]] ?? 0;
@@ -516,8 +715,8 @@ function DetailTable({
                   </td>
                 ))}
                 <td className="num">
-                  {p.value >= 0 ? "+" : ""}
-                  {p.value.toFixed(1)}
+                  {(p[mode] ?? 0) >= 0 ? "+" : ""}
+                  {(p[mode] ?? 0).toFixed(1)}
                 </td>
               </tr>
             ))}

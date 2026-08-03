@@ -64,23 +64,21 @@ body {
 }
 
 /*
- * Reserve the scrollbar's width whether or not the page needs one.
+ * NO `scrollbar-gutter` — the header runs the full width of the window, and the
+ * scrollbar takes that space back only on pages tall enough to need one. Owner's call,
+ * matching how most sites behave.
  *
- * Without this, a short page (Season Summary) has no scrollbar and a tall one
- * (Scoreboard) does, so the 15px gutter appears and disappears as you navigate — and
- * because the header and content are CENTRED, everything jumps sideways by half of it
- * (measured: 7.5px) on every such move. The gutter is now always there, so the centre
- * line never moves.
+ * This was previously `scrollbar-gutter: stable`, which permanently reserved the
+ * scrollbar's width so the centred column never moved. The trade it makes is real and
+ * worth knowing before anyone "fixes" this again: without the reservation, navigating
+ * between a short page (Season Summary, no scrollbar) and a tall one (Scoreboard, has
+ * one) changes the viewport's usable width by the scrollbar's ~15px, and because the
+ * header and content are both CENTRED, everything shifts sideways by half of that
+ * (~7.5px). That shift is the cost of the full-width header, not a bug to chase.
  *
- * `scrollbar-gutter` rather than the old `overflow-y: scroll`: that also fixes the
- * shift, but by forcing a permanently visible scrollbar track on every page, including
- * ones with nothing to scroll. This reserves the SPACE without drawing a dead track.
- * It is also a no-op on platforms with overlay scrollbars (macOS, phones), where
- * scrollbars take no layout space and there is no shift to fix.
+ * On platforms with overlay scrollbars (macOS, phones) scrollbars take no layout space,
+ * so there is nothing to reserve and nothing to shift either way.
  */
-html {
-  scrollbar-gutter: stable;
-}
 
 /* Every number in this app is a tabular figure. */
 .mono {
@@ -375,6 +373,45 @@ h2 {
   margin-left: 0.7rem;
 }
 
+/* ---- the scoreboard panel ---------------------------------------------------
+   On DESKTOP the board, the acquisition/GP line, the live badge and the category sheet
+   are one scoreboard, so they share a single border and background with internal rules
+   between them — four separately-bordered cards read as four unrelated widgets. On
+   mobile the panel dissolves and its children go back to being their own blocks, which
+   is the right form on a narrow screen. */
+@media (min-width: 768px) {
+  .sb-panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 0.9rem 0 1.2rem;
+  }
+  /* Children give up their own chrome and are separated by rules instead. `.cs-horiz`
+     is a `.table-scroll`, which carries its own border/radius/background — those have
+     to go too or the panel ends up with a box inside a box. */
+  .sb-panel > .board,
+  .sb-panel > .acq-line,
+  .sb-panel > .live-badge,
+  .sb-panel > .cs-horiz {
+    border: 0;
+    border-radius: 0;
+    margin: 0;
+    background: transparent;
+  }
+  .sb-panel > .acq-line,
+  .sb-panel > .live-badge,
+  .sb-panel > .cs-horiz {
+    border-top: 1px solid var(--line-2);
+  }
+  .sb-panel > .acq-line { background: var(--surface-2); }
+  /* Full width, not inline-flex — otherwise its top rule spans only the text. */
+  .sb-panel > .live-badge {
+    display: flex;
+    padding: 0.5rem 1.3rem;
+  }
+}
+
 /* ---- the board -------------------------------------------------------------
    The matchup header as an actual scoreboard: one row, each side owning its own
    number, a status chip between them. Its own block rather than a variant of
@@ -639,6 +676,8 @@ table.sheet.tape th:first-child { width: 1%; }
   font-size: 0.72rem;
   color: var(--ink-2);
 }
+/* Was an inline style on the element; moved here so `.sb-panel` can override it. */
+.live-badge { margin: 0 0 0.6rem; }
 .live-dot {
   width: 7px;
   height: 7px;
@@ -1674,6 +1713,88 @@ table.sheet.ss-standings td {
   font-weight: 600;
   color: var(--ink-3);
 }
+
+/* -------- slot board (ESPN's layout: one row per named lineup slot) -------- */
+.lu-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0.2rem 0 0.9rem;
+}
+.lu-modes { margin: 0; align-items: center; }
+.lu-modes-l {
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin-right: 0.15rem;
+}
+/* The click-to-move fallback needs to say what it's waiting for — on touch there is no
+   drag cursor to imply it. */
+.lu-picked { font-size: 0.78rem; color: var(--ink-2); }
+.linkish {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--cobalt);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+table.sheet.lu-slots td { padding: 0.4rem 0.7rem; vertical-align: middle; }
+.lu-slot-row { cursor: pointer; }
+.lu-slot-row:hover { background: var(--row-highlight); }
+/* The slot name is the row's label, so it reads as chrome rather than data — boxed and
+   uppercase, the way ESPN prints it. */
+.lu-slot-tag {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  text-align: center;
+  white-space: nowrap;
+}
+.lu-slot-h { width: 1%; }
+.lu-name-cell { display: flex; align-items: center; gap: 0.55rem; min-width: 0; }
+.lu-row-shot {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center top;
+  border: 1px solid var(--line);
+}
+.lu-name-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.lu-name-n { font-weight: 600; white-space: nowrap; }
+.lu-name-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+/* A slot the held player can legally fill. Only ever set for a legal target, so an
+   illegal drop never looks available in the first place. */
+.lu-slot-open { background: var(--row-highlight); box-shadow: inset 0 0 0 1px var(--cobalt); }
+.lu-slot-picked { box-shadow: inset 0 0 0 1px var(--cobalt); }
+.lu-slot-dragging { opacity: 0.45; }
+.lu-slot-empty-row { color: var(--ink-3); }
+.lu-slot-empty-text { font-size: 0.78rem; color: var(--ink-3); font-style: italic; }
+.lu-row-action { width: 1%; text-align: right; white-space: nowrap; }
+
+@media (max-width: 767px) {
+  /* The action button is the touch affordance for a board that can't be dragged, so it
+     keeps its place while the stat columns scroll away under it. */
+  .lu-name-n { white-space: normal; }
+  .lu-toolbar { margin-bottom: 0.7rem; }
+}
 .lu-board {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -1973,10 +2094,9 @@ table.sheet.lu-table .lu-pos {
   color: var(--ink-2);
 }
 
+/* One line of text, as in the legacy app — `space-between` was there to push two
+   separate blocks apart and has nothing left to separate. */
 .lp-foot {
-  display: flex;
-  justify-content: space-between;
-  gap: 2rem;
   margin-top: 3rem;
   padding: 1.2rem 0 0;
   border-top: 1px solid var(--line);
@@ -3550,13 +3670,30 @@ table.sheet.lu-table .lu-pos {
    across the top, then the head-to-head board and a category sheet with won cells shaded.
    ============================================================================== */
 
+/*
+ * ONE scrolling row, the way ESPN's mobile app carries its scoreboard — not a grid that
+ * wrapped to three rows of cards and pushed the matchup you actually came for below the
+ * fold. Cards keep a fixed width so the next one always peeks past the edge, which is
+ * the only affordance that says "this scrolls".
+ *
+ * Its own scroll container, so it can never widen the page (body is `overflow-x: clip`,
+ * which would silently clip it instead). Nothing inside is `position: sticky` — that
+ * would break here, since sticky resolves against the nearest scroll container.
+ */
 .rc-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  display: flex;
   gap: 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
   margin: 1rem 0 0.4rem;
+  /* Keeps the scrollbar off the cards rather than over their bottom border. */
+  padding-bottom: 0.35rem;
 }
 .rc-game {
+  flex: 0 0 11rem;
+  scroll-snap-align: start;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
@@ -3672,7 +3809,10 @@ table.sheet.rc-sheet .rc-win {
 }
 
 @media (max-width: 767px) {
-  .rc-strip { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+  /* Was `grid-template-columns`, which does nothing now the strip is a flex scroller.
+     Narrower cards instead, so two fit on a phone with the third peeking. */
+  .rc-strip { gap: 0.4rem; }
+  .rc-game { flex-basis: 10rem; }
   .rc-row { font-size: 0.72rem; }
 }
 
@@ -3681,12 +3821,41 @@ table.sheet.rc-sheet .rc-win {
 table.sheet.rc-box { font-size: 0.74rem; }
 table.sheet.rc-box td,
 table.sheet.rc-box th { padding: 0.35rem 0.5rem; }
+/* This table opts into the shared sortable-header pattern, but its cells are denser
+   than a default sheet's. The generic `table.sheet.sortable th { padding: 0 }` ties on
+   specificity with the rule above and loses by order, which would leave the header's
+   own padding AND the button's — so the padding is moved onto the button explicitly.
+   The one non-sortable header has no button, so it carries the padding on a span. */
+table.sheet.sortable.rc-box th { padding: 0; }
+table.sheet.sortable.rc-box .th-sort { padding: 0.35rem 0.5rem; }
+table.sheet.rc-box .rc-opp-h { display: inline-block; padding: 0.35rem 0.5rem; }
 table.sheet.rc-box .rc-player {
   font-weight: 600;
   white-space: nowrap;
+}
+/*
+ * The WHOLE first column freezes, not just the player rows.
+ *
+ * Only `.rc-player` was sticky, which is the name cell in a body row — so scrolling the
+ * table sideways left the "Starters" header and the "Totals" cell sliding out from
+ * behind a name column that stayed put, and the frozen column lost both its heading and
+ * its footer. `:first-child` catches all three (header th, body td, totals td).
+ *
+ * Stacking order matters once cells overlap: the header row is already sticky to the
+ * top (see `table.sheet th`), so the top-left cell is frozen in BOTH directions and has
+ * to sit above the sticky row AND the sticky column, or the numbers scroll over it.
+ */
+table.sheet.rc-box th:first-child,
+table.sheet.rc-box td:first-child {
   position: sticky;
   left: 0;
   background: var(--card);
+  z-index: 1;
+}
+table.sheet.rc-box thead th { z-index: 2; }
+table.sheet.rc-box th:first-child {
+  background: var(--surface-2);
+  z-index: 3;
 }
 /* The totals row has to equal the category sheet above it, so it reads as a rule. */
 table.sheet.rc-box .rc-totals td {
@@ -3694,7 +3863,9 @@ table.sheet.rc-box .rc-totals td {
   font-weight: 700;
   background: var(--surface-2);
 }
-table.sheet.rc-box .rc-totals .rc-player { background: var(--surface-2); }
+/* The totals row's first cell has no class of its own, so it needs naming here or it
+   keeps the --card background every other frozen body cell uses. */
+table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
 /* GAMES: OPPONENTS — a list of short labels, not a number, so it gets room and left
    alignment rather than the numeric columns' tabular-nums/right-align. */
 table.sheet.rc-box .rc-opp {
@@ -3733,8 +3904,9 @@ table.sheet.rc-box .rc-opp {
 }
 .acq-side-right { text-align: right; align-items: flex-end; }
 .acq-name { font-weight: 700; color: var(--ink); }
-/* Each fact on its own line — acquisitions and GP are unrelated numbers, and running
-   them together with a separator made both wrap mid-figure on a phone. */
+/* nowrap so a figure like "14/14" can never break mid-number. The two labels are their
+   own elements rather than one string with a separator, which is what lets the mobile
+   rule below lay them out as a row and desktop keep them stacked. */
 .acq-label { color: var(--ink-3); white-space: nowrap; }
 
 @media (max-width: 767px) {
@@ -3747,6 +3919,23 @@ table.sheet.rc-box .rc-opp {
    */
   .acq-line { flex-direction: column; gap: 0.5rem; }
   .acq-side-right { text-align: left; align-items: flex-start; }
+  /*
+   * Within a side, the team name takes a line of its own and the two figures share the
+   * one under it — GP sits to the RIGHT of acquisitions rather than below it, which
+   * turned each side into three stacked lines and the block into six.
+   *
+   * Wrapping rather than a fixed row: `.acq-label` is nowrap, so if a long name or a
+   * narrow screen leaves the pair short of room they drop onto separate lines instead
+   * of overlapping — the same failure the stacking above was added to fix.
+   */
+  .acq-side {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.8rem;
+    row-gap: 0.1rem;
+  }
+  .acq-name { flex: 0 0 100%; }
 }
 
 /* -------- Scoreboard three-way tabs (You / Matchup / Opponent) --------
@@ -3798,6 +3987,11 @@ table.sheet.rc-box .rc-opp {
  */
 .sbx-panels { display: flex; flex-direction: column; gap: 0.4rem; }
 .sbx-panel { display: block; }
+/* The scoreboard leads on desktop. In DOM order it sits between the two box-score
+   tables (that's the mobile tab order); here it floats to the top so the page opens on
+   the matchup rather than on your own box score. Flex `order` only — no markup change,
+   so the mobile tab order is untouched. */
+.sbx-panel-matchup { order: -1; }
 
 @media (max-width: 767px) {
   .sbx-tabs { display: flex; }

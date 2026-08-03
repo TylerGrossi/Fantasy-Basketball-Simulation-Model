@@ -118,7 +118,6 @@ export default async function Page({
   const oppAcq = currentGame && (r.isHome ? currentGame.awayAcq : currentGame.homeAcq);
   const lines = (id: number) => box?.periods[String(league.period)]?.[String(id)] ?? [];
   const gp = (id: number) => lines(id).reduce((a, l) => a + (l.gp || 0), 0);
-  const label = periodLabel(league);
 
   return (
     <>
@@ -129,7 +128,6 @@ export default async function Page({
         mine={
           <PlayerBoxTable
             title={`${r.youName} box score`}
-            caption={label}
             stats={box?.stats ?? league.stats}
             lines={lines(me.id)}
           />
@@ -153,7 +151,6 @@ export default async function Page({
         opp={
           <PlayerBoxTable
             title={`${r.oppName} box score`}
-            caption={label}
             stats={box?.stats ?? league.stats}
             lines={lines(r.oppId)}
           />

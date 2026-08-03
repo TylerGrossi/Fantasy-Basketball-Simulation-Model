@@ -11,12 +11,11 @@ const STARTER_SLOTS = 10;
  * the player pool, which is the only place it exists. They are joined by name here, on
  * the server, so the client component gets one flat list and no lookup table.
  *
- * Named position SLOTS (PG/SG/SF/PF/C/UTIL) are still deliberately not enforced — ESPN
- * players are multi-eligible and a grid that picked one slot per player would block
- * moves that are legal in the real league. What the board DOES show, via
- * `eligibleSlots`, is every position a player is eligible for ("PG/SG"), which is real
- * information without pretending there is one right slot for them. The cap on how many
- * can start is real; which ten is up to you.
+ * Named position SLOTS (PG/SG/SF/PF/C/G/F/UTIL) ARE enforced by the board, using
+ * `eligibleSlots` — every position ESPN lists a player at, not the single default
+ * `position`. That distinction is what makes enforcement safe rather than obstructive: a
+ * "PG/SG" player is legal in PG, SG, G and UTIL, so the board allows every move the real
+ * league would, and refuses only the ones ESPN would refuse too.
  */
 export default async function Page() {
   const league = await loadLeague();
@@ -37,6 +36,11 @@ export default async function Page() {
   const posOf = new Map(pool.map((p) => [p.name, p.position]));
   const eligOf = new Map(pool.map((p) => [p.name, p.eligibleSlots]));
   const valueOf = new Map(pool.map((p) => [p.name, p.value]));
+  // The same 9-cat score over the last 30 / 15 days, so the board can be ranked by form
+  // rather than by the season. Both fall back to the season value when absent, matching
+  // what the exporter does for a player with too few recent games.
+  const recentOf = new Map(pool.map((p) => [p.name, p.recent]));
+  const recent15Of = new Map(pool.map((p) => [p.name, p.recent15]));
   const pidOf = new Map(pool.map((p) => [p.name, p.playerId]));
 
   const players: LineupPlayer[] = you.players.map((p) => ({
@@ -52,6 +56,8 @@ export default async function Page() {
         ? [posOf.get(p.name)!]
         : [],
     value: valueOf.get(p.name) ?? 0,
+    recent: recentOf.get(p.name) ?? valueOf.get(p.name) ?? 0,
+    recent15: recent15Of.get(p.name) ?? valueOf.get(p.name) ?? 0,
     gamesLeft: p.gamesLeft,
     injured: p.injured,
     status: p.status,
@@ -62,8 +68,8 @@ export default async function Page() {
     <>
       <h1>Lineup</h1>
       <p className="caption">
-        {me.name} &mdash; drag a player onto the other board (or click Start / Bench) to
-        see what it does to your projected category totals.
+        {me.name} &mdash; drag a player into a slot (or tap a player, then a slot) to see
+        what it does to your projected category totals.
       </p>
       <LineupView
         players={players}

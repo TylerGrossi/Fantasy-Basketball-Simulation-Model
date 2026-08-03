@@ -409,7 +409,10 @@ def _team_schedule_labels(team_abbrev, year):
                 if ab == team_abbrev:
                     my_side = c.get("homeAway")
                 else:
-                    opp_abbr = t.get("abbreviation") or ab
+                    # Normalized, not raw: ESPN's own abbreviation for Utah ("UTAH") is
+                    # 4 letters where every other team's is 3 - printing it raw here is
+                    # what put "UTAH" instead of "UTA" next to Jokic's opponent list.
+                    opp_abbr = ab
             if my_side is None or not opp_abbr:
                 continue
             labels[d] = f"@{str(opp_abbr).strip()}" if my_side == "away" else str(opp_abbr).strip()

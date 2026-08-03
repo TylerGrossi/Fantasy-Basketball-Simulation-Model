@@ -35,7 +35,10 @@ export default function LiveBadge({
           : "Loading live totals…";
   const dot = state === "live" ? "" : state === "error" ? "error" : "stale";
   return (
-    <p className="live" style={{ margin: "0 0 0.6rem" }}>
+    /* Spacing via a class, not an inline style: inside `.sb-panel` the badge is a band
+       of the scoreboard and needs the panel's own padding, and an inline margin would
+       win against that rule no matter how specific it was. */
+    <p className="live live-badge">
       <span className={`live-dot ${dot}`} />
       {label}
     </p>
