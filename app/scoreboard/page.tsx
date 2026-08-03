@@ -32,7 +32,7 @@ import {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ demo?: string; period?: string }>;
+  searchParams: Promise<{ demo?: string; period?: string; game?: string }>;
 }) {
   const sp = await searchParams;
   const demo = sp.demo === "1";
@@ -50,8 +50,19 @@ export default async function Page({
 
   // ---- a completed week: the recap ----
   if (isPast && asked < league.period) {
+    // Which game the strip has selected. Validated against the teams that actually
+    // played this period, so a stale or hand-edited `?game=` falls back to your own
+    // matchup instead of rendering an empty recap.
+    const played = (league.periodResults ?? [])
+      .find((p) => p.period === asked)
+      ?.games.flatMap((g) => [g.homeId, g.awayId]);
+    const wanted = Number(sp.game);
+    const focusId =
+      Number.isFinite(wanted) && played?.includes(wanted) ? wanted : me.id;
+
     const recap = buildWeekRecap({
-      league, period: asked, teamId: me.id, box: await loadBoxScores(),
+      league, period: asked, teamId: focusId, myTeamId: me.id,
+      box: await loadBoxScores(),
     });
 
     if (!recap) {
@@ -70,7 +81,10 @@ export default async function Page({
       <>
         <WeekSelect weeks={weeks} selected={asked} current={league.period} />
         <ScoreboardTabs
-          mineLabel={abbrev(me.id)}
+          // The tabs name the SELECTED game's two teams, which are only your own when
+          // the strip is on your matchup.
+          key={focusId}
+          mineLabel={abbrev(focusId)}
           oppLabel={abbrev(recap.oppId)}
           mine={recap.mine}
           matchup={recap.matchup}

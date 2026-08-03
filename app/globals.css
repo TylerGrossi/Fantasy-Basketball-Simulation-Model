@@ -64,21 +64,89 @@ body {
 }
 
 /*
- * NO `scrollbar-gutter` — the header runs the full width of the window, and the
- * scrollbar takes that space back only on pages tall enough to need one. Owner's call,
- * matching how most sites behave.
+ * Header runs the FULL window width, and the layout never shifts. Both, not one.
  *
- * This was previously `scrollbar-gutter: stable`, which permanently reserved the
- * scrollbar's width so the centred column never moved. The trade it makes is real and
- * worth knowing before anyone "fixes" this again: without the reservation, navigating
- * between a short page (Season Summary, no scrollbar) and a tall one (Scoreboard, has
- * one) changes the viewport's usable width by the scrollbar's ~15px, and because the
- * header and content are both CENTRED, everything shifts sideways by half of that
- * (~7.5px). That shift is the cost of the full-width header, not a bug to chase.
+ * These pull in opposite directions and neither half alone is enough:
  *
- * On platforms with overlay scrollbars (macOS, phones) scrollbars take no layout space,
- * so there is nothing to reserve and nothing to shift either way.
+ *   - `scrollbar-gutter: stable` reserves the scrollbar's ~15px on every page, so the
+ *     centred column sits in a constant width and navigating between a short page
+ *     (Season Summary, no scrollbar) and a tall one (Scoreboard, has one) can't jump it
+ *     sideways by half the scrollbar (~7.5px). But it also means no descendant can ever
+ *     reach the true window edge: everything inside `body` is laid out in the narrower
+ *     scrollport, and `overflow-x: clip` cuts anything that tries to overhang. That is
+ *     why the header used to stop short of the edge.
+ *
+ *   - Dropping the gutter lets the header reach the edge, but hands back the 7.5px jump.
+ *
+ * The way out is that the gutter is only unreachable by ELEMENTS. The canvas — the
+ * background propagated from the root — paints the whole viewport, gutter included. So
+ * the gutter keeps its reservation (no jump) while `html` paints the header's own band
+ * across the top of the entire window (full width). `body` keeps `--paper` and covers
+ * everything except that reserved strip, so the gradient is visible exactly where it is
+ * needed and nowhere else.
+ *
+ * `background-attachment: fixed` because the band has to stay under the STICKY header
+ * rather than scrolling away with the document.
+ *
+ * Do not replace this with a spread `box-shadow` on `.nav`. That was the previous
+ * attempt: a spread grows on all four sides, so it painted an opaque slab down over the
+ * page and every desktop route rendered blank (see the note on `.nav::before` below).
  */
+/*
+ * THE SCROLLING MODEL. Read this before touching `scrollbar-gutter` anywhere.
+ *
+ * Two requirements that look independent and are not:
+ *   a) the header runs the full width of the window, and
+ *   b) the centred content never shifts sideways as you navigate.
+ *
+ * At the VIEWPORT level you can have either, never both:
+ *   - `scrollbar-gutter: stable` on `html` reserves the scrollbar's ~15px on every page,
+ *     so (b) holds. But the reserved strip is outside the scrollport, and NOTHING can
+ *     paint into it — not a descendant, not a spread shadow, not the propagated canvas
+ *     background, not even `position: fixed; width: 100vw` with every `overflow` clip
+ *     removed. All four were tried and measured; the strip stayed `--paper` in each. So
+ *     (a) is impossible while the viewport reserves a gutter.
+ *   - No gutter, and (a) holds but the usable width changes by the scrollbar's width
+ *     between a short page and a tall one, moving the centred column ~7.5px. (b) breaks.
+ *
+ * The way out is to stop the VIEWPORT scrolling at all. `body` becomes a full-height flex
+ * column: the header is a row that never scrolls (so it spans the whole window — there is
+ * no gutter at window level to dodge), and `.app-scroll` below it owns the scrollbar.
+ * That inner box reserves ITS own gutter, so the content column's width is constant and
+ * (b) holds too. The scrollbar now starts under the header rather than beside it, which
+ * is also what it looks like on the sites this was modelled on.
+ *
+ * DESKTOP ONLY. On mobile the document keeps scrolling natively: `body { overflow:
+ * hidden }` there would break the browser's URL-bar auto-hide and iOS momentum scroll,
+ * and the trade buys nothing — there is no header under 768px to make full-width.
+ */
+.app-scroll {
+  display: contents;
+}
+
+@media (min-width: 768px) {
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .nav {
+    flex: 0 0 auto;
+  }
+  .app-scroll {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    /* The gutter that keeps the centred column still — on the inner box now, where it
+       costs nothing, instead of on the viewport where it cost the full-width header. */
+    scrollbar-gutter: stable;
+  }
+}
 
 /* Every number in this app is a tabular figure. */
 .mono {
@@ -112,42 +180,40 @@ body {
   border-bottom: 1px solid var(--line);
 }
 /*
- * Bleed the header background past `.nav`'s own box, HORIZONTALLY ONLY.
+ * The header band, painted across the FULL window — scrollbar gutter included — while the
+ * layout underneath never moves. Getting both at once is the whole point of this rule.
  *
- * Why the bleed exists: `scrollbar-gutter: stable` (below) reserves scrollbar-width space
- * at the true right edge of the viewport. `.nav`'s box stops short of that reserved
- * sliver — it's sized to `body`'s gutter-reduced width — so on a page with no actual
- * scrollbar thumb the sliver shows `--paper` (off-white) instead of the nav's white, and
- * the header visibly doesn't reach the edge. Widening the box itself is not an option:
- * `.nav-inner`'s centering has to keep lining up with `.page` beneath it.
+ * The tension: `scrollbar-gutter: stable` (above) reserves the scrollbar's ~15px on every
+ * page so the centred column can't jump sideways by half of it when you move between a
+ * short page and a tall one. But that reservation is exactly what stops the header
+ * reaching the edge — `.nav` is sized to `body`, which is gutter-reduced, so on a page
+ * with no scrollbar thumb the strip showed `--paper` and the header visibly stopped
+ * short. Widening `.nav` itself is not an option: `.nav-inner`'s centring has to keep
+ * lining up with `.page` beneath it.
  *
- * This WAS `box-shadow: 0 0 0 100vmax var(--header-bg)`, and that shadow is why every
- * desktop page rendered BLANK below the header. A spread shadow grows in all four
- * directions, so a 100vmax spread painted an opaque white slab ~1400px DOWN the page as
- * well as sideways — and since `.nav` is `z-index: 100` while page content is the default
- * z-index, the slab painted on top of everything. The content was always in the DOM and
- * still hit-tested (shadows don't capture pointer events), which is exactly what made it
- * look like a rendering bug rather than a paint-order one. Mobile was unaffected only
- * because `.nav` is `display: none` under 768px.
+ * `position: fixed` + `width: 100vw` resolves it. `vw` units INCLUDE the scrollbar's
+ * width (that is the one place the unit's usual footgun is the feature), and a fixed box
+ * is laid out against the viewport rather than the gutter-reduced scrollport, so this
+ * strip is the one thing on the page that can legitimately cover the gutter. `.nav` is
+ * `top: 0` sticky, so the fixed strip and the sticky bar sit at the same y at every
+ * scroll position.
  *
- * A pseudo-element can only bleed on the axis you give it, so the failure mode can't
- * recur: `top/bottom: 0` pins it to the header's own band, `left/right` do the bleeding,
- * and `z-index: -1` keeps it behind the nav's own content (it stays inside `.nav`'s
- * stacking context, so it can't slip behind the page). The horizontal overhang is clipped
- * by html's `overflow-x: clip`, same as before.
+ * Two things were tried first and are recorded so they don't get retried:
+ *   - `box-shadow: 0 0 0 100vmax` on `.nav`. A spread grows on ALL FOUR sides, so it
+ *     painted an opaque slab ~1400px DOWN the page; with `.nav` at `z-index: 100` that
+ *     covered every desktop route. Content stayed in the DOM and still hit-tested
+ *     (shadows take no pointer events), which is what made it read as a rendering bug
+ *     rather than a paint-order one.
+ *   - A `background-image` gradient on `html`, betting the canvas would paint into the
+ *     reserved gutter. It computes correctly and does nothing: Chrome does not paint the
+ *     propagated canvas image into the `scrollbar-gutter` strip. Verified by sampling the
+ *     pixel — still `--paper`.
+ *
+ * HEIGHT IS BOUNDED to the header's own band, unlike the shadow: it can never cover page
+ * content no matter how the stacking context changes.
  */
-.nav::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -100vmax;
-  right: -100vmax;
-  background: var(--header-bg);
-  border-bottom: inherit;
-  z-index: -1;
-  pointer-events: none;
-}
+/* No bleed pseudo-element any more: with the scrollbar on `.app-scroll` instead of the
+   viewport, `.nav` is a full-window-width flex row and reaches both edges by itself. */
 /* Brand, links and gear span the SAME content column as the page body, so the header's
    left and right edges line up with the content beneath it. `.nav-inner` and `.page`
    share --content-max and --page-pad, which is what makes the two edges agree; the links
@@ -3691,6 +3757,7 @@ table.sheet.lu-table .lu-pos {
   /* Keeps the scrollbar off the cards rather than over their bottom border. */
   padding-bottom: 0.35rem;
 }
+/* A link, not a card: picking one shows that game below. */
 .rc-game {
   flex: 0 0 11rem;
   scroll-snap-align: start;
@@ -3699,11 +3766,28 @@ table.sheet.lu-table .lu-pos {
   background: var(--card);
   padding: 0.4rem 0.55rem;
   min-width: 0;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
 }
-/* Your own game, so it is findable without reading all five. */
-.rc-game-you {
+.rc-game:hover { border-color: var(--line-strong); }
+.rc-game:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+/*
+ * Two DIFFERENT things, which used to be one: `-you` is your own game (findable without
+ * reading all five, even while you're looking at someone else's), `-on` is the game
+ * currently showing below. They coincide on arrival and diverge the moment you pick
+ * another card, so selection is the louder of the two — a filled bar down the edge —
+ * and yours stays a quiet tinted background.
+ */
+.rc-game-you { background: var(--row-highlight); }
+.rc-game-on {
   border-color: var(--cobalt);
-  background: var(--row-highlight);
+  box-shadow: inset 3px 0 0 var(--cobalt);
 }
 .rc-row {
   display: flex;

@@ -33,7 +33,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Suspense>
           <Nav seasonOver={seasonOver} />
         </Suspense>
-        <main className="page">{children}</main>
+        {/*
+          The DESKTOP scroll container. The header sits outside it, so it spans the whole
+          window while this box owns the scrollbar — see `.app-scroll` in globals.css for
+          why the scrolling had to move off the viewport to get a full-width header and a
+          layout that never shifts at the same time. On mobile this is `display: contents`
+          and the document scrolls natively, as before.
+        */}
+        <div className="app-scroll">
+          <main className="page">{children}</main>
+        </div>
       </body>
     </html>
   );

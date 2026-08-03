@@ -125,7 +125,11 @@ STATUS_DISPLAY = {
 NBA_TEAM_MAP = {
     "ATL": "atl", "BOS": "bos", "BKN": "bkn", "CHA": "cha", "CHI": "chi",
     "CLE": "cle", "DAL": "dal", "DEN": "den", "DET": "det", "GSW": "gs",
-    "HOU": "hou", "IND": "ind", "LAC": "lac", "LAL": "la", "MEM": "mem",
+    # LAL is "lal", NOT "la" - the short form 400s, which silently emptied every Lakers
+    # player's opponent list (_team_schedule_labels swallows a non-200 and returns {}).
+    # Every slug in this map was verified against the schedule endpoint; the other odd
+    # ones ("gs", "no", "ny", "sa", "pho", "wsh", "utah") are all genuinely correct.
+    "HOU": "hou", "IND": "ind", "LAC": "lac", "LAL": "lal", "MEM": "mem",
     "MIA": "mia", "MIL": "mil", "MIN": "min", "NOP": "no", "NYK": "ny",
     "OKC": "okc", "ORL": "orl", "PHI": "phi", "PHX": "pho", "POR": "por",
     "SAC": "sac", "SAS": "sa", "TOR": "tor", "UTA": "utah", "WAS": "wsh"

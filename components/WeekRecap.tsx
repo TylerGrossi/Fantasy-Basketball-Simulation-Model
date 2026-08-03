@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { AcquisitionLine, CategorySheet, PlayerBoxTable, tally } from "./BoxScoreSheet";
 import { periodLabel, type LeagueData } from "@/lib/league";
 import type { BoxScores } from "@/lib/loadLeague";
@@ -26,11 +27,23 @@ export function buildWeekRecap({
   league,
   period,
   teamId,
+  myTeamId,
   box,
 }: {
   league: LeagueData;
   period: number;
+  /**
+   * Whose game to show. Defaults to your own team upstream, but the strip's links can
+   * point it at ANY team in the period — the panels are built from that team's side, so
+   * "mine"/"opp" mean the selected game's two teams, not necessarily you.
+   */
   teamId: number;
+  /**
+   * YOUR team, which is not necessarily the one being shown. Only used to keep your own
+   * game marked in the strip while you're looking at somebody else's — otherwise it
+   * becomes one anonymous card among five.
+   */
+  myTeamId: number;
   /** Per-player lines, or null when the export predates them. */
   box: BoxScores | null;
 }): { oppId: number; matchup: ReactNode; mine: ReactNode; opp: ReactNode } | null {
@@ -61,14 +74,28 @@ export function buildWeekRecap({
 
   const matchup = (
     <>
-      {/* Every matchup in the league that week — the strip ESPN puts above the box score,
-          so a week reads as a league event rather than just your own game. */}
+      {/*
+        Every matchup in the league that week — the strip ESPN puts above the box score,
+        so a week reads as a league event rather than just your own game.
+
+        Each card SELECTS its game: the whole page below re-renders for whichever one is
+        showing. Links carrying `?game=`, not client state, so the choice survives a
+        reload and is shareable, and so the panels stay server-rendered — the alternative
+        was shipping every game's box tables to the browser to switch between them.
+      */}
       <div className="rc-strip">
         {result.games.map((g) => {
           const home = tally(league, g.home, g.away);
-          const yours = g.homeId === teamId || g.awayId === teamId;
+          const shown = g.homeId === teamId || g.awayId === teamId;
+          const yours = g.homeId === myTeamId || g.awayId === myTeamId;
           return (
-            <div className={`rc-game ${yours ? "rc-game-you" : ""}`} key={g.homeId}>
+            <Link
+              href={`/scoreboard?period=${period}&game=${g.homeId}`}
+              scroll={false}
+              aria-current={shown ? "true" : undefined}
+              className={`rc-game ${shown ? "rc-game-on" : ""} ${yours ? "rc-game-you" : ""}`}
+              key={g.homeId}
+            >
               <RcSide
                 name={name(g.homeId)}
                 score={`${home.win}-${home.loss}-${home.tie}`}
@@ -79,7 +106,7 @@ export function buildWeekRecap({
                 score={`${home.loss}-${home.win}-${home.tie}`}
                 won={home.loss > home.win}
               />
-            </div>
+            </Link>
           );
         })}
       </div>
