@@ -53,6 +53,65 @@ export function headshotUrl(playerId: number | null | undefined): string | null 
     : null;
 }
 
+/** One starting slot's result: your player there, and how they rank against the
+ *  league's other starters in that same slot. */
+export interface StarterRank {
+  /** "PG" / "SG" / "G" / "SF" / "PF" / "F" / "C" / "Util1" / "Util2" / "Util3". */
+  slot: string;
+  player: PoolPlayer | null;
+  /** 1 = best in the league at this slot. Null when the slot is empty for this team. */
+  rank: number | null;
+  /** How many players this rank is out of — the league's team count for a single-count
+   *  slot, or teamCount * 3 for the pooled UTIL group. */
+  poolSize: number;
+}
+
+/** Single-count starting slots, backcourt -> frontcourt, matching ESPN's own ordering
+ *  for this widget (PG, SG, G, SF, PF, F, C — flex slots sit next to their pair). */
+const SINGLE_SLOTS = ["PG", "SG", "G", "SF", "PF", "F", "C"];
+
+/**
+ * ESPN's "Starter Rankings" widget: for each of your starting slots, where your player
+ * ranks against the league's other players in that same slot, by 9-cat value.
+ *
+ * UTIL gets different treatment than the others. A single-count slot (PG, ...) has
+ * exactly one player per team, so "rank against the league" is unambiguous. UTIL has
+ * THREE per team with no inherent order — ESPN doesn't call one of them "the starting
+ * UTIL" — so every team's three UTIL players are pooled into one group of
+ * `teamCount * 3`, and your three are ranked within that pool, best-to-worst labeled
+ * Util1/Util2/Util3.
+ */
+export function starterRankings(pool: PoolPlayer[], teamName: string): StarterRank[] {
+  const out: StarterRank[] = [];
+
+  for (const slot of SINGLE_SLOTS) {
+    const ranked = pool.filter((p) => p.lineupSlot === slot).sort((a, b) => b.value - a.value);
+    const idx = ranked.findIndex((p) => p.owner === teamName);
+    out.push({
+      slot,
+      player: idx >= 0 ? ranked[idx] : null,
+      rank: idx >= 0 ? idx + 1 : null,
+      poolSize: ranked.length,
+    });
+  }
+
+  const utilRanked = pool.filter((p) => p.lineupSlot === "UTIL").sort((a, b) => b.value - a.value);
+  const myUtils = utilRanked.filter((p) => p.owner === teamName);
+  for (let i = 0; i < 3; i++) {
+    const p = myUtils[i] ?? null;
+    out.push({
+      slot: `Util${i + 1}`,
+      player: p,
+      // Reference equality, not name: two same-named players can't collide, and this
+      // avoids a second pass matching on identity into the same sorted array.
+      rank: p ? utilRanked.indexOf(p) + 1 : null,
+      poolSize: utilRanked.length,
+    });
+  }
+
+  return out;
+}
+
 /** Steals + blocks, the pairing the player cards show as one figure. */
 export function stocks(p: PoolPlayer): number {
   return (p.STL ?? 0) + (p.BLK ?? 0);

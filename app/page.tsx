@@ -153,6 +153,8 @@ const DIRECTORY: Array<{
       { href: "/league-stats", name: "League Stats", desc: "Every team's totals and where each of them ranks." },
       // Sits with the other league-wide numbers, matching its move out of Tools in the nav.
       { href: "/rankings", name: "Power Rankings", desc: "All-play strength, form and weekly movement." },
+      { href: "/league-rosters", name: "Rosters", desc: "Every team's roster, slot, acquisition and value." },
+      { href: "/recent-moves", name: "Recent Moves", desc: "Every add, drop, waiver claim and trade, newest first." },
       { href: "/schedule", name: "Schedule", desc: "Week-by-week results, opponents and margins." },
     ],
   },
@@ -260,6 +262,15 @@ export default async function Page() {
       {/* ---------------- mobile: the launcher ---------------- */}
       <div className="home-mobile">
         <div className="home-hero">
+          {/* The app tile. Mobile has no header, so this is the only place the brand mark
+              appears in the phone UI — everywhere else it is the home-screen icon. */}
+          <img
+            src="/logo-tile.png"
+            alt=""
+            className="home-logo"
+            width={384}
+            height={384}
+          />
           <div className="home-eyebrow">
             {leagueName} &middot; {status}
           </div>

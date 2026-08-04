@@ -1,0 +1,226 @@
+import type { LeagueData, PoolPlayer, Team } from "@/lib/league";
+import { headshotUrl, playerStatus } from "@/lib/playerPool";
+import PlayerLink from "./PlayerLink";
+
+/**
+ * Every team's roster, one card per team, laid out the way ESPN's league-wide roster page
+ * is: SLOT / PLAYER / ACQ, one row per roster SPOT — so an unfilled IR shows as "Empty"
+ * rather than silently shortening the card. The extra column is VALUE, this app's 9-cat
+ * z-score, which ESPN has no equivalent of.
+ *
+ * Two orderings, and they are deliberately different:
+ *  - CARDS are ranked by the roster's total value, best team first (the owner's call —
+ *    the page is a value board, not a standings repeat).
+ *  - ROWS inside a card follow the SLOT layout, because that is what makes the Slot
+ *    column mean anything; ranking rows by value would leave the slot labels in a
+ *    scrambled order that reads as a bug.
+ *
+ * Nothing is greyed out. Injury is carried by the badge next to the name, exactly as ESPN
+ * does it — dimming a whole row buries the value figure that the page exists to show.
+ */
+
+/** Fallback when the export predates `rosterSlots`. This league's actual shape. */
+const DEFAULT_SLOTS = [
+  "PG", "SG", "SF", "PF", "C", "G", "F",
+  "UTIL", "UTIL", "UTIL",
+  "Bench", "Bench", "Bench",
+  "IR", "IR", "IR",
+];
+
+/** Base positions only, backcourt -> frontcourt — ESPN's "PG, SG" subline. */
+const POSITION_ORDER = ["PG", "SG", "SF", "PF", "C"];
+
+function positions(p: PoolPlayer): string {
+  const raw = p.eligibleSlots?.length ? p.eligibleSlots : p.position ? [p.position] : [];
+  const clean = Array.from(
+    new Set(raw.map((s) => s.trim().toUpperCase()).filter((s) => POSITION_ORDER.includes(s)))
+  );
+  clean.sort((a, b) => POSITION_ORDER.indexOf(a) - POSITION_ORDER.indexOf(b));
+  return clean.join(", ");
+}
+
+export default function LeagueRostersView({ league }: { league: LeagueData }) {
+  const pool = league.seasonData?.playerPool ?? [];
+  const standings = league.seasonData?.standings ?? [];
+  const recordByTeam = new Map(standings.map((s) => [s.teamId, s]));
+  const layout = league.rosterSlots?.length ? league.rosterSlots : DEFAULT_SLOTS;
+
+  const byOwner = new Map<string, PoolPlayer[]>();
+  for (const p of pool) {
+    if (!p.owner) continue;
+    const list = byOwner.get(p.owner) ?? [];
+    list.push(p);
+    byOwner.set(p.owner, list);
+  }
+
+  const cards = league.teams
+    .map((team) => {
+      const players = byOwner.get(team.name) ?? [];
+      return {
+        team,
+        players,
+        total: players.reduce((a, p) => a + (p.value ?? 0), 0),
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  return (
+    <div className="lr-cols">
+      {cards.map(({ team, players, total }) => (
+        <RosterCard
+          key={team.id}
+          team={team}
+          players={players}
+          total={total}
+          layout={layout}
+          record={recordByTeam.get(team.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Fill the slot layout from the roster.
+ *
+ * Each player goes in the slot ESPN itself reports for them (`lineupSlot`), best-valued
+ * first within a label — with three UTIL and three Bench spots, the order inside a label
+ * is otherwise arbitrary.
+ *
+ * A label can OVERFLOW its layout count: two teams in this league carry a fourth bench
+ * player. The extra row is emitted alongside the other Bench rows rather than tacked onto
+ * the end of the card, so the slot column stays in blocks — a lone "Bench" row printed
+ * below the IR rows reads as a rendering bug. Labels the layout doesn't mention at all
+ * (older export, unused slot) still go last, because there is nowhere else for them; a
+ * board that silently drops a player would be worse than one with a trailing row.
+ */
+function fillSlots(players: PoolPlayer[], layout: string[]) {
+  const pending = new Map<string, PoolPlayer[]>();
+  for (const p of [...players].sort((a, b) => (b.value ?? 0) - (a.value ?? 0))) {
+    const key = p.lineupSlot || "";
+    const list = pending.get(key) ?? [];
+    list.push(p);
+    pending.set(key, list);
+  }
+
+  const counts = new Map<string, number>();
+  for (const slot of layout) counts.set(slot, (counts.get(slot) ?? 0) + 1);
+
+  const rows: Array<{ slot: string; player?: PoolPlayer }> = [];
+  const seen = new Set<string>();
+  for (const slot of layout) {
+    if (seen.has(slot)) continue;
+    seen.add(slot);
+    const held = pending.get(slot) ?? [];
+    // Every spot the layout defines, plus any extra the roster actually holds.
+    const n = Math.max(counts.get(slot) ?? 0, held.length);
+    for (let i = 0; i < n; i++) rows.push({ slot, player: held[i] });
+    pending.delete(slot);
+  }
+
+  const leftover: Array<{ slot: string; player: PoolPlayer }> = [];
+  for (const [slot, list] of pending) {
+    for (const player of list) leftover.push({ slot: slot || "—", player });
+  }
+  leftover.sort((a, b) => (b.player.value ?? 0) - (a.player.value ?? 0));
+
+  return [...rows, ...leftover];
+}
+
+function RosterCard({
+  team,
+  players,
+  total,
+  layout,
+  record,
+}: {
+  team: Team;
+  players: PoolPlayer[];
+  total: number;
+  layout: string[];
+  record?: { wins: number; losses: number; ties: number };
+}) {
+  const wins = record?.wins ?? team.wins;
+  const losses = record?.losses ?? team.losses;
+  const ties = record?.ties ?? team.ties;
+  const rows = fillSlots(players, layout);
+
+  return (
+    <section className="lr-card">
+      <header className="lr-card-h">
+        <h2 className="lr-team">{team.name}</h2>
+        <span className="lr-record mono">
+          ({wins}-{losses}
+          {ties ? `-${ties}` : ""})
+        </span>
+        <span className="lr-total mono">
+          {total >= 0 ? "+" : ""}
+          {total.toFixed(1)}
+        </span>
+      </header>
+      <div className="table-scroll">
+        <table className="sheet lr-table">
+          <thead>
+            <tr>
+              <th className="lr-slot-h">Slot</th>
+              <th>Player</th>
+              <th className="lr-acq-h">Acq</th>
+              <th className="num">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ slot, player }, i) => (
+              <tr key={player ? player.name : `${slot}-${i}`}>
+                <td className="lr-slot-tag">{slot}</td>
+                <td>
+                  {player ? (
+                    <span className="lr-player">
+                      <Shot id={player.playerId} />
+                      <span className="lr-player-t">
+                        <span className="lr-player-n">
+                          <PlayerLink name={player.name} className="lr-link" />
+                          <Badge status={player.status} />
+                        </span>
+                        <span className="lr-player-sub">
+                          {player.nbaTeam}
+                          {positions(player) && ` ${positions(player)}`}
+                        </span>
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="lr-player">
+                      <span className="lr-shot lr-shot-blank" />
+                      <span className="lr-empty">Empty</span>
+                    </span>
+                  )}
+                </td>
+                <td className="lr-acq">{player?.acquisitionType || ""}</td>
+                <td className="num">
+                  {player
+                    ? `${(player.value ?? 0) >= 0 ? "+" : ""}${(player.value ?? 0).toFixed(1)}`
+                    : ""}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function Shot({ id }: { id: number | null }) {
+  const url = headshotUrl(id);
+  return url ? (
+    <span className="lr-shot" style={{ backgroundImage: `url('${url}')` }} />
+  ) : (
+    <span className="lr-shot lr-shot-blank" />
+  );
+}
+
+/** ESPN's small red mark next to an unavailable player. Never dims the row. */
+function Badge({ status }: { status: string }) {
+  const [code, sev] = playerStatus(status);
+  if (!code) return null;
+  return <span className={`pv-badge ${sev}`}>{code}</span>;
+}

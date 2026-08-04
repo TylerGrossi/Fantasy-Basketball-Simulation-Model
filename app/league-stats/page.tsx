@@ -55,6 +55,10 @@ export default async function Page() {
 
   // ESPN's "Moves" is the season acquisition count — how hard a manager worked the wire.
   const hasMoves = standings.some((t) => t.acquisitions != null);
+  // The fuller "Transaction Counter" widget ESPN also shows: acquisitions/drops/trades
+  // plus the two roster-management counts (`moveToActive`/`moveToIR`) that Moves above
+  // doesn't carry — needs the same optional-field check, for the same reason.
+  const hasTxnCounter = standings.some((t) => t.moveToActive != null);
 
   // Every data column is right-aligned monospace, records included — they are figures
   // too, and having two of the seven left-aligned made the row read as three ragged
@@ -127,6 +131,33 @@ export default async function Page() {
     return { id: t.teamId, highlight: t.teamId === me.id, cells };
   });
 
+  // ESPN's own "Transaction Counter" widget: LOSS is that team's standings loss column,
+  // repeated here rather than derived from a different source, so it matches Full League
+  // Standings above exactly.
+  const txnCols: SortCol[] = [
+    { key: "team", label: "Team Name" },
+    { key: "loss", label: "Loss", num: true },
+    { key: "trade", label: "Trade", num: true },
+    { key: "acq", label: "Acq", num: true },
+    { key: "drop", label: "Drop", num: true },
+    { key: "activate", label: "Activate", num: true },
+    { key: "ir", label: "IR", num: true },
+  ];
+
+  const txnRows: SortRow[] = standings.map((t) => ({
+    id: t.teamId,
+    highlight: t.teamId === me.id,
+    cells: {
+      team: { sort: t.teamName, text: t.teamName },
+      loss: { sort: t.losses, text: String(t.losses) },
+      trade: { sort: t.trades ?? 0, text: String(t.trades ?? 0) },
+      acq: { sort: t.acquisitions ?? 0, text: String(t.acquisitions ?? 0) },
+      drop: { sort: t.drops ?? 0, text: String(t.drops ?? 0) },
+      activate: { sort: t.moveToActive ?? 0, text: String(t.moveToActive ?? 0) },
+      ir: { sort: t.moveToIR ?? 0, text: String(t.moveToIR ?? 0) },
+    },
+  }));
+
   return (
     <>
       <h1>League Stats</h1>
@@ -141,6 +172,18 @@ export default async function Page() {
 
       <h2>Season Category Totals</h2>
       <SortableTable cols={catCols} rows={catRows} defaultKey="PTS" />
+
+      {hasTxnCounter && (
+        <>
+          <h2>Transaction Counter</h2>
+          <SortableTable
+            cols={txnCols}
+            rows={txnRows}
+            defaultKey="team"
+            defaultDesc={false}
+          />
+        </>
+      )}
     </>
   );
 }

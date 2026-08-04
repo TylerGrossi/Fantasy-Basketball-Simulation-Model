@@ -58,6 +58,40 @@ OUT_DIR = ROOT / "public" / "data"
 STATS = list(config.CATEGORY_VARIANCE.keys())
 VARIANCE = [float(config.CATEGORY_VARIANCE[s]) for s in STATS]
 
+# espn-api's short slot names -> the labels the board prints, which are ESPN's own UI
+# wording. Anything not listed (PG, SG, ... IR) already matches and passes through.
+SLOT_ALIASES = {"UT": "UTIL", "BE": "Bench"}
+
+# ESPN's raw `acquisitionType` values, as the League Rosters view labels them.
+#
+# "ADD" is the one that matters and the one that is easy to miss: it - not "FREEAGENCY" -
+# is what this league actually returns for a wire pickup (45 of 142 rostered players),
+# and ESPN's own roster page prints those as "Free Agency". The rest are here because
+# other leagues/seasons do return them.
+ACQUISITION_LABELS = {
+    "DRAFT": "Draft",
+    "ADD": "Free Agency",
+    "FREEAGENT": "Free Agency",
+    "FREEAGENCY": "Free Agency",
+    "WAIVER": "Waivers",
+    "TRADE": "Trade",
+}
+
+
+def acquisition_label(raw):
+    """
+    A display label for ESPN's `acquisitionType`.
+
+    An UNRECOGNISED but non-empty code is title-cased rather than blanked, so a value
+    ESPN adds later shows up as itself instead of silently vanishing from the column -
+    which is exactly how "ADD" went missing on the first pass. Genuinely absent (a free
+    agent, never acquired) stays "".
+    """
+    code = str(raw or "").strip().upper()
+    if not code:
+        return ""
+    return ACQUISITION_LABELS.get(code, code.replace("_", " ").title())
+
 
 def espn_stat_ids():
     """
@@ -290,6 +324,11 @@ def build_player_pool(app):
             "owner": p.get("Owner", ""),
             "status": p.get("Status", ""),
             "playerId": int(p["PlayerId"]) if p.get("PlayerId") == p.get("PlayerId") and p.get("PlayerId") is not None else None,
+            # Blank for a free agent, who was never on a roster to have either.
+            "lineupSlot": SLOT_ALIASES.get(
+                p.get("LineupSlot", "") or "", p.get("LineupSlot", "") or ""
+            ),
+            "acquisitionType": acquisition_label(p.get("AcquisitionType", "")),
             "value": _round(p.get("Value", 0), 3),
             "recent": _round(p.get("Recent", 0), 3),
             "trend": _round(p.get("Trend", 0), 3),
@@ -459,6 +498,156 @@ def fetch_acquisition_totals(league):
         print(f"  ! acquisition limit setting failed: {exc}")
 
     return totals, limit_per_day
+
+
+def fetch_recent_activity(league):
+    """
+    League-wide add/drop/trade feed, newest first — ESPN's "Recent Activity".
+
+    Tried espn-api's own `recent_activity()` first (the natural fit: one
+    `kona_league_communication` request, pre-grouped into (team, action, player) tuples).
+    It 404s for this league with "This Communication Group does not exist" — an
+    ESPN-side thing (that message board/topics group appears to not exist for this
+    league/season), not something this app controls, so this falls back to the
+    transaction log instead: `mTransactions2`, which ESPN scopes PER SCORING PERIOD (no
+    "give me the whole season" call, unlike `mTeam`), so it's one request per day of the
+    season. That's ~167 pooled calls here — a few seconds through `data.HTTP`'s shared
+    session (see the pooling note above `fetch_acquisition_totals`), not the dozens of
+    seconds a per-call `requests.get` used to cost.
+
+    Reads the raw JSON via `league.espn_request.league_get` rather than
+    `league.transactions()`/`Transaction`: that wrapper's `.date` only reads
+    `processDate`, which is blank on most FREEAGENT rows even though the transaction
+    plainly happened — `proposedDate` (read here) is populated on every row tested.
+
+    Only `EXECUTED` rows count as a move that happened — pending waiver claims and
+    trade proposals/vetoes aren't.
+
+    `types` deliberately includes `ROSTER`: a standalone drop (cutting a player with no
+    matching add) files under `ROSTER`, not `FREEAGENT`/`WAIVER` — leaving it out
+    silently dropped every add-only-no-corresponding-drop-shown gap in the feed (found
+    by spot-checking one player's full-season history against this export and finding
+    two adds with no drop between them). `FUTURE_ROSTER` is excluded on purpose: every
+    item under it is a lineup-slot move (`LINEUP`), never an add/drop, and at ~1,800
+    rows for this league alone it would dwarf the real moves. The item-type allowlist
+    below is the actual belt-and-suspenders check — it skips any `LINEUP` item even if
+    it turns up under a type this function didn't expect to carry one.
+    """
+    types = ["FREEAGENT", "WAIVER", "TRADE_ACCEPT", "TRADE_UPHOLD", "ROSTER", "DRAFT"]
+    filters = {"transactions": {"filterType": {"value": types}}}
+    headers = {"x-fantasy-filter": json.dumps(filters)}
+
+    rows = []
+    for period in range(league.firstScoringPeriod, league.finalScoringPeriod + 1):
+        try:
+            data = league.espn_request.league_get(
+                params={"view": "mTransactions2", "scoringPeriodId": period},
+                headers=headers,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! transactions period {period} failed: {exc}")
+            continue
+        for tx in data.get("transactions", []):
+            if tx.get("status") != "EXECUTED":
+                continue
+            ttype = tx.get("type", "")
+            try:
+                team_name = league.get_team_data(tx.get("teamId")).team_name
+            except Exception:  # noqa: BLE001
+                team_name = "—"
+            when = tx.get("proposedDate")
+            when_iso = (
+                datetime.fromtimestamp(when / 1000, tz=ZoneInfo("America/New_York")).isoformat()
+                if when else ""
+            )
+            for item in tx.get("items", []):
+                itype = item.get("type", "")
+                if itype not in ("ADD", "DROP", "DRAFT"):
+                    continue  # LINEUP etc. — a roster-slot move, not an add/drop
+                player = league.player_map.get(item.get("playerId"), "")
+                if not player:
+                    continue
+                if itype == "DRAFT":
+                    label = "Draft"
+                elif ttype.startswith("TRADE"):
+                    label = "Trade"
+                elif itype == "DROP":
+                    label = "Drop"
+                elif ttype == "WAIVER":
+                    label = "Waiver Add"
+                else:
+                    label = "Add"
+                rows.append({
+                    "date": when_iso,
+                    "team": team_name,
+                    "action": label,
+                    "player": player,
+                    "position": "",
+                })
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    return rows
+
+
+# ESPN's lineupSlotId -> the label the League Rosters board prints, in BOARD ORDER.
+# Ordered because the board renders slots in this sequence (ESPN's own), so the mapping
+# and the ordering are one thing that cannot drift apart. Ids absent here (the
+# combination slots this league doesn't use, 7-10) carry a count of 0 anyway.
+SLOT_LABELS = [
+    (0, "PG"), (1, "SG"), (2, "SF"), (3, "PF"), (4, "C"),
+    (5, "G"), (6, "F"), (11, "UTIL"), (12, "Bench"), (13, "IR"),
+]
+
+
+def fetch_roster_slots(league):
+    """
+    The league's starting-lineup shape as a flat, ordered list of slot labels -
+    `["PG", "SG", ..., "UTIL", "UTIL", "UTIL", "Bench", ...]`, one entry per roster spot.
+
+    Read from `rosterSettings.lineupSlotCounts` rather than hardcoded: the League Rosters
+    board draws an "Empty" row for every unfilled spot the way ESPN does, and it can only
+    know a spot is empty by knowing how many there are meant to be. Returns `[]` on
+    failure, which the page treats as "just list the players" rather than inventing slots.
+    """
+    try:
+        raw = league.espn_request.league_get(params={"view": "mSettings"})
+        counts = ((raw.get("settings") or {}).get("rosterSettings") or {}).get(
+            "lineupSlotCounts"
+        ) or {}
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! roster slot settings failed: {exc}")
+        return []
+    out = []
+    for slot_id, label in SLOT_LABELS:
+        out.extend([label] * int(counts.get(str(slot_id), 0) or 0))
+    return out
+
+
+def fetch_transaction_counters(league):
+    """
+    Per-team `moveToActive`/`moveToIR` counts from the same raw `mTeam` payload
+    `fetch_acquisition_totals` reads - roster-management moves (activating a bench spot,
+    stashing someone on IR) that `espn_api`'s `Team` object doesn't surface, unlike
+    `acquisitions`/`drops`/`trades`, which it does. This is ESPN's own "Transaction
+    Counter" widget (Team / Loss / Trade / Acq / Drop / Activate / IR); `Loss` there is
+    just the standings loss column repeated, so it isn't duplicated here.
+
+    Returns `{team_id: {"moveToActive": int, "moveToIR": int}}`, empty on failure - the
+    page then falls back to 0, same as an export built before this was added.
+    """
+    out = {}
+    try:
+        raw = league.espn_request.league_get(params={"view": "mTeam"})
+        for tm in raw.get("teams", []):
+            tid = tm.get("id")
+            tc = tm.get("transactionCounter") or {}
+            if tid is not None:
+                out[int(tid)] = {
+                    "moveToActive": int(tc.get("moveToActive", 0) or 0),
+                    "moveToIR": int(tc.get("moveToIR", 0) or 0),
+                }
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! transaction counters failed: {exc}")
+    return out
 
 
 def acquisition_summary(team_id, app_period, window, totals, limit_per_day, regular_season_weeks):
@@ -720,11 +909,13 @@ def build_season(league, injury_data, sims=8000):
         # Roster churn, straight off the Team object. "Moves" in ESPN's standings is the
         # acquisition count — how many players a manager added all season, which is the
         # difference between a set-and-forget roster and one that was worked every week.
+        counters = fetch_transaction_counters(league)
         moves_by_id = {
             int(t.team_id): {
                 "acquisitions": int(getattr(t, "acquisitions", 0) or 0),
                 "drops": int(getattr(t, "drops", 0) or 0),
                 "trades": int(getattr(t, "trades", 0) or 0),
+                **counters.get(int(t.team_id), {}),
             }
             for t in league.teams
         }
@@ -741,6 +932,8 @@ def build_season(league, injury_data, sims=8000):
             **moves_by_id.get(int(t["team_id"]), {}),
             "catTotals": {k: _round(v, 4) for k, v in (t.get("cat_totals") or {}).items()},
         } for t in stats]
+
+    out["recentMoves"] = step("recent moves", lambda: fetch_recent_activity(league)) or []
 
     pr = step("power rankings", lambda: app.get_power_rankings(lid, yr, s2, swid))
     if pr:
@@ -922,6 +1115,8 @@ def main():
         "categories": list(config.CATEGORIES),   # the 15 SCORED categories
         "variance": [_round(v, 4) for v in VARIANCE],
         "lowerIsBetter": ["TO"],
+        # The roster's slot shape, so the League Rosters board can draw empty spots.
+        "rosterSlots": fetch_roster_slots(league),
         "teams": teams,
         "matchups": matchups,
         "freeAgents": free_agents,

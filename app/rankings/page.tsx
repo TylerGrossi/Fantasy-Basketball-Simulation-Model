@@ -1,11 +1,14 @@
 import RankTrendChart from "@/components/RankTrendChart";
+import StarterRankingsView from "@/components/StarterRankingsView";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { starterRankings } from "@/lib/playerPool";
 
 /** Power rankings by all-play %, plus how each rank moved week to week. */
 export default async function Page() {
   const league = await loadLeague();
   const me = await myTeam(league);
   const pr = league.seasonData?.powerRankings;
+  const pool = league.seasonData?.playerPool ?? [];
 
   if (!pr?.teams.length) {
     return (
@@ -67,6 +70,10 @@ export default async function Page() {
 
       <h2>Rank movement</h2>
       <RankTrendChart weeks={pr.weeks} teams={pr.teams} yourTeamId={me.id} />
+
+      {pool.length > 0 && (
+        <StarterRankingsView team={me.name} ranks={starterRankings(pool, me.name)} />
+      )}
     </>
   );
 }

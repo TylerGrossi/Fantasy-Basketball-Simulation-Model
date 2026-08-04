@@ -60,6 +60,8 @@ export const FLAT_NAV: NavEntry[] = [
       { label: "Season Stats", href: "/season-stats" },
       { label: "League Stats", href: "/league-stats" },
       { label: "Power Rankings", href: "/rankings" },
+      { label: "Rosters", href: "/league-rosters" },
+      { label: "Recent Moves", href: "/recent-moves" },
     ],
   },
   {
@@ -97,6 +99,8 @@ export const SEASON_PAGES = [
   { label: "League Stats", href: "/league-stats" },
   // Follows the desktop move of Power Rankings out of Tools and into the stats group.
   { label: "Rankings", href: "/rankings" },
+  { label: "Rosters", href: "/league-rosters" },
+  { label: "Recent Moves", href: "/recent-moves" },
   { label: "Schedule", href: "/schedule" },
 ];
 

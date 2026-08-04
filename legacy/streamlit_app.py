@@ -1093,12 +1093,16 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     owner = {}
     status = {}  # player -> raw ESPN injuryStatus (for the availability badge / filter)
     pid = {}     # player -> ESPN playerId (for the headshot image on the mobile card)
+    slot = {}    # player -> current lineup slot (PG/SG/.../Bench/IR), for the League Rosters view
+    acq = {}     # player -> raw ESPN acquisitionType (DRAFT/FREEAGENCY/TRADE/WAIVER), same view
     season_frames, last30_frames, last15_frames = [], [], []
     for t in league.teams:
         for p in t.roster:
             owner[p.name] = t.team_name
             status[p.name] = getattr(p, "injuryStatus", "") or ""
             pid[p.name] = getattr(p, "playerId", None)
+            slot[p.name] = getattr(p, "lineupSlot", "") or ""
+            acq[p.name] = getattr(p, "acquisitionType", "") or ""
         season_frames.append(build_stat_df(t.roster, f"{year}_total", "Season", t.team_name, year))
         last30_frames.append(build_stat_df(t.roster, f"{year}_last_30", "Last30", t.team_name, year))
         last15_frames.append(build_stat_df(t.roster, f"{year}_last_15", "Last15", t.team_name, year))
@@ -1175,8 +1179,13 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     season_df["Status"] = season_df["Status"].apply(
         lambda s: ",".join(str(x) for x in s) if isinstance(s, (list, tuple)) else str(s or ""))
     season_df["PlayerId"] = season_df["Player"].map(pid)
+    # Free agents were never on a roster, so `slot`/`acq` have no entry for them - leave
+    # blank rather than guessing, same treatment as `owner.setdefault(nm, "FA")` above.
+    season_df["LineupSlot"] = season_df["Player"].map(slot).fillna("")
+    season_df["AcquisitionType"] = season_df["Player"].map(acq).fillna("")
 
-    keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId", "Value",
+    keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId",
+             "LineupSlot", "AcquisitionType", "Value",
              "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD", "GP"] + _AGG_KEYS
             + [c for c in season_df.columns
                if c.startswith("L30_") or c.startswith("L15_")])

@@ -252,16 +252,50 @@ body {
 }
 .nav-links::-webkit-scrollbar { display: none; }
 
+/* The brand lockup: ball, then "FBBSim" with the tagline stacked beneath it. Assembled
+   here rather than baked into one image so the tagline can be TEXT — see Nav.tsx. */
 .nav-brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: var(--ink);
+  gap: 0.5rem;
   text-decoration: none;
-  white-space: nowrap;
   flex: 0 0 auto;
+}
+/* Both marks are sized by HEIGHT with width:auto, so each keeps its own aspect ratio and
+   only its height has to be chosen. */
+.nav-mark {
+  display: block;
+  height: 38px;
+  width: auto;
+}
+.nav-brand-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  /* The wordmark PNG is cropped tight to its glyphs, so this gap is the whole optical
+     space between the two lines — there is no leading built into the image to absorb it. */
+  gap: 6px;
+  min-width: 0;
+}
+.nav-word {
+  display: block;
+  height: 18px;
+  width: auto;
+}
+/* Tracked-out caps, the way the artwork sets it. `line-height: 1` because the stack's
+   `gap` is doing the spacing — leading on top of it would push the tagline off-centre
+   against the ball. */
+.nav-tagline {
+  /* 9px. Small on purpose — it is a descriptor, not a second wordmark, and at anything
+     larger it out-measures "FBBSim" above it and stops reading as subordinate to it.
+     The tracking is what keeps it legible at this size, so don't trade it away. */
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .nav-link {
@@ -1779,6 +1813,16 @@ table.sheet.ss-standings td {
 
 /* -------- home hero: centred, matching the Streamlit landing page -------- */
 .home-hero { text-align: center; padding: 2.6rem 1rem 1.4rem; }
+/* The mobile hero's app tile. `alt=""` in the markup — the title right underneath already
+   names the app, so announcing it twice would just be noise to a screen reader. */
+.home-logo {
+  display: block;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 0.85rem;
+  border-radius: 17px;
+  box-shadow: 0 2px 10px rgba(27, 29, 34, 0.09);
+}
 .home-eyebrow {
   font-size: 0.72rem;
   letter-spacing: 0.16em;
@@ -4572,4 +4616,264 @@ table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
   outline: 2px solid var(--cobalt);
   outline-offset: 2px;
   border-radius: 3px;
+}
+
+/* -------- League Rosters (app/league-rosters) --------
+   One card per team. Two-up on desktop so a card is never squeezed narrower than the
+   Slot/Player/Acq/Value row needs — the rest of the league is a scroll away, not a
+   third column of half-width cards. */
+.lr-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+  margin-top: 0.9rem;
+}
+.lr-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+  min-width: 0;
+}
+.lr-card-h {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.lr-team {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lr-record {
+  color: var(--ink-2);
+  font-size: 0.82rem;
+  flex: 0 0 auto;
+}
+/* Pushed to the far edge so it reads as the card's headline figure, the way the Team /
+   Record / Value row in the screenshot the owner sent lines up. */
+.lr-total {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+/* The card is ALREADY a bordered, rounded, clipped box, so the generic `.table-scroll`
+   chrome has to be switched off inside it — otherwise it draws a second bordered box
+   within the first, and its 10px radius carves the corner away to reveal the card
+   underneath as a pale notch, with the card header's bottom border and the scroller's top
+   border stacking into a double rule. Strip it back to a plain scroll container and let
+   the card supply the frame. */
+.lr-card .table-scroll {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* The table itself, ESPN's roster grid: a tinted header strip, a tinted Slot rail down
+   the left, and a headshot + two-line player cell. Rows are taller than this app's
+   default sheet row because the headshot sets the floor. */
+table.sheet.lr-table { table-layout: fixed; }
+table.sheet.lr-table thead th {
+  background: var(--surface-2);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0.45rem 0.7rem;
+}
+table.sheet.lr-table td {
+  padding: 0.34rem 0.7rem;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line-2);
+}
+table.sheet.lr-table tbody tr:last-child td { border-bottom: 0; }
+.lr-slot-h { width: 4.2rem; }
+.lr-acq-h { width: 6.6rem; }
+table.sheet.lr-table th.num { width: 4rem; }
+/* The slot rail: chrome, not data — tinted the whole way down the way ESPN prints it.
+   A STEP LIGHTER than the header strip above it (paper, not surface-2). Both were
+   surface-2, which fused the rail and the header into one grey L wrapping the table's top
+   corner and reading as a block of colour rather than as two different kinds of chrome.
+   Three tones now, darkest to lightest: header, rail, rows. */
+.lr-slot-tag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  background: var(--paper);
+  border-right: 1px solid var(--line-2);
+  white-space: nowrap;
+}
+.lr-slot-h { border-right: 1px solid var(--line-2); }
+.lr-acq { font-size: 0.74rem; color: var(--ink-2); white-space: nowrap; }
+
+.lr-player { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.lr-shot {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center top;
+  background-color: var(--surface-2);
+  border: 1px solid var(--line);
+}
+/* A missing headshot keeps the circle so the name column never loses its left edge. */
+.lr-shot-blank { background-image: none; }
+.lr-player-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.lr-player-n { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+/* Named like ESPN's: the player IS the link here, so unlike the dense stat tables it
+   declares itself in cobalt at rest rather than only on hover. */
+.lr-link {
+  color: var(--cobalt);
+  font-size: 0.8rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lr-player-sub {
+  font-size: 0.66rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lr-empty { font-size: 0.8rem; color: var(--ink-3); }
+
+@media (max-width: 900px) {
+  .lr-cols { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+}
+
+/* Recent Moves — ESPN's Recent Activity feed. */
+.rm-badge {
+  display: inline-block;
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  padding: 0.14rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.rm-badge.add { background: rgba(46, 125, 70, 0.14); color: var(--good); }
+.rm-badge.drop { background: rgba(192, 57, 43, 0.14); color: var(--bad); }
+.rm-badge.trade { background: rgba(47, 111, 237, 0.14); color: var(--cobalt); }
+.rm-badge.moved { background: var(--surface-2); color: var(--ink-2); }
+.rm-badge.draft { background: var(--surface-2); color: var(--ink-3); }
+table.sheet.rm-table td { vertical-align: middle; }
+.rm-date {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.rm-team { color: var(--ink-2); }
+
+/* Recent Moves filter bar. Deliberately NOT `.pv-filters` — that class forces the
+   multi-select panel to the trigger's own width ("reads as that control opening"),
+   which is right for Player Value's short position/team codes but clips a full team
+   name like "Brendon's Best Team" mid-word. Left at the default `.ms-panel` sizing
+   (shrink-to-fit up to 320px) so team/move-type options show in full. Team/Move
+   type/Date hold a fixed width; Player is the only one with `flex-grow`, so it
+   absorbs whatever's left of the row — which both stretches the bar to the table's
+   full width (the other three have nothing to grow into on their own) and makes the
+   search box itself longer, which is what it's for. */
+.rm-filters { align-items: flex-end; gap: 0.8rem; }
+.rm-filters .field { min-width: 0; width: 100%; }
+.rm-f-player { flex: 1 1 320px; min-width: 0; }
+.rm-f-team { flex: 0 0 220px; min-width: 0; }
+.rm-f-action { flex: 0 0 200px; min-width: 0; }
+.rm-f-date { flex: 0 0 170px; min-width: 0; }
+
+@media (max-width: 900px) {
+  .rm-f-player { flex: 1 1 200px; }
+  .rm-f-team,
+  .rm-f-action,
+  .rm-f-date { flex: 1 1 180px; }
+}
+
+/* Starter Rankings (Power Rankings page) — ESPN's per-slot bar chart. Bars are bottom-
+   aligned within a fixed-height track (same idea as .wk-bar/.wk-fill on Schedule, just
+   vertical): height is a percentage of the track, so rank #1 in a 10-team league fills
+   it and rank #10 is a sliver. */
+.sr-card {
+  margin: 1.4rem 0;
+  padding: 1.1rem 1.2rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.sr-title { font-size: 1.02rem; margin: 0 0 0.9rem; }
+.sr-shots { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+.sr-shot-col { flex: 1 1 0; display: flex; justify-content: center; min-width: 0; }
+.sr-shot {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center top;
+  background-color: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.sr-shot-blank { background-image: none; }
+
+.sr-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  height: 11rem;
+  border-bottom: 2px solid var(--ink);
+}
+.sr-bar-col {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+.sr-bar-track { width: 100%; height: 100%; display: flex; align-items: flex-end; }
+.sr-bar-fill {
+  width: 100%;
+  min-height: 1.4rem;
+  background: var(--ink-2);
+  border-radius: 6px 6px 0 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 0.3rem;
+}
+.sr-bar-fill.sr-bar-empty { background: var(--surface-2); }
+.sr-bar-rank {
+  color: var(--paper);
+  font-weight: 700;
+  font-size: 0.74rem;
+  font-family: var(--mono);
+}
+.sr-bar-empty .sr-bar-rank { color: var(--ink-3); }
+.sr-bar-label {
+  margin-top: 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--ink-2);
+  text-align: center;
+}
+.sr-insight { margin: 0.8rem 0 0; }
+
+@media (max-width: 700px) {
+  .sr-shot { width: 30px; height: 30px; border-radius: 6px; }
+  .sr-bars { height: 8rem; }
+  .sr-bar-label { font-size: 0.6rem; }
 }

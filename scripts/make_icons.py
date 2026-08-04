@@ -1,100 +1,217 @@
 """
-Generate the home-screen / PWA icons (basketball mark) for the Next.js app.
+Cut the app's brand assets out of the master logo artwork.
 
-    pip install pillow
+    pip install pillow numpy
     python scripts/make_icons.py     # run from the repo root
 
+Source: assets/logo-source.png — the FBBSim artwork, one image holding BOTH lockups side
+by side (horizontal lockup on the left, rounded app tile on the right). It is the master;
+everything below is derived from it, so a new logo means replacing that one file and
+re-running this. Nothing here is hand-drawn any more — the previous version of this script
+redrew a basketball from app/icon.svg's coordinates, and that mark no longer exists.
+
 Writes:
-    app/apple-icon.png    180x180  -> Next emits <link rel="apple-touch-icon">
-    public/icon-192.png   192x192  -> manifest (Android home screen)
-    public/icon-512.png   512x512  -> manifest (splash / high-DPI)
+    public/logo-mark.png     the ball, TRANSPARENT   -> header
+    public/logo-word.png     "FBBSim", TRANSPARENT   -> header
+    public/logo-tile.png     384x384  -> the app tile, for the mobile home hero
+    public/og.png            1200x630 -> link preview when the site is shared
+    app/icon.png             256x256  -> browser tab / favicon (94% ball, vs 78% below)
+    app/apple-icon.png       180x180  -> <link rel="apple-touch-icon">
+    public/icon-192.png      192x192  -> manifest (Android home screen)
+    public/icon-512.png      512x512  -> manifest (splash / high-DPI)
 
-Why redraw at each size instead of upscaling the legacy 180px PNG: the seams are thin
-strokes, so a 512 blown up from 180 goes soft.
+TWO deliberate departures from the source artwork:
 
-This is a direct port of app/icon.svg's own coordinates (viewBox 0 0 100 100, circle at
-50,50 r=45, stroke-width 4) scaled to each target size, so every PNG is pixel-proportional
-to the SVG rather than an independent redraw — same circle-to-canvas ratio, same stroke
-ratio, same four seams. Opaque background (no alpha), since iOS applies a squircle
-mask/crop to home-screen icons and a transparent corner would show through as a hole.
+1. The header's THREE parts ship separately — ball, wordmark, and (in Nav.tsx) the tagline
+   as live text — rather than as one flattened lockup. The artwork sets the tagline at 22px
+   against a 366px lockup, i.e. 6% of its height; scaled to fit a header that is 62px tall
+   the tagline lands around 2px and reads as a grey smudge. Setting it as text decouples
+   its size from the mark's, so it can be legible without the ball having to grow to
+   billboard size. See components/Nav.tsx for the layout that reassembles them.
+
+2. The icons are built from the BALL ALONE, re-centred on an opaque square, rather than by
+   cropping the right-hand tile. Two reasons: the tile carries a drop shadow that would
+   bake a grey edge into the icon, and iOS/Android apply their OWN rounded mask — feeding
+   them an already-rounded tile double-rounds it and leaves pale corners inside the mask.
+   The ball is scaled to the same 78% of the canvas the artwork's tile uses, so the result
+   is the right-hand logo, just with the platform supplying the rounding.
+
+Opaque white background on the icons, for the same reason as before: iOS masks home-screen
+icons and a transparent corner shows through as a hole.
 """
+
 import os
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SOURCE = os.path.join(ROOT, "assets", "logo-source.png")
 
-# app/icon.svg's own geometry, viewBox 0 0 100 100 — keep these two files in sync by eye.
-CX = CY = 50
-R = 45
-STROKE = 4
-ORANGE = (224, 106, 59)   # #E06A3B, matches icon.svg's fill
-INK = (27, 29, 34)        # #1B1D22, matches icon.svg's stroke
+# The artwork's flat background. Measured, not assumed — it is 254, not pure white, which
+# matters because the alpha extraction below solves against it.
+BG = np.array([254.0, 254.0, 254.0])
+
+# Regions of assets/logo-source.png, as (left, top, right, bottom) in its own pixels.
+# Measured from the file; re-measure if the artwork is ever replaced.
+BALL = (37, 238, 402, 604)        # left lockup's ball mark, 365x366
+WORDMARK = (449, 344, 1026, 470)  # "FBBSim" only — the tagline sits below, at y 503..524
+LOCKUP = (37, 238, 1026, 604)     # the WHOLE left logo, tagline included, 989x366
+
+# The ball occupies this fraction of the app tile's width in the source artwork.
+BALL_ON_TILE = 0.78
+
 WHITE = (255, 255, 255)
 
-TARGETS = [
-    (os.path.join(ROOT, "app", "apple-icon.png"), 180),
-    (os.path.join(ROOT, "public", "icon-192.png"), 192),
-    (os.path.join(ROOT, "public", "icon-512.png"), 512),
+ICON_TARGETS = [
+    # (path, size, how much of the canvas the ball fills)
+    #
+    # All of these are the artwork's own mark on white. They differ only in how much of the
+    # canvas the ball takes.
+    #
+    # The FAVICON is the odd one out at 94%. It is looked at 16-32px across in a browser
+    # tab, and at that size the generous padding that makes a home-screen icon look composed
+    # is just thrown-away pixels. The home-screen icons keep the artwork's own 78%, because
+    # those ARE seen large, where the padding reads as composition and the white tile is the
+    # artwork's right-hand logo.
+    (os.path.join(ROOT, "app", "icon.png"), 256, 0.94),
+    (os.path.join(ROOT, "app", "apple-icon.png"), 180, BALL_ON_TILE),
+    (os.path.join(ROOT, "public", "icon-192.png"), 192, BALL_ON_TILE),
+    (os.path.join(ROOT, "public", "icon-512.png"), 512, BALL_ON_TILE),
 ]
 
 
-def quad_bezier(p0, pc, p1, n=32):
-    """Sample a quadratic bezier as a polyline — PIL has no curve primitive."""
-    pts = []
-    for i in range(n + 1):
-        t = i / n
-        x = (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * pc[0] + t ** 2 * p1[0]
-        y = (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * pc[1] + t ** 2 * p1[1]
-        pts.append((x, y))
-    return pts
+def to_alpha(rgb: Image.Image) -> Image.Image:
+    """
+    Lift the flat background out of a crop, turning it into real transparency.
+
+    Solves the compositing equation the artwork was flattened with. Every pixel is
+    `P = a*F + (1-a)*BG` for some foreground colour F and coverage a; taking the channel
+    that moved FURTHEST from the background recovers a, and F follows by unpremultiplying.
+    A plain "make near-white transparent" threshold instead leaves a hard, aliased edge on
+    every curve in the mark — this keeps the artwork's own anti-aliasing intact.
+
+    The mid-greys in the bar chart come back as partially transparent dark pixels rather
+    than opaque grey. Over a light background — which is the only kind this app has — they
+    composite back to exactly the original colour.
+    """
+    arr = np.asarray(rgb).astype(np.float64)
+    alpha = ((BG - arr) / BG).max(axis=2).clip(0.0, 1.0)
+    safe = np.where(alpha[..., None] > 0, alpha[..., None], 1.0)
+    fg = ((arr - (1.0 - alpha[..., None]) * BG) / safe).clip(0, 255)
+    out = np.dstack([fg, alpha * 255.0]).round().astype(np.uint8)
+    return Image.fromarray(out, mode="RGBA")
 
 
-def draw(size: int) -> Image.Image:
-    # Supersample: draw at 4x then downscale, so thin curved strokes anti-alias cleanly
-    # instead of looking chunky/jagged at native size.
-    ss = 4
-    scale = size * ss / 100
-    img = Image.new("RGB", (size * ss, size * ss), WHITE)
-    d = ImageDraw.Draw(img)
+def build_icon(src: Image.Image, size: int, frac: float) -> Image.Image:
+    """The ball on an opaque white square, filling `frac` of the canvas."""
+    ball = to_alpha(src.crop(BALL))
+    # Supersample the resize so the thin seams stay smooth at 180px and below.
+    target = max(1, round(size * frac))
+    scale = target / max(ball.width, ball.height)
+    ball = ball.resize(
+        (max(1, round(ball.width * scale)), max(1, round(ball.height * scale))),
+        Image.LANCZOS,
+    )
 
-    def p(x, y):
-        return (x * scale, y * scale)
+    canvas = Image.new("RGBA", (size, size), WHITE + (255,))
+    canvas.alpha_composite(ball, ((size - ball.width) // 2, (size - ball.height) // 2))
+    return canvas.convert("RGB")
 
-    r = R * scale
-    line_w = max(1, round(STROKE * scale))
 
-    cx, cy = p(CX, CY)
-    # SVG centers `stroke` on the path, so icon.svg's ring actually spans r - 2 to r + 2.
-    # PIL's ellipse outline instead grows INWARD from the given bounding box (the box IS
-    # the stroke's outer edge), so passing bbox radius r alone draws a ring that stops at
-    # r rather than reaching past it — and the curved seams, whose endpoints sit just
-    # outside r in icon.svg (still inside ITS centered ring), then poke past our ring
-    # into the white background. Padding the bbox out by half the stroke width recentres
-    # it the same way SVG does.
-    outer = r + line_w / 2
-    d.ellipse((cx - outer, cy - outer, cx + outer, cy + outer), fill=ORANGE, outline=INK, width=line_w)
+# An inverted favicon - the mark knocked out on a solid orange chip - was tried here and
+# reverted on the owner's call. It read better at 16px against every tab-bar colour, but
+# the white tile is the brand, and matching the rest of the icon set won. If small-size
+# visibility comes up again, that is the lever: a filled field, not more scaling.
 
-    # Straight pole-to-pole and equator seams: app/icon.svg's
-    # `M50 5 Q50 50 50 95` / `M5 50 Q50 50 95 50` (both quadratic Beziers that collapse
-    # to straight lines because the control point sits on the line between endpoints).
-    d.line((*p(50, 5), *p(50, 95)), fill=INK, width=line_w)
-    d.line((*p(5, 50), *p(95, 50)), fill=INK, width=line_w)
 
-    # The two shallow seams above and below the equator: `M15 20 Q50 35 85 20` /
-    # `M15 80 Q50 65 85 80`.
-    top = quad_bezier(p(15, 20), p(50, 35), p(85, 20))
-    bottom = quad_bezier(p(15, 80), p(50, 65), p(85, 80))
-    d.line(top, fill=INK, width=line_w, joint="curve")
-    d.line(bottom, fill=INK, width=line_w, joint="curve")
+def build_og(src: Image.Image) -> Image.Image:
+    """
+    The link-preview card: the full lockup, centred on white, at 1200x630.
 
-    return img.resize((size, size), Image.LANCZOS)
+    1200x630 is the size every platform crops toward (Facebook/LinkedIn/Slack want ~1.91:1,
+    Twitter's summary_large_image the same), so one image covers all of them.
+
+    This is the ONE place the artwork's own tagline is used as artwork rather than being
+    reset as text: a share card is 1200px wide, so the tagline lands around 26px tall and
+    the resolution is there for it. The header has to re-set it only because 62px of
+    header cannot give it more than about 2px.
+
+    Deliberately just the logo, generously sized and centred. Every platform draws the
+    title and description as text of its own directly beneath this image, so repeating
+    them inside it produces a card that says everything twice.
+    """
+    card = Image.new("RGB", (1200, 630), WHITE)
+    lockup = to_alpha(src.crop(LOCKUP))
+    width = round(1200 * 0.66)
+    scale = width / lockup.width
+    lockup = lockup.resize((width, round(lockup.height * scale)), Image.LANCZOS)
+    card.paste(
+        lockup,
+        ((1200 - lockup.width) // 2, (630 - lockup.height) // 2),
+        lockup,
+    )
+    return card
+
+
+def build_tile(src: Image.Image, size: int) -> Image.Image:
+    """
+    The right-hand app tile for use INSIDE a page: white rounded square, ball centred,
+    transparent outside the corners.
+
+    Drawn rather than cropped, because the tile in the artwork is a near-white shape on a
+    near-white background — `to_alpha` would dissolve the tile along with the background,
+    since it cannot tell them apart. The corner radius matches the artwork's (~22%).
+
+    Distinct from the ICON outputs above, which are square and hard-cornered on purpose:
+    those get their rounding from iOS/Android. This one has to supply its own, because
+    nothing masks an <img> sitting on a page.
+    """
+    ss = 4  # supersample, so the corner curve doesn't stair-step
+    big = size * ss
+    tile = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    ImageDraw.Draw(tile).rounded_rectangle(
+        (0, 0, big - 1, big - 1), radius=round(big * 0.22), fill=WHITE + (255,)
+    )
+
+    ball = to_alpha(src.crop(BALL))
+    target = max(1, round(big * BALL_ON_TILE))
+    scale = target / max(ball.width, ball.height)
+    ball = ball.resize(
+        (max(1, round(ball.width * scale)), max(1, round(ball.height * scale))),
+        Image.LANCZOS,
+    )
+    tile.alpha_composite(ball, ((big - ball.width) // 2, (big - ball.height) // 2))
+    return tile.resize((size, size), Image.LANCZOS)
 
 
 def main():
-    for path, size in TARGETS:
-        draw(size).save(path, format="PNG")
-        print(f"wrote {os.path.relpath(path, ROOT)} ({size}x{size})")
+    if not os.path.exists(SOURCE):
+        raise SystemExit(f"missing {os.path.relpath(SOURCE, ROOT)} — the master artwork")
+    src = Image.open(SOURCE).convert("RGB")
+
+    # The header's two pieces, exported separately so the tagline can be laid out as real
+    # text BETWEEN them — see components/Nav.tsx for why it isn't baked into the artwork.
+    for region, name in ((BALL, "logo-mark.png"), (WORDMARK, "logo-word.png")):
+        piece = to_alpha(src.crop(region))
+        path = os.path.join(ROOT, "public", name)
+        piece.save(path, format="PNG", optimize=True)
+        print(
+            f"wrote {os.path.relpath(path, ROOT)} "
+            f"({piece.width}x{piece.height}, transparent)"
+        )
+
+    tile_path = os.path.join(ROOT, "public", "logo-tile.png")
+    build_tile(src, 384).save(tile_path, format="PNG", optimize=True)
+    print(f"wrote {os.path.relpath(tile_path, ROOT)} (384x384, rounded, transparent)")
+
+    og_path = os.path.join(ROOT, "public", "og.png")
+    build_og(src).save(og_path, format="PNG", optimize=True)
+    print(f"wrote {os.path.relpath(og_path, ROOT)} (1200x630, link preview)")
+
+    for path, size, frac in ICON_TARGETS:
+        build_icon(src, size, frac).save(path, format="PNG", optimize=True)
+        print(f"wrote {os.path.relpath(path, ROOT)} ({size}x{size}, ball {frac:.0%})")
 
 
 if __name__ == "__main__":

@@ -18,4 +18,10 @@ scripts/*.py
 scripts/__pycache__/
 Old Models/
 *.pyc
+
+# The master logo artwork (assets/logo-source.png, ~880 KB). It is the INPUT to
+# scripts/make_icons.py, which runs on your machine; the served assets it produces live in
+# public/ and app/ and are committed. Nothing at build or request time reads the master, so
+# it would just be dead weight in the upload.
+assets/
 __pycache__/

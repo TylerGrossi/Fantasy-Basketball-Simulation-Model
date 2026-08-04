@@ -13,17 +13,32 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "FBB Sim",
-    short_name: "FBB Sim",
+    name: "FBBSim",
+    short_name: "FBBSim",
     description:
       "Monte Carlo simulation and live category win probability for an ESPN fantasy basketball league.",
     start_url: "/",
     display: "standalone",
     background_color: "#F4F3EF",
     theme_color: "#F4F3EF",
+    /*
+     * Declared BOTH ways from the same files.
+     *
+     * "any" is the plain icon. "maskable" tells Android it may crop these to whatever
+     * adaptive shape the launcher uses (circle, squircle, teardrop) instead of shrinking
+     * the icon and dropping it inside a white blob of its own — which is what a manifest
+     * with no maskable entry gets you.
+     *
+     * The same PNGs can serve both because the mark already sits inside the maskable safe
+     * zone: the ball is 78% of the canvas (scripts/make_icons.py), and the spec's safe
+     * area is the middle 80%. Keep that number at or under 80% or the crop will start
+     * clipping the ball.
+     */
     icons: [
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-      { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }

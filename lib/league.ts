@@ -106,6 +106,13 @@ export interface StandingRow {
   acquisitions?: number;
   drops?: number;
   trades?: number;
+  /**
+   * Roster-management moves ESPN counts separately from acquisitions: activating a
+   * bench spot, stashing someone on IR. Optional for the same reason as the three
+   * above - absent on an export built before they were added.
+   */
+  moveToActive?: number;
+  moveToIR?: number;
   catTotals: Record<string, number>;
 }
 
@@ -164,6 +171,13 @@ export interface PoolPlayer {
   owner: string;
   status: string;
   playerId: number | null;
+  /**
+   * Current starting-lineup slot ("PG", "Bench", "IR", ...) and how the player was
+   * added to their roster ("Draft", "Free Agency", "Waiver", "Trade"). Both are "" for a
+   * free agent (never rostered) and for exports built before these fields were added.
+   */
+  lineupSlot?: string;
+  acquisitionType?: string;
   /** 9-cat value: standard deviations above/below a replacement-level player. */
   value: number;
   recent: number;
@@ -205,6 +219,18 @@ export interface TeamSeasonStats {
   players: SeasonPlayerLine[];
 }
 
+export interface RecentMoveRow {
+  /** ISO timestamp. */
+  date: string;
+  team: string;
+  /** "Add" / "Waiver Add" / "Drop" / "Trade" / "Moved", or a title-cased fallback for an
+   *  ESPN action type not in the known set. */
+  action: string;
+  player: string;
+  /** Roster slot the player was moved into/out of, when ESPN reports one. */
+  position: string;
+}
+
 export interface SeasonData {
   playerPool?: PoolPlayer[];
   /** Keyed by team id (string, since JSON keys are strings). */
@@ -215,6 +241,8 @@ export interface SeasonData {
   schedules?: Record<string, ScheduleRow[]>;
   playoffOdds?: PlayoffOddsRow[];
   championshipFinalists?: number[];
+  /** League-wide add/drop/trade feed, newest first. */
+  recentMoves?: RecentMoveRow[];
 }
 
 export interface LeagueData extends LeagueMeta {
@@ -229,6 +257,13 @@ export interface LeagueData extends LeagueMeta {
   regularSeasonWeeks?: number;
   /** How many playoff rounds follow them. Optional — older exports predate it. */
   playoffRounds?: number;
+  /**
+   * The roster's slot shape, one entry per spot and in board order:
+   * `["PG", "SG", ..., "UTIL", "UTIL", "UTIL", "Bench", ...]`. Read by the League
+   * Rosters board so it can draw an empty row for an unfilled spot. Optional — older
+   * exports predate it, and the board then just lists the players it has.
+   */
+  rosterSlots?: string[];
   /** Per-stat variance factor. The one source for turning averages into moments. */
   variance: number[];
   statIds: Record<string, number>;
