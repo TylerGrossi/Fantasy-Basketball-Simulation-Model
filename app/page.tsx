@@ -31,9 +31,13 @@ import {
 /**
  * The mobile tile grid — nine tiles, and the grid is 3-up, so each ROW is a group:
  *
- *   1. where things stand     Season Summary · Current Matchup · Schedule
- *   2. the numbers            Season Stats · League Stats · Power Rankings
+ *   1. where things stand     Current Matchup · Schedule · Season Stats
+ *   2. the numbers            League Stats · Power Rankings · Player Card
  *   3. things you act with    Player Value · Trade Simulator · Settings
+ *
+ * Season Summary is NOT here: it's in HIDDEN_ON_MOBILE (lib/nav.ts) because its champion
+ * card + KPI row + wide standings table don't sit well on a phone. Player Card took the
+ * freed slot to keep the grid at a full 3×3.
  *
  * Playoff Odds is deliberately NOT here. It is a forecast with nothing left to forecast
  * (the same reason IN_SEASON_ONLY drops it from the nav), and a launcher tile is exactly
@@ -47,12 +51,12 @@ import {
  * extra and puts it one tap from Home like everything else here.
  */
 const TILES = [
-  { href: "/season", label: "Season Summary", Icon: TrophyIcon },
   { href: "/scoreboard", label: "Current Matchup", Icon: ChartIcon },
   { href: "/schedule", label: "Schedule", Icon: CalendarIcon },
   { href: "/season-stats", label: "Season Stats", Icon: ClipboardDataIcon },
   { href: "/league-stats", label: "League Stats", Icon: TableIcon },
   { href: "/rankings", label: "Power Rankings", Icon: GraphUpIcon },
+  { href: "/player", label: "Player Card", Icon: TrophyIcon },
   { href: "/player-value", label: "Player Value", Icon: PersonBadgeIcon },
   { href: "/trade", label: "Trade Simulator", Icon: ShuffleIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },
@@ -147,18 +151,23 @@ const DIRECTORY: Array<{
       { href: "/season", name: "Season Summary", desc: "Final standings, champion, all-play and schedule luck." },
       { href: "/season-stats", name: "Season Stats", desc: "Category leaders and every player's line." },
       { href: "/league-stats", name: "League Stats", desc: "Every team's totals and where each of them ranks." },
+      // Sits with the other league-wide numbers, matching its move out of Tools in the nav.
+      { href: "/rankings", name: "Power Rankings", desc: "All-play strength, form and weekly movement." },
       { href: "/schedule", name: "Schedule", desc: "Week-by-week results, opponents and margins." },
     ],
   },
   {
+    // Same order as the Tools dropdown in lib/nav.ts — the directory is meant to mirror
+    // the header, so a page is in the same place whichever one you read.
     section: "Tools",
     items: [
       { href: "/player", name: "Player Card", desc: "Profile, value, recent form, last ten games." },
       { href: "/player-value", name: "Player Value", desc: "Rostered players and free agents by 9-cat value." },
-      { href: "/compare", name: "Compare", desc: "Two players side by side, category by category." },
-      { href: "/rankings", name: "Power Rankings", desc: "All-play strength, form and weekly movement." },
-      { href: "/playoffs", name: "Playoff Odds", desc: "Championship probabilities from a simulated bracket.", inSeason: true },
       { href: "/trade", name: "Trade Simulator", desc: "What a trade does to your category strength." },
+      { href: "/compare", name: "Compare", desc: "Two players side by side, category by category." },
+      { href: "/lineup", name: "Lineup", desc: "Who to start, and what each swap costs you." },
+      { href: "/cheat-sheets", name: "Cheat Sheets", desc: "Ranked columns per position, with your roster shaded." },
+      { href: "/playoffs", name: "Playoff Odds", desc: "Championship probabilities from a simulated bracket.", inSeason: true },
       { href: "/agent", name: "Agent", desc: "Ask about the league in plain English." },
     ],
   },

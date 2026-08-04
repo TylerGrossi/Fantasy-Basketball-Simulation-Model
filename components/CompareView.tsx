@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
 import GameLog from "./GameLog";
+import PlayerSearch from "./PlayerSearch";
 import { headshotUrl, playerStatus } from "@/lib/playerPool";
+import PlayerLink from "./PlayerLink";
 
 /**
  * Head-to-head of any two players: 9-cat Value plus the season per-game line, each row a
@@ -25,7 +27,6 @@ interface Spec {
 
 export default function CompareView({ league }: { league: LeagueData }) {
   const pool = league.seasonData.playerPool ?? [];
-  const names = useMemo(() => [...pool.map((p) => p.name)].sort(), [pool]);
   // Seeded with the two most valuable players — the export is already value-sorted.
   const [a, setA] = useState(pool[0]?.name ?? "");
   const [b, setB] = useState(pool[1]?.name ?? "");
@@ -40,35 +41,13 @@ export default function CompareView({ league }: { league: LeagueData }) {
   return (
     <>
       <div className="controls pv-cmp-pickers">
-        <select
-          className="field field-select"
-          value={a}
-          onChange={(e) => setA(e.target.value)}
-          aria-label="Player A"
-          style={{ flex: "1 1 0" }}
-        >
-          {names.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+        {/* Each side excludes the other's pick, so choosing the same player twice — the
+            one state this page cannot render — is unreachable rather than an error. */}
+        <PlayerSearch pool={pool} value={a} onPick={setA} label="Player A" exclude={b} />
         <span className="caption" style={{ margin: 0 }}>
           vs
         </span>
-        <select
-          className="field field-select"
-          value={b}
-          onChange={(e) => setB(e.target.value)}
-          aria-label="Player B"
-          style={{ flex: "1 1 0" }}
-        >
-          {names.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+        <PlayerSearch pool={pool} value={b} onPick={setB} label="Player B" exclude={a} />
       </div>
 
       {a === b ? (
@@ -165,7 +144,7 @@ function CompareHeader({ p }: { p: PoolPlayer }) {
       ) : (
         <div className="pv-shot pv-shot-blank" />
       )}
-      <div className="pv-cmp-name">{p.name}</div>
+      <div className="pv-cmp-name"><PlayerLink name={p.name} /></div>
       <div className="pv-csub pv-cmp-sub">
         <span className="pv-cmeta">
           {[p.nbaTeam, p.position].filter(Boolean).join(" · ")}

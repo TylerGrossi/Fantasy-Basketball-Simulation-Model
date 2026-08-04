@@ -509,11 +509,6 @@ export default function LineupView({
             );
           })}
         </div>
-        <p className="caption">
-          Per-game totals for the ten you have starting, vs. the best legal ten your roster
-          could field by the selected value basis. Turnovers count down.
-        </p>
-
         <div className="controls lu-rail-controls">
           <button type="button" className="chip" onClick={() => setAssigned(best)}>
             Reset to best ten

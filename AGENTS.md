@@ -611,6 +611,12 @@ worth it; measure before changing.
 5. Prefer **small, surgical edits**; this is a large single-file UI. Don't refactor
    broadly without being asked.
 6. Don't touch `Old Models/`.
+7. **NEVER push to git.** Not `git push`, not a PR, not a branch — nothing that leaves
+   the machine, and no exception for "the fix is verified" or "it's needed for the
+   Vercel deploy". Pushing to `main` triggers a Vercel deploy, so a push is a DEPLOY to
+   the live site, which is the owner's call and not an agent's. Committing locally is
+   fine when asked; publishing never is. If a change only takes effect once deployed,
+   say so and stop there.
 
 ## Gotchas
 

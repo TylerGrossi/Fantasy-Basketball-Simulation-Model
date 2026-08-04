@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { BoxLine } from "@/lib/loadLeague";
+import PlayerLink from "./PlayerLink";
 
 /** Columns for a player line, in ESPN's own box-score order: opponents, then the stat group. */
 const BOX_COLS = [
@@ -150,14 +151,6 @@ export function PlayerBoxTable({
           <thead>
             <tr>
               <Th k="name" label="Starters" />
-              {/* `rc-opp`, same as the data cells below — on mobile the CSS hides both
-                  together. Hiding only the data cells left the header behind on its own,
-                  which shifted every following column one slot out of alignment with its
-                  header (MIN's numbers landing under this header's text). Not sortable:
-                  a list of opponent codes has no meaningful order. */}
-              <th className="rc-opp">
-                <span className="rc-opp-h">Games: Opponents</span>
-              </th>
               {BOX_COLS.map((c) => (
                 <Th key={c} k={c} label={c} num />
               ))}
@@ -166,8 +159,7 @@ export function PlayerBoxTable({
           <tbody>
             {played.map((l) => (
               <tr key={l.name} className={l.gp ? undefined : "row-muted"}>
-                <td className="rc-player">{l.name}</td>
-                <td className="rc-opp">{l.opp?.length ? l.opp.join(", ") : "—"}</td>
+                <td className="rc-player"><PlayerLink name={l.name} /></td>
                 {BOX_COLS.map((c) => (
                   <td className="num" key={c}>
                     {cell(l, c)}
@@ -177,7 +169,6 @@ export function PlayerBoxTable({
             ))}
             <tr className="rc-totals">
               <td>Totals</td>
-              <td className="rc-opp" />
               {BOX_COLS.map((c) => (
                 <td className="num" key={c}>
                   {cell(totals, c)}

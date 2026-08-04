@@ -1159,6 +1159,14 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
         for c in _AGG_KEYS + ["DD", "FG%", "FT%", "3P%", "GP"]:
             if c in l30.columns:
                 season_df[f"L30_{c}"] = season_df["Player"].map(l30[c])
+    # Same again for the last-15 window. `Recent15` already collapses it to one z-score;
+    # these are the raw per-game categories behind it, which is what the Player Card's
+    # averages block needs to show a 15D line rather than just a 15D number.
+    if not last15_df.empty:
+        l15 = last15_df.drop_duplicates("Player", keep="first").set_index("Player")
+        for c in _AGG_KEYS + ["DD", "FG%", "FT%", "3P%", "GP"]:
+            if c in l15.columns:
+                season_df[f"L15_{c}"] = season_df["Player"].map(l15[c])
 
     season_df["Owner"] = season_df["Player"].map(owner).fillna("FA")
     # Raw injuryStatus can be a list on some API responses - stringify so it stays cache-
@@ -1170,7 +1178,8 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
 
     keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId", "Value",
              "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD", "GP"] + _AGG_KEYS
-            + [c for c in season_df.columns if c.startswith("L30_")])
+            + [c for c in season_df.columns
+               if c.startswith("L30_") or c.startswith("L15_")])
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))
     return season_df[keep].to_dict("records")
 

@@ -7,6 +7,7 @@ import { analyzeStreamers } from "@/lib/streamers";
 import { useLiveTotals } from "@/lib/useLiveTotals";
 import { useSettings } from "@/lib/useSettings";
 import LiveBadge from "./LiveBadge";
+import PlayerLink from "./PlayerLink";
 
 interface Props {
   league: LeagueData;
@@ -122,7 +123,7 @@ export default function StreamersView({
                 {results.map((r, i) => (
                   <tr key={r.add.name}>
                     <td className="num">{i + 1}</td>
-                    <td>{r.add.name}</td>
+                    <td><PlayerLink name={r.add.name} /></td>
                     <td>{r.add.nbaTeam}</td>
                     <td className="num">{r.add.gamesLeft}</td>
                     <td

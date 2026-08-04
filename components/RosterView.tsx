@@ -1,4 +1,5 @@
 import type { LeagueData, PlayerRow, TeamSide } from "@/lib/league";
+import PlayerLink from "./PlayerLink";
 
 /**
  * Both rosters, with per-game averages and games left. Server-rendered — nothing here
@@ -49,7 +50,7 @@ export default function RosterView({
             <tbody>
               {injured.map(({ p, team }) => (
                 <tr key={`${team}-${p.name}`}>
-                  <td>{p.name}</td>
+                  <td><PlayerLink name={p.name} /></td>
                   <td>{team}</td>
                   <td>{p.status || "OUT"}</td>
                   <td className="num">{p.gamesLeft}</td>
@@ -95,7 +96,7 @@ function RosterTable({
         <tbody>
           {sorted.map((p) => (
             <tr key={p.name} className={p.injured ? "row-muted" : undefined}>
-              <td>{p.name}</td>
+              <td><PlayerLink name={p.name} /></td>
               <td>{p.nbaTeam}</td>
               <td className="num">{p.gamesLeft}</td>
               {cols.map((c) => (

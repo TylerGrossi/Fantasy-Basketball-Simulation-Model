@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { AcquisitionLine, CategorySheet, PlayerBoxTable, tally } from "./BoxScoreSheet";
-import { periodLabel, type LeagueData } from "@/lib/league";
+import { type LeagueData } from "@/lib/league";
 import type { BoxScores } from "@/lib/loadLeague";
 
 /**
@@ -67,7 +67,6 @@ export function buildWeekRecap({
 
   const score = tally(league, you, opp);
   const oppScore = { win: score.loss, loss: score.win, tie: score.tie };
-  const label = periodLabel(league, period);
 
   const linesFor = (id: number) => box?.periods[String(period)]?.[String(id)] ?? [];
   const gp = (id: number) => linesFor(id).reduce((a, l) => a + (l.gp || 0), 0);
@@ -159,8 +158,6 @@ export function buildWeekRecap({
         oppVec={opp}
       />
       </div>
-
-      <p className="caption">Final totals for {label}. A shaded cell is a category won.</p>
     </>
   );
 

@@ -28,7 +28,6 @@ import os
 import sys
 import time
 from datetime import date, datetime
-from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -314,19 +313,24 @@ def build_player_pool(app):
         if "exp" in bio:
             row["exp"] = bio["exp"]
 
-        # The last-30 line as its own per-game categories. Omitted entirely for a player
-        # with no last-30 window (didn't play): an absent key reads as "no recent
-        # sample" downstream, whereas zeros would read as "played and produced nothing"
-        # and drag the blend toward zero.
-        l30 = {}
-        for s in PLAYER_POOL_STATS:
-            v = p.get(f"L30_{s}")
-            if v is not None and v == v:  # NaN != NaN
-                l30[s] = _round(v, 2)
-        l30_gp = p.get("L30_GP")
-        if l30 and l30_gp is not None and l30_gp == l30_gp and l30_gp > 0:
-            l30["gp"] = int(_round(l30_gp, 0))
-            row["last30"] = l30
+        # The recent windows as their own per-game categories, alongside the season line.
+        # `recent`/`recent15` collapse each window to one z-score; these are the raw
+        # categories behind them — read by the draft projection (last30) and by the
+        # Player Card's Season/30D/15D averages switch (both).
+        #
+        # A window is omitted ENTIRELY for a player who has no games in it: an absent key
+        # reads as "no sample" downstream, where zeros would read as "played and produced
+        # nothing" and drag both the blend and the displayed averages toward zero.
+        for prefix, key in (("L30", "last30"), ("L15", "last15")):
+            window = {}
+            for s in PLAYER_POOL_STATS:
+                v = p.get(f"{prefix}_{s}")
+                if v is not None and v == v:  # NaN != NaN
+                    window[s] = _round(v, 2)
+            gp = p.get(f"{prefix}_GP")
+            if window and gp is not None and gp == gp and gp > 0:
+                window["gp"] = int(_round(gp, 0))
+                row[key] = window
 
         out.append(row)
     out.sort(key=lambda r: -r["value"])
@@ -364,64 +368,7 @@ def score_vs(a, b):
     return w, l, t
 
 
-@lru_cache(maxsize=64)
-def _team_schedule_labels(team_abbrev, year):
-    """
-    Game-day opponent labels for one NBA team in one season: `{date: "Tor"}` or
-    `{date: "@Wsh"}` when away. Mirrors legacy `data.get_team_schedule_game_labels`, but
-    takes an explicit `year` — the site API defaults to whatever season is CURRENT right
-    now, which in the offseason is next year's barely-populated schedule (4 preseason
-    games), not the season that was just played. Confirmed: `?season=2026` returns the
-    full 82-game 2025-26 slate; the bare endpoint returns 4.
-
-    Cached for the life of the process (`lru_cache`, not `st.cache_data` — this runs
-    outside a Streamlit runtime) and goes through `D.HTTP`, the one pooled session, never
-    a bare `requests.get` (see AGENTS.md on the SSLContext cost of skipping it).
-    """
-    team_abbrev = D.normalize_team(team_abbrev)
-    if not team_abbrev or team_abbrev not in D.NBA_TEAM_MAP:
-        return {}
-    slug = D.NBA_TEAM_MAP[team_abbrev]
-    url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{slug}/schedule"
-    try:
-        r = D.HTTP.get(url, params={"season": year}, timeout=10)
-        if r.status_code != 200:
-            return {}
-        events = r.json().get("events", [])
-    except Exception:  # noqa: BLE001
-        return {}
-
-    eastern = ZoneInfo("America/New_York")
-    labels = {}
-    for event in events:
-        try:
-            d = datetime.fromisoformat(event["date"].replace("Z", "+00:00")).astimezone(eastern).date()
-            comp = (event.get("competitions") or [{}])[0]
-            competitors = comp.get("competitors") or []
-            if len(competitors) < 2:
-                continue
-            my_side, opp_abbr = None, None
-            for c in competitors:
-                t = c.get("team") or {}
-                ab = D.normalize_team(t.get("abbreviation"))
-                if not ab:
-                    continue
-                if ab == team_abbrev:
-                    my_side = c.get("homeAway")
-                else:
-                    # Normalized, not raw: ESPN's own abbreviation for Utah ("UTAH") is
-                    # 4 letters where every other team's is 3 - printing it raw here is
-                    # what put "UTAH" instead of "UTA" next to Jokic's opponent list.
-                    opp_abbr = ab
-            if my_side is None or not opp_abbr:
-                continue
-            labels[d] = f"@{str(opp_abbr).strip()}" if my_side == "away" else str(opp_abbr).strip()
-        except Exception:  # noqa: BLE001
-            continue
-    return labels
-
-
-def player_lines(lineup, window=None, year=None):
+def player_lines(lineup):
     """
     One team's players for one matchup period, from ESPN's own box score.
 
@@ -438,12 +385,11 @@ def player_lines(lineup, window=None, year=None):
     for period 20), which means ESPN only lists players whose stats counted. There is no
     bench to separate.
 
-    `window`/`year`, when given, add `opp`: the player's NBA team's game-day opponents
-    within the period's date range ("GAMES: OPPONENTS" in ESPN's own box score) —
-    every day their team played in that window, not just days this player individually
-    logged a stat line, matching what ESPN shows.
+    NO OPPONENTS COLUMN. This used to carry `opp` — the team's game-day opponents
+    within the period ("GAMES: OPPONENTS" in ESPN's own box score). It was dropped: the
+    column read badly next to the stat line, and building it cost one schedule request
+    per NBA team per export on top of everything else.
     """
-    start, end = window if window else (None, None)
     out = []
     for bp in lineup or []:
         bd = getattr(bp, "points_breakdown", None) or {}
@@ -457,12 +403,6 @@ def player_lines(lineup, window=None, year=None):
         # ~40 bytes per player per week across 22 weeks and says nothing gp doesn't.
         if gp:
             row["v"] = [_round(bd.get(stat, 0) or 0, 2) for stat in STATS]
-        if start and end and year:
-            team = getattr(bp, "proTeam", "") or ""
-            labels = _team_schedule_labels(team, year)
-            opp = [labels[d] for d in sorted(labels) if start <= d <= end]
-            if opp:
-                row["opp"] = opp
         out.append(row)
     return out
 
@@ -568,11 +508,9 @@ def build_period_results(
     period - fetching them separately would double ~22 round trips for data we are
     already holding.
 
-    `year`/`regular_season_weeks`, when given, add two things ESPN's own box score shows
-    and this export previously didn't: each player's GAMES: OPPONENTS
-    (`player_lines`' `opp`) and each team's Matchup Acquisition Limit (`homeAcq`/
-    `awayAcq`) on the game row. Both degrade to simply absent when the inputs needed to
-    compute them aren't available - never a guess.
+    `year`/`regular_season_weeks`, when given, add each team's Matchup Acquisition Limit
+    (`homeAcq`/`awayAcq`) on the game row. It degrades to simply absent when the inputs
+    needed to compute it aren't available - never a guess.
 
     `extra_periods` covers a gap the schedule table has: a playoff ROUND logs only its
     FIRST scoring period there (20, not 21, for round 1), while `league.period` - what
@@ -642,10 +580,10 @@ def build_period_results(
             if box_out is not None:
                 teams = box_out.setdefault(str(p), {})
                 teams[str(int(home.team_id))] = player_lines(
-                    getattr(m, "home_lineup", None), window, year
+                    getattr(m, "home_lineup", None)
                 )
                 teams[str(int(away.team_id))] = player_lines(
-                    getattr(m, "away_lineup", None), window, year
+                    getattr(m, "away_lineup", None)
                 )
         if rows:
             out.append({"period": p, "games": rows})

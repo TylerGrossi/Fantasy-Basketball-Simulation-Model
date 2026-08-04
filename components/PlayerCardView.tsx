@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
 import GameLog from "./GameLog";
 import InjuryLog from "./InjuryLog";
-import { headshotUrl, playerStatus, stocks } from "@/lib/playerPool";
+import PlayerSearch from "./PlayerSearch";
+import { headshotUrl, playerStatus, VALUE_BASES, type ValueBasis } from "@/lib/playerPool";
 
 /**
  * Global player search → the full profile: bio header, the season / 30D / 15D value
@@ -32,12 +33,22 @@ interface Bio {
 
 const BIO_CACHE = new Map<number, Bio>();
 
-export default function PlayerCardView({ league }: { league: LeagueData }) {
+export default function PlayerCardView({
+  league,
+  initialName,
+}: {
+  league: LeagueData;
+  /**
+   * Who to open on, from `/player?name=…` — how every player name elsewhere in the app
+   * links here. Already validated against the pool by the server page, so an unknown
+   * name never reaches this component.
+   */
+  initialName?: string;
+}) {
   const pool = league.seasonData.playerPool ?? [];
-  const names = useMemo(() => pool.map((p) => p.name).sort(), [pool]);
   // The export is sorted by value, so the first row is the top player — the same seed
-  // the Streamlit page used.
-  const [name, setName] = useState(pool[0]?.name ?? "");
+  // the Streamlit page used, and the fallback when no player was asked for.
+  const [name, setName] = useState(initialName || pool[0]?.name || "");
   const p = pool.find((x) => x.name === name);
   const bio = usePlayerBio(p?.playerId ?? null);
 
@@ -48,19 +59,7 @@ export default function PlayerCardView({ league }: { league: LeagueData }) {
   return (
     <>
       <div className="controls pd-search">
-        <select
-          className="field field-select"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          aria-label="Search for a player"
-          style={{ minWidth: 240, flex: "1 1 auto" }}
-        >
-          {names.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+        <PlayerSearch pool={pool} value={name} onPick={setName} />
         <button
           type="button"
           className="chip"
@@ -75,6 +74,7 @@ export default function PlayerCardView({ league }: { league: LeagueData }) {
     </>
   );
 }
+
 
 /** One ESPN athlete lookup, cached per session. Absent bio simply renders nothing. */
 function usePlayerBio(playerId: number | null): Bio {
@@ -162,19 +162,47 @@ function PlayerDetail({
   ];
   const shownFacts = facts.filter(([, v]) => v);
 
+  /*
+   * Which window the averages sheet shows. Same three choices, same labels, and the same
+   * `ValueBasis` type as the Player Value page's basis menu — one vocabulary across the
+   * app rather than a second one that means almost the same thing.
+   *
+   * The value TILES above deliberately keep showing all three at once: there the point is
+   * comparing them, here the point is reading one line in detail.
+   */
+  const [basis, setBasis] = useState<ValueBasis>("Regular");
+  const window_ = basis === "30D" ? p.last30 : basis === "15D" ? p.last15 : undefined;
+  // A window is absent when the player had no games in it. Falling back to the season
+  // line (and saying so) beats printing a column of zeros, which would read as "played
+  // and produced nothing".
+  const missing = basis !== "Regular" && !window_;
+
+  const at = (k: string, seasonVal: number) =>
+    window_ ? Number(window_[k] ?? 0) : seasonVal;
+  // Percentages are RATES: recomputed from the window's own makes and attempts, never
+  // carried over from the season.
+  const rate = (made: string, att: string, seasonPct: number) => {
+    if (!window_) return seasonPct;
+    const a = Number(window_[att] ?? 0);
+    return a > 0 ? Number(window_[made] ?? 0) / a : 0;
+  };
+
   const stats: Array<[string, string]> = [
-    ["Points", p.PTS.toFixed(1)],
-    ["Field Goal %", (p.fgPct * 100).toFixed(1)],
-    ["Rebounds", p.REB.toFixed(1)],
-    ["Free Throw %", (p.ftPct * 100).toFixed(1)],
-    ["Assists", p.AST.toFixed(1)],
-    ["3-Point %", (p.tpPct * 100).toFixed(1)],
-    ["Steals", p.STL.toFixed(1)],
-    ["3-Pointers", p["3PM"].toFixed(1)],
-    ["Blocks", p.BLK.toFixed(1)],
-    ["Turnovers", p.TO.toFixed(1)],
-    ["Stocks (stl+blk)", stocks(p).toFixed(1)],
-    ["Double-Doubles", p.DD.toFixed(1)],
+    ["Points", at("PTS", p.PTS).toFixed(1)],
+    ["Field Goal %", (rate("FGM", "FGA", p.fgPct) * 100).toFixed(1)],
+    ["Rebounds", at("REB", p.REB).toFixed(1)],
+    ["Free Throw %", (rate("FTM", "FTA", p.ftPct) * 100).toFixed(1)],
+    ["Assists", at("AST", p.AST).toFixed(1)],
+    ["3-Point %", (rate("3PM", "3PA", p.tpPct) * 100).toFixed(1)],
+    ["Steals", at("STL", p.STL).toFixed(1)],
+    ["3-Pointers", at("3PM", p["3PM"]).toFixed(1)],
+    ["Blocks", at("BLK", p.BLK).toFixed(1)],
+    ["Turnovers", at("TO", p.TO).toFixed(1)],
+    [
+      "Stocks (stl+blk)",
+      (at("STL", p.STL) + at("BLK", p.BLK)).toFixed(1),
+    ],
+    ["Double-Doubles", at("DD", p.DD).toFixed(1)],
   ];
 
   return (
@@ -217,9 +245,33 @@ function PlayerDetail({
         <ValueTile label="15D" value={p.recent15} trend={p.trend15} colored />
       </div>
 
-      <div className="pd-sec">
-        Season averages <span>per game</span>
+      <div className="pd-sec pd-sec-row">
+        <span>
+          {basis === "Regular" ? "Season averages" : `Last ${basis === "30D" ? 30 : 15} days`}{" "}
+          <span>
+            per game
+            {window_?.gp ? ` · ${window_.gp} GP` : p.gp ? ` · ${p.gp} GP` : ""}
+          </span>
+        </span>
+        <span className="controls pd-basis" role="group" aria-label="Averages basis">
+          {VALUE_BASES.map((b) => (
+            <button
+              key={b}
+              type="button"
+              className={`chip${basis === b ? " chip-on" : ""}`}
+              aria-pressed={basis === b}
+              onClick={() => setBasis(b)}
+            >
+              {b === "Regular" ? "Season" : b}
+            </button>
+          ))}
+        </span>
       </div>
+      {missing && (
+        <p className="caption pd-basis-note">
+          No games in that window — showing the season line instead.
+        </p>
+      )}
       <div className="pd-stats">
         {stats.map(([label, v]) => (
           <div className="pd-stat" key={label}>

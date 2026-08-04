@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import PlayerLink from "./PlayerLink";
 
 export interface SeasonPlayer {
   name: string;
@@ -199,7 +200,7 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
           <tbody>
             {rows.map((p) => (
               <tr key={p.name}>
-                <td className="cell-name">{p.name}</td>
+                <td className="cell-name"><PlayerLink name={p.name} /></td>
                 <td className="num">{p.gp}</td>
                 {cols.map((c) => (
                   <td key={c.key} className="num">

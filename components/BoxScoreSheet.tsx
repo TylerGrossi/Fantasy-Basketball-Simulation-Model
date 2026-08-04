@@ -162,9 +162,10 @@ function CategoryRow({
 }
 
 /**
- * "Matchup Acquisition Limit (Used/Max)" — ESPN's own line for how much of the matchup's
- * add allowance each side has spent — plus GP, the team's total games played so far this
- * period (summed from the same box lines `PlayerBoxTable` renders below it). Renders
+ * ESPN's "Matchup Acquisition Limit" — how much of the matchup's add allowance each side
+ * has spent — plus GP, the team's total games played so far this period (summed from the
+ * same box lines `PlayerBoxTable` renders below it). The used/max shape is legible from
+ * the figure itself ("14/14"), so the label doesn't spell it out. Renders
  * nothing when either side's acquisition summary is missing (an old export, or a period
  * the exporter couldn't resolve a window for) rather than showing a blank or a guessed
  * number; GP renders independently since it has no such failure mode.
@@ -190,14 +191,14 @@ export function AcquisitionLine({
       <div className="acq-side">
         <span className="acq-name">{youName}</span>
         <span className="acq-label mono">
-          Acquisitions (Used/Max): {youAcq.used}/{youAcq.max}
+          Acquisitions: {youAcq.used}/{youAcq.max}
         </span>
         {youGp != null && <span className="acq-label mono">GP: {youGp}</span>}
       </div>
       <div className="acq-side acq-side-right">
         <span className="acq-name">{oppName}</span>
         <span className="acq-label mono">
-          Acquisitions (Used/Max): {oppAcq.used}/{oppAcq.max}
+          Acquisitions: {oppAcq.used}/{oppAcq.max}
         </span>
         {oppGp != null && <span className="acq-label mono">GP: {oppGp}</span>}
       </div>

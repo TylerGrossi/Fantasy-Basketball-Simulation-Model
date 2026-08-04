@@ -5,6 +5,8 @@ import type { LeagueData, PoolPlayer } from "@/lib/league";
 import GameLog from "./GameLog";
 import MultiSelect from "./MultiSelect";
 import {
+  gpFor,
+  MIN_GP_OPTIONS,
   POSITION_ORDER,
   VALUE_BASES,
   VALUE_COL,
@@ -34,6 +36,7 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
   const [owners, setOwners] = useState<string[]>([]);
   const [basis, setBasis] = useState<ValueBasis>("Regular");
   const [showInjured, setShowInjured] = useState(true);
+  const [minGp, setMinGp] = useState(10);
 
   const valueCol = VALUE_COL[basis];
   const trendCol = TREND_COL[basis];
@@ -73,10 +76,11 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
       if (nbaTeams.length && !nbaTeams.includes(p.nbaTeam)) return false;
       if (owners.length && !owners.includes(p.owner)) return false;
       if (!showInjured && playerStatus(p.status)[1] === "out") return false;
+      if (minGp > 0 && gpFor(p, basis) < minGp) return false;
       return true;
     });
     return [...out].sort((a, b) => b[valueCol] - a[valueCol]);
-  }, [pool, name, positions, nbaTeams, owners, showInjured, valueCol]);
+  }, [pool, name, positions, nbaTeams, owners, showInjured, minGp, basis, valueCol]);
 
   if (!pool.length) {
     return <p className="caption">No player pool data — run the data export.</p>;
@@ -132,6 +136,21 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
             {VALUE_BASES.map((b) => (
               <option key={b} value={b}>
                 {b}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="ms pv-f-gp">
+          <div className="ms-label">Min GP</div>
+          <select
+            className="field field-select"
+            value={minGp}
+            onChange={(e) => setMinGp(Number(e.target.value))}
+            aria-label="Minimum games played"
+          >
+            {MIN_GP_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? "Any" : n}
               </option>
             ))}
           </select>

@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
-import { allPlayCats, scorableCategories, teamAgg, type Agg } from "@/lib/playerPool";
+import { teamAgg, type Agg } from "@/lib/playerPool";
+import PlayerSearch from "./PlayerSearch";
+import PlayerLink from "./PlayerLink";
 
 /**
  * A give-and-get trade board, then buy-low / sell-high ideas.
@@ -81,26 +83,9 @@ export default function TradeView({
     [theirs]
   );
 
-  // Every OTHER team's aggregate, for the all-play category record.
-  const otherAggs = useMemo(() => {
-    const byTeam = new Map<string, PoolPlayer[]>();
-    for (const p of theirs) {
-      const list = byTeam.get(p.owner) ?? [];
-      list.push(p);
-      byTeam.set(p.owner, list);
-    }
-    return [...byTeam.values()].map((roster) => teamAgg(lineup(roster)));
-  }, [theirs]);
-
   const eliteNames = useMemo(
     () => new Set(theirs.slice(0, ELITE_COUNT).map((p) => p.name)),
     [theirs]
-  );
-
-  // The league's own scoring categories, minus any the player pool can't produce (TW).
-  const cats = useMemo(
-    () => scorableCategories(league.categories ?? []),
-    [league.categories]
   );
 
   if (!pool.length) {
@@ -125,27 +110,75 @@ export default function TradeView({
   const net = valIn - valOut;
   const active = giveP.length > 0 || getP.length > 0;
 
-  const lower = league.lowerIsBetter ?? ["TO"];
-  const [bw, bl, bt] = otherAggs.length
-    ? allPlayCats(before, otherAggs, cats, lower)
-    : [0, 0, 0];
-  const [aw, al, at] = otherAggs.length
-    ? allPlayCats(after, otherAggs, cats, lower)
-    : [0, 0, 0];
-  const catSwing = aw - bw;
+  /*
+   * A trade has ONE partner. The first player you take fixes whose team you are dealing
+   * with, and everything downstream reads this rather than the dropdown: the search only
+   * offers that roster, and the equalizer suggestions only come from it.
+   *
+   * Without this the board happily built a deal out of two different owners' players,
+   * which is not a trade anyone can actually make — it looked like a filter default
+   * ("All teams") but was really a way to produce an impossible offer.
+   */
+  const partner = getP[0]?.owner ?? "";
+  const dealTeam = partner || withTeam;
+  const theirRoster = theirs.filter((p) => !dealTeam || p.owner === dealTeam);
+
+  /*
+   * How many categories the deal improves vs hurts — the same nine rows the table shows,
+   * counted once here so the headline and the table can never disagree.
+   *
+   * "Flat" is measured at the precision DISPLAYED (one decimal), matching ShiftRow: a
+   * category that moves by 0.04 prints as "–" in the table, so counting it as a win up
+   * here would be the summary contradicting the working directly beneath it.
+   */
+  const { catUp, catDown } = useMemo(() => {
+    let up = 0;
+    let down = 0;
+    const tally = (now: number, next: number, lowerIsBetter = false) => {
+      const d = Number((next - now).toFixed(1));
+      if (d === 0) return;
+      const good = lowerIsBetter ? d < 0 : d > 0;
+      if (good) up += 1;
+      else down += 1;
+    };
+    for (const c of SHIFT_CATS) tally(before[c] ?? 0, after[c] ?? 0, c === "TO");
+    tally(ratio(before, "FGM", "FGA") * 100, ratio(after, "FGM", "FGA") * 100);
+    tally(ratio(before, "FTM", "FTA") * 100, ratio(after, "FTM", "FTA") * 100);
+    return { catUp: up, catDown: down };
+  }, [before, after]);
+
+  /** Net change in roster size — a 2-for-1 leaves a hole to fill off waivers. */
+  const rosterDelta = getP.length - giveP.length;
+
 
   const toggle = (list: string[], set: (v: string[]) => void, name: string) =>
     set(list.includes(name) ? list.filter((n) => n !== name) : [...list, name]);
 
-  const matches = (p: PoolPlayer, q: string) => {
-    const s = q.trim().toLowerCase();
-    if (!s) return true;
-    return (
-      p.name.toLowerCase().includes(s) ||
-      p.nbaTeam.toLowerCase().includes(s) ||
-      p.position.toLowerCase().includes(s)
-    );
-  };
+  /*
+   * Players who would level the deal.
+   *
+   * The gap is `net` (positive = the trade already favours you), so the balancing move is
+   * a player worth roughly that much added to the LIGHTER side — yours when you're ahead,
+   * theirs when you're behind. Ranked by how close each one gets the deal to even rather
+   * than by value: the point is to balance, so a 3.0 next to a 3.2 gap beats a 9.0.
+   *
+   * Anyone already in the deal is excluded — offering a player you have on the board is
+   * how the list starts reading as noise. When you're behind, the source is the PARTNER's
+   * roster, not every other team: suggesting a player the other manager doesn't own would
+   * propose the same impossible multi-team deal the board now prevents.
+   */
+  const equalizers = useMemo(() => {
+    const gap = Math.abs(net);
+    if (!active || gap < 0.05) return [];
+    const source = net > 0 ? mine : theirRoster;
+    const chosen = new Set([...give, ...get]);
+    return source
+      .filter((p) => !chosen.has(p.name) && p.value > 0)
+      .map((p) => ({ p, off: Math.abs(p.value - gap) }))
+      .sort((a, b) => a.off - b.off)
+      .slice(0, 5)
+      .map((x) => x.p);
+  }, [net, active, mine, theirRoster, give, get]);
 
   // Sell high: your risers. Buy low: quality, slumping, NOT elite.
   const risers = mine
@@ -159,41 +192,44 @@ export default function TradeView({
     .slice(0, 5);
 
   return (
-    <>
+    <div className="trade-layout">
+      <div className="trade-main">
       <div className="trade-board">
         <Side
           title="You give"
           subtitle={myTeamName}
           tone="out"
+          pool={mine}
           selected={giveP}
           total={valOut}
-          query={mineQuery}
-          onQuery={setMineQuery}
-          candidates={mine.filter((p) => matches(p, mineQuery))}
-          isOn={(n) => give.includes(n)}
-          onToggle={(n) => toggle(give, setGive, n)}
+          onAdd={(n) => toggle(give, setGive, n)}
+          onRemove={(n) => toggle(give, setGive, n)}
           onClear={() => setGive([])}
         />
 
         <Side
           title="You get"
-          subtitle={withTeam || `${owners.length} other teams`}
+          subtitle={dealTeam || `pick a team`}
           tone="in"
+          pool={theirRoster}
           selected={getP}
           total={valIn}
-          query={theirQuery}
-          onQuery={setTheirQuery}
-          candidates={theirs.filter(
-            (p) => (!withTeam || p.owner === withTeam) && matches(p, theirQuery)
-          )}
-          isOn={(n) => get.includes(n)}
-          onToggle={(n) => toggle(get, setGet, n)}
-          onClear={() => setGet([])}
-          showOwner={!withTeam}
+          onAdd={(n) => toggle(get, setGet, n)}
+          onRemove={(n) => toggle(get, setGet, n)}
+          onClear={() => {
+            setGet([]);
+            setWithTeam("");
+          }}
+          showOwner={false}
           filter={
             <select
               className="field field-select trade-team"
-              value={withTeam}
+              value={dealTeam}
+              /* Locked once someone is on the board: the partner is decided by who you
+                 took, and silently switching teams under an existing offer would leave a
+                 deal made of two different rosters. Clearing the side unlocks it. */
+              disabled={!!partner}
+              title={partner ? `Trading with ${partner} — clear this side to change` : undefined}
               onChange={(e) => setWithTeam(e.target.value)}
               aria-label="Trade with"
             >
@@ -208,71 +244,122 @@ export default function TradeView({
         />
       </div>
 
-      {/* Verdict and category shift are ONE card spanning the board: the verdict alone
-          was a full-width bar holding one number at the far left, and the table alone was
-          a narrow column in a lot of empty page. Side by side they fill the width and the
-          answer sits next to its working. */}
+      {/* Which way the deal leans, as one sentence between the two sides — the number is
+          already above in each side's total, so this says only what it MEANS. */}
+      {active && (
+        <div className={`trade-favors ${net > 0 ? "tf-you" : net < 0 ? "tf-them" : "tf-even"}`}>
+          {Math.abs(net) < 0.05 ? (
+            <>An even trade by value</>
+          ) : net > 0 ? (
+            <>&larr; Favors you by <strong>{net.toFixed(1)}</strong></>
+          ) : (
+            <>Favors the other side by <strong>{Math.abs(net).toFixed(1)}</strong> &rarr;</>
+          )}
+        </div>
+      )}
+
+      {/* Players to equalize: the gap is `net`, so the fix is a player worth about that
+          much added to the LIGHTER side. Sorted by how close each one gets to level, not
+          by value — the useful suggestion is the one that balances, not the best player. */}
+      {active && equalizers.length > 0 && (
+        <section className="trade-equal">
+          <h3 className="trade-equal-h">
+            Equalize
+            <span className="tp-sub">
+              add {net > 0 ? "to your side" : "to theirs"}
+            </span>
+          </h3>
+          <div className="trade-equal-list">
+            {equalizers.map((p) => (
+              <button
+                key={p.name}
+                type="button"
+                className="teq"
+                onClick={() =>
+                  net > 0 ? toggle(give, setGive, p.name) : toggle(get, setGet, p.name)
+                }
+                title={`Add ${p.name} to ${net > 0 ? "your side" : "their side"}`}
+              >
+                <span className="teq-plus" aria-hidden="true">
+                  +
+                </span>
+                <span className="teq-name">{p.name}</span>
+                <span className="teq-val mono">{p.value.toFixed(1)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Verdict ACROSS THE TOP, category shift underneath — the two used to sit side by
+          side, which left the table in a narrow column while the verdict had a column of
+          its own for three numbers. Three figures read fine as a row; the table wants the
+          full width. */}
       {active ? (
         <div className="trade-result">
+          {/*
+            A row of equal tiles rather than one big number with two labels trailing after
+            it. Net value keeps the emphasis (it is the headline), and the rest are the
+            figures you would otherwise have to derive by reading the table underneath:
+            how many categories move each way, and where the roster spots go.
+          */}
           <div className="tr-verdict">
-            <span className="eyebrow">Net value</span>
-            <span
-              className="tv-net-num mono"
-              style={{ color: net > 0 ? "var(--good)" : net < 0 ? "var(--bad)" : "var(--ink)" }}
-            >
-              {net >= 0 ? "+" : ""}
-              {net.toFixed(1)}
-            </span>
-            <dl className="tr-facts">
-              <div>
-                <dt>Out</dt>
-                <dd className="mono">
-                  {valOut.toFixed(1)}{" "}
-                  <span className="tr-count">
-                    ({giveP.length} {giveP.length === 1 ? "player" : "players"})
-                  </span>
-                </dd>
-              </div>
-              <div>
-                <dt>In</dt>
-                <dd className="mono">
-                  {valIn.toFixed(1)}{" "}
-                  <span className="tr-count">
-                    ({getP.length} {getP.length === 1 ? "player" : "players"})
-                  </span>
-                </dd>
-              </div>
-              {/* NOT called "all-play": that name belongs to the exact season figure on
-                  the standings page, and putting it on a current-roster snapshot invited
-                  a comparison between two numbers that were never the same statistic. */}
-              <div>
-                <dt title={`Categories won against all ${otherAggs.length} other rosters as they stand today`}>
-                  Cats vs league
-                </dt>
-                <dd className="mono">
-                  {`${bw}-${bl}-${bt}`} →{" "}
-                  <strong
-                    style={{
-                      color:
-                        catSwing > 0
-                          ? "var(--good)"
-                          : catSwing < 0
-                            ? "var(--bad)"
-                            : "var(--ink-2)",
-                    }}
-                  >
-                    {`${aw}-${al}-${at}`}
-                  </strong>
-                  {catSwing !== 0 && (
-                    <span className="tr-count">
-                      {" "}
-                      ({catSwing > 0 ? "+" : ""}
-                      {catSwing})
-                    </span>
-                  )}
-                </dd>
-              </div>
-            </dl>
+            <div className="tr-tile tr-tile-lead">
+              <span className="eyebrow">Net value</span>
+              <span
+                className="tv-net-num mono"
+                style={{ color: net > 0 ? "var(--good)" : net < 0 ? "var(--bad)" : "var(--ink)" }}
+              >
+                {net >= 0 ? "+" : ""}
+                {net.toFixed(1)}
+              </span>
+              <span className="tr-count">
+                {Math.abs(net) < 0.05
+                  ? "even"
+                  : net > 0
+                    ? "in your favour"
+                    : "in theirs"}
+              </span>
+            </div>
+
+            <div className="tr-tile">
+              <span className="eyebrow">Out</span>
+              <span className="tr-tile-v mono">{valOut.toFixed(1)}</span>
+              <span className="tr-count">
+                {giveP.length} {giveP.length === 1 ? "player" : "players"}
+              </span>
+            </div>
+
+            <div className="tr-tile">
+              <span className="eyebrow">In</span>
+              <span className="tr-tile-v mono">{valIn.toFixed(1)}</span>
+              <span className="tr-count">
+                {getP.length} {getP.length === 1 ? "player" : "players"}
+              </span>
+            </div>
+
+            {/* The table below says which categories move; this says how many, so a deal
+                can be read as "wins 6, loses 3" without counting rows by eye. */}
+            <div className="tr-tile">
+              <span className="eyebrow">Categories</span>
+              <span className="tr-tile-v mono">
+                <span style={{ color: "var(--good)" }}>{catUp}</span>
+                <span className="tr-sep">/</span>
+                <span style={{ color: "var(--bad)" }}>{catDown}</span>
+              </span>
+              <span className="tr-count">better / worse</span>
+            </div>
+
+            <div className="tr-tile">
+              <span className="eyebrow">Roster spots</span>
+              <span className="tr-tile-v mono">
+                {rosterDelta > 0 ? "+" : ""}
+                {rosterDelta}
+              </span>
+              <span className="tr-count">
+                {mine.length} &rarr; {mine.length + rosterDelta}
+              </span>
+            </div>
           </div>
 
           <div className="tr-shift">
@@ -322,44 +409,36 @@ export default function TradeView({
           </span>
         </div>
       )}
-      {active && (
-        <p className="caption">
-          Per-game totals for your best {COUNTED} — the league counts ten players a day, so
-          comparing whole rosters would just reward the deeper bench. Green = the trade
-          helps that category; red = it hurts. <strong>Cats vs league</strong> is how those
-          ten score against every other roster <em>as it stands today</em>, over{" "}
-          {cats.length} of the league&rsquo;s {(league.categories ?? []).length} categories
-          — it is a snapshot, not the season all-play on the standings page, which is the
-          record those teams actually posted week by week.
-        </p>
-      )}
-
-      <h2>Buy Low / Sell High</h2>
-      <div className="two-up">
-        <div>
-          <h3 className="trade-side trade-sell">Sell High — your risers</h3>
-          {risers.length === 0 ? (
-            <p className="caption">No one clearly overperforming right now.</p>
-          ) : (
-            risers.map((p) => (
-              <TrendLine key={p.name} p={p} good onAdd={() => toggle(give, setGive, p.name)} />
-            ))
-          )}
-        </div>
-        <div>
-          <h3 className="trade-side trade-buy">Buy Low — slumping targets</h3>
-          {targets.length === 0 ? (
-            <p className="caption">
-              No obviously slumping quality players on other rosters.
-            </p>
-          ) : (
-            targets.map((p) => (
-              <TrendLine key={p.name} p={p} onAdd={() => toggle(get, setGet, p.name)} />
-            ))
-          )}
-        </div>
       </div>
-    </>
+
+      {/*
+        Trends rail. Same two lists as before (they were a full-width two-up block under
+        the board), moved beside the board so an idea is visible WHILE you build a deal
+        rather than after scrolling past the verdict — clicking one puts the player
+        straight onto the right side of the board.
+      */}
+      <aside className="trade-rail">
+        <h2 className="trade-rail-h">Trends</h2>
+
+        <div className="eyebrow trade-rail-sec trade-sell">Sell high — your risers</div>
+        {risers.length === 0 ? (
+          <p className="caption">No one clearly overperforming right now.</p>
+        ) : (
+          risers.map((p) => (
+            <TrendLine key={p.name} p={p} good onAdd={() => toggle(give, setGive, p.name)} />
+          ))
+        )}
+
+        <div className="eyebrow trade-rail-sec trade-buy">Buy low — slumping targets</div>
+        {targets.length === 0 ? (
+          <p className="caption">No obviously slumping quality players on other rosters.</p>
+        ) : (
+          targets.map((p) => (
+            <TrendLine key={p.name} p={p} onAdd={() => toggle(get, setGet, p.name)} />
+          ))
+        )}
+      </aside>
+    </div>
   );
 }
 
@@ -370,13 +449,11 @@ function Side({
   title,
   subtitle,
   tone,
+  pool,
   selected,
   total,
-  query,
-  onQuery,
-  candidates,
-  isOn,
-  onToggle,
+  onAdd,
+  onRemove,
   onClear,
   showOwner,
   filter,
@@ -384,99 +461,74 @@ function Side({
   title: string;
   subtitle: string;
   tone: "in" | "out";
+  /** Everyone eligible for this side — the search filters it; nothing is listed up front. */
+  pool: PoolPlayer[];
   selected: PoolPlayer[];
   total: number;
-  query: string;
-  onQuery: (v: string) => void;
-  candidates: PoolPlayer[];
-  isOn: (name: string) => boolean;
-  onToggle: (name: string) => void;
+  onAdd: (name: string) => void;
+  onRemove: (name: string) => void;
   onClear: () => void;
   showOwner?: boolean;
   filter?: React.ReactNode;
 }) {
+  const chosen = new Set(selected.map((p) => p.name));
+  // Already-picked players drop out of the search rather than sitting there as a no-op
+  // that silently removes them when tapped.
+  const searchable = pool.filter((p) => !chosen.has(p.name));
+
   return (
     <section className={`trade-panel trade-panel-${tone}`}>
+      {/*
+        One line of chrome, not four. This had a two-line header block, a full `<table>`
+        with its own PLAYER/VALUE header row, and a separate total row — a frame heavier
+        than the one or two players it usually holds. Title, subtitle and the running
+        total now share a single line, and the picks are plain rows underneath.
+      */}
       <header className="tp-head">
-        <div>
-          <div className="eyebrow">{title}</div>
-          <div className="tp-sub">{subtitle}</div>
-        </div>
-        <div className="tp-total mono">
-          {total >= 0 ? "+" : ""}
-          {total.toFixed(1)}
-        </div>
+        <span className="eyebrow tp-title">{title}</span>
+        <span className="tp-sub">{subtitle}</span>
+        <span className="tp-total mono">{total.toFixed(1)}</span>
       </header>
 
-      <div className="tp-slot">
-        {selected.length === 0 ? (
-          <p className="tp-empty">Nobody yet — pick from the list below.</p>
-        ) : (
-          <>
-            {selected.map((p) => (
-              <button
-                key={p.name}
-                type="button"
-                className="tp-pick"
-                onClick={() => onToggle(p.name)}
-                title="Remove"
-              >
-                <span className="tp-pick-name">{p.name}</span>
-                <span className="tp-pick-meta">
-                  {p.nbaTeam} · {p.position}
-                </span>
-                <span className="tp-pick-val mono">
-                  {p.value >= 0 ? "+" : ""}
-                  {p.value.toFixed(1)}
-                </span>
-                <span className="tp-pick-x" aria-hidden="true">
-                  ×
-                </span>
-              </button>
-            ))}
-            <button type="button" className="tp-clear" onClick={onClear}>
-              Clear side
-            </button>
-          </>
-        )}
-      </div>
-
       <div className="tp-controls">
-        <input
-          className="field"
-          type="search"
-          placeholder="Search name, team, position…"
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          aria-label={`Search players to ${title.toLowerCase()}`}
+        <PlayerSearch
+          pool={searchable}
+          value=""
+          onPick={onAdd}
+          label={`Search players to ${title.toLowerCase()}`}
         />
         {filter}
       </div>
 
-      <div className="tp-list">
-        {candidates.length === 0 && <p className="tp-empty">No players match.</p>}
-        {candidates.map((p) => (
-          <button
-            key={p.name}
-            type="button"
-            className={`tp-row ${isOn(p.name) ? "tp-row-on" : ""}`}
-            onClick={() => onToggle(p.name)}
-            aria-pressed={isOn(p.name)}
-          >
-            <span className="tp-row-name">{p.name}</span>
-            <span className="tp-row-meta">
-              {showOwner ? p.owner : `${p.nbaTeam} · ${p.position}`}
+      <ul className="tp-picks">
+        {selected.length === 0 && <li className="tp-empty">Search to add players.</li>}
+        {selected.map((p) => (
+          <li className="tp-pick" key={p.name}>
+            <span className="tp-pick-id">
+              <span className="tp-pick-name"><PlayerLink name={p.name} /></span>
+              <span className="tp-pick-meta">
+                {showOwner ? p.owner : `${p.nbaTeam} · ${p.position}`}
+              </span>
             </span>
-            <span
-              className="tp-row-val mono"
-              style={{ color: p.value >= 0 ? "var(--good)" : "var(--bad)" }}
+            <span className="tp-pick-val mono">{p.value.toFixed(1)}</span>
+            <button
+              type="button"
+              className="tp-x"
+              onClick={() => onRemove(p.name)}
+              aria-label={`Remove ${p.name}`}
+              title="Remove"
             >
-              {p.value >= 0 ? "+" : ""}
-              {p.value.toFixed(1)}
-            </span>
-          </button>
+              ×
+            </button>
+          </li>
         ))}
-      </div>
+      </ul>
+
+      {selected.length > 1 && (
+        <button type="button" className="tp-clear" onClick={onClear}>
+          Clear side
+        </button>
+      )}
     </section>
   );
 }
@@ -527,13 +579,17 @@ function TrendLine({
 }) {
   return (
     <div className="trade-line">
-      <div>
-        <strong>{p.name}</strong>{" "}
-        <span className="mono" style={{ color: good ? "var(--good)" : "var(--bad)" }}>
-          {p.trend >= 0 ? "+" : ""}
-          {p.trend.toFixed(1)}
-        </span>{" "}
-        <span style={{ color: "var(--ink-2)" }}>trend, value {p.value.toFixed(1)}</span>
+      {/* Name on its own line, the numbers under it. Inline, the name and the two figures
+          wrapped mid-phrase at rail width ("value" on one line, "-1.8" on the next). */}
+      <div className="tl-id">
+        <strong className="tl-name"><PlayerLink name={p.name} /></strong>
+        <span className="tl-nums">
+          <span className="mono" style={{ color: good ? "var(--good)" : "var(--bad)" }}>
+            {p.trend >= 0 ? "+" : ""}
+            {p.trend.toFixed(1)}
+          </span>{" "}
+          trend &middot; value <span className="mono">{p.value.toFixed(1)}</span>
+        </span>
       </div>
       <button type="button" className="chip trade-add" onClick={onAdd}>
         {good ? "Offer" : "Target"}

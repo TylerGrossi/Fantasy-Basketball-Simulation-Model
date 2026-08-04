@@ -61,13 +61,17 @@ export default function Scoreboard({
     you.projVar.some((v) => v > 0) || opp.projVar.some((v) => v > 0);
 
   return (
-    /*
-      One panel, not four stacked cards. On desktop the board, the per-side acquisition
-      and GP figures, the live badge and the category sheet are all the SAME scoreboard,
-      so they share one border and one background with internal rules between them —
-      four separate bordered blocks read as four unrelated widgets. Mobile keeps them as
-      separate blocks (see the media query), where stacked cards are the right form.
-    */
+    <>
+    {/*
+      One panel, not three stacked cards. On desktop the board, the per-side acquisition
+      and GP figures and the category sheet are all the SAME scoreboard, so they share
+      one border and one background with internal rules between them — separate bordered
+      blocks read as unrelated widgets. Mobile keeps them as separate blocks (see the
+      media query), where stacked cards are the right form.
+
+      The live badge is deliberately NOT in here: it is a note about when the data was
+      fetched, not part of the scoreboard, so it sits plain underneath.
+    */}
     <div className="sb-panel">
       {/*
         One line per side, the way a scoreboard reads: name, score, status, score, name.
@@ -109,8 +113,6 @@ export default function Scoreboard({
         oppGp={oppGp}
       />
 
-      <LiveBadge {...live} generatedAt={league.generatedAt} />
-
       <CategorySheet
         league={league}
         youName={youName}
@@ -118,6 +120,12 @@ export default function Scoreboard({
         youVec={live.you}
         oppVec={live.opp}
       />
+
     </div>
+
+    {/* Outside the panel, unstyled: a footnote on when the totals were fetched, not a
+        band of the scoreboard. */}
+    <LiveBadge {...live} generatedAt={league.generatedAt} />
+    </>
   );
 }

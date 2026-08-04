@@ -6,6 +6,7 @@ import { sideMoments } from "@/lib/league";
 import { analyzeBench } from "@/lib/bench";
 import { useLiveTotals } from "@/lib/useLiveTotals";
 import LiveBadge from "./LiveBadge";
+import PlayerLink from "./PlayerLink";
 
 interface Props {
   league: LeagueData;
@@ -132,7 +133,7 @@ export default function BenchView({
           <tbody>
             {perPlayer.map((r) => (
               <tr key={r.player.name}>
-                <td>{r.player.name}</td>
+                <td><PlayerLink name={r.player.name} /></td>
                 <td>{r.player.nbaTeam}</td>
                 <td className="num">{r.player.gamesLeft}</td>
                 <td

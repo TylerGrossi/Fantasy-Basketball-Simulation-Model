@@ -129,7 +129,7 @@ export default async function Page() {
 
   return (
     <>
-      <h1>League Statistics</h1>
+      <h1>League Stats</h1>
 
       <h2>Full League Standings</h2>
       <SortableTable

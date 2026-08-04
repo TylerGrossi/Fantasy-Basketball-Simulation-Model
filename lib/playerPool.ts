@@ -80,6 +80,21 @@ export const TREND_COL: Record<ValueBasis, "trend" | "trend15"> = {
   "15D": "trend15",
 };
 
+/** Minimum games-played thresholds offered by "Min GP" filters. */
+export const MIN_GP_OPTIONS = [0, 5, 10, 15, 20] as const;
+
+/**
+ * Games played behind a given value basis — the season total for "Regular", or the
+ * window's OWN games-played for "30D"/"15D". A 30D value built from 3 games is exactly
+ * as noisy as a season value built from 3 games, so the threshold has to track whichever
+ * window is being ranked, not always the season count.
+ */
+export function gpFor(p: PoolPlayer, basis: ValueBasis): number {
+  if (basis === "30D") return p.last30?.gp ?? 0;
+  if (basis === "15D") return p.last15?.gp ?? 0;
+  return p.gp ?? 0;
+}
+
 /** The counting stats summed when a set of players is treated as one roster. */
 export const AGG_KEYS = [
   "FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO", "PTS", "DD",

@@ -24,6 +24,8 @@
   --line-strong: #c9c5bb;
   --cobalt: #2f6fed;
   --cobalt-soft: rgba(47, 111, 237, 0.1);
+  /* The clay equivalent, for the "favours the other side" state on the trade board. */
+  --clay-soft: rgba(224, 106, 59, 0.12);
   --clay: #e06a3b;
   --good: #2e7d46;
   --bad: #c0392b;
@@ -34,7 +36,15 @@
   --mono: ui-monospace, "SF Mono", "Consolas", "Liberation Mono", monospace;
 
   --nav-h: 3.9rem;
-  --bottomnav-h: 5.6rem;
+  /*
+   * The bar's REAL height: .bottom-link's 96px min-height + the bar's 0.85rem bottom
+   * padding, rounded up to 7rem, plus the same safe-area inset the bar itself adds.
+   *
+   * Page bottom-padding is derived from this, so understating it puts content under the
+   * bar with the last row unreachable — and the inset has to be included here rather
+   * than left to the consumers' slack, or a notched iPhone eats ~34px of it.
+   */
+  --bottomnav-h: calc(7rem + env(safe-area-inset-bottom, 0px));
   --content-max: 1180px;
   --page-pad: clamp(1rem, 4vw, 2.5rem);
 }
@@ -440,11 +450,13 @@ h2 {
 }
 
 /* ---- the scoreboard panel ---------------------------------------------------
-   On DESKTOP the board, the acquisition/GP line, the live badge and the category sheet
-   are one scoreboard, so they share a single border and background with internal rules
-   between them — four separately-bordered cards read as four unrelated widgets. On
-   mobile the panel dissolves and its children go back to being their own blocks, which
-   is the right form on a narrow screen. */
+   On DESKTOP the board, the acquisition/GP line and the category sheet are one
+   scoreboard, so they share a single border and background with internal rules between
+   them — separately-bordered cards read as unrelated widgets. On mobile the panel
+   dissolves and its children go back to being their own blocks, which is the right form
+   on a narrow screen.
+
+   The live badge is NOT a child: it renders after the panel, plain and unstyled. */
 @media (min-width: 768px) {
   .sb-panel {
     background: var(--card);
@@ -458,7 +470,6 @@ h2 {
      to go too or the panel ends up with a box inside a box. */
   .sb-panel > .board,
   .sb-panel > .acq-line,
-  .sb-panel > .live-badge,
   .sb-panel > .cs-horiz {
     border: 0;
     border-radius: 0;
@@ -466,16 +477,10 @@ h2 {
     background: transparent;
   }
   .sb-panel > .acq-line,
-  .sb-panel > .live-badge,
   .sb-panel > .cs-horiz {
     border-top: 1px solid var(--line-2);
   }
   .sb-panel > .acq-line { background: var(--surface-2); }
-  /* Full width, not inline-flex — otherwise its top rule spans only the text. */
-  .sb-panel > .live-badge {
-    display: flex;
-    padding: 0.5rem 1.3rem;
-  }
 }
 
 /* ---- the board -------------------------------------------------------------
@@ -744,6 +749,21 @@ table.sheet.tape th:first-child { width: 1%; }
 }
 /* Was an inline style on the element; moved here so `.sb-panel` can override it. */
 .live-badge { margin: 0 0 0.6rem; }
+/*
+ * Under the scoreboard it sits bottom-RIGHT: a footnote timestamping the panel above it,
+ * tucked into that panel's bottom corner rather than starting a new left-aligned line.
+ *
+ * `display: flex` because `.live` is inline-flex, which shrinks to its text and leaves
+ * nothing for `justify-content` to push against.
+ *
+ * Scoped to this position on purpose. The same badge leads its section on Matchup,
+ * Bench and Streamers, where left is right — an adjacent-sibling selector moves only
+ * the one that follows the panel.
+ */
+.sb-panel + .live-badge {
+  display: flex;
+  justify-content: flex-end;
+}
 .live-dot {
   width: 7px;
   height: 7px;
@@ -1096,6 +1116,69 @@ table.sheet.sortable th.num .th-sort {
   font-size: 0.64rem;
   color: var(--ink-3);
 }
+
+/* ------------------------------------------------------- rank movement chart */
+
+/* Invisible per-WEEK hover bands. Plain default cursor: `cursor: help` put a question
+   mark over the whole chart, which read as "this is confusing" rather than "hover me". */
+.rt-band { cursor: default; }
+/* Tint the column under the cursor, so it is obvious WHICH week is being reported — the
+   panel sits above the plot, not over the column it describes. */
+.rt-band:hover { fill: var(--cobalt); fill-opacity: 0.06; }
+
+.rt-wrap { position: relative; }
+/* White panel, black text — a real element, because a native SVG <title> cannot be
+   styled and cannot carry coloured arrows. `pointer-events: none` so it can never sit
+   between the pointer and the band that opened it, which would make it flicker. */
+.rt-tip {
+  position: absolute;
+  top: 0.4rem;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 13rem;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(20, 16, 10, 0.18);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+.rt-tip-h {
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--line-2);
+}
+.rt-tip-row {
+  display: grid;
+  grid-template-columns: 1.1rem 1fr auto;
+  gap: 0.45rem;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.rt-tip-rank {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  text-align: right;
+}
+.rt-tip-name { overflow: hidden; text-overflow: ellipsis; }
+/* Your own row, so ten similar names can be scanned at a glance. */
+.rt-tip-you .rt-tip-name { font-weight: 700; }
+.rt-tip-d {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+/* The arrows carry the colour; the table itself stays black. */
+.rt-up { color: var(--good); }
+.rt-down { color: var(--bad); }
+.rt-flat { color: var(--ink-3); }
 
 /* --------------------------------------------------------- score distribution */
 
@@ -1469,15 +1552,11 @@ table.sheet.ss-standings td {
   .ss-finish {
     font-size: 0.92rem;
   }
-  /* Four cramped columns become two readable ones. */
+  /* The KPI row is off on phones. Four figures wrapped 2-up filled most of a screen
+     before the standings table — which is the thing you actually came to read, and which
+     carries all four of these numbers per team anyway. Desktop keeps them. */
   .ss-metrics {
-    grid-template-columns: 1fr 1fr;
-  }
-  .ss-metrics .metric-value {
-    font-size: 1.5rem;
-  }
-  .ss-metrics .eyebrow {
-    font-size: 0.7rem;
+    display: none;
   }
   table.sheet.ss-standings {
     font-size: 0.88rem;
@@ -1643,8 +1722,12 @@ table.sheet.ss-standings td {
     z-index: 100;
     background: var(--header-bg);
     border-top: 1px solid var(--line);
-    /* Keep clear of the iOS home indicator. */
-    padding-bottom: env(safe-area-inset-bottom, 0);
+    /*
+     * Breathing room under the labels, PLUS the iOS home indicator inset rather than
+     * instead of it — `env()` is 0 on Android and on older iPhones, so using it alone
+     * left the labels sitting on the screen edge everywhere except a notched iPhone.
+     */
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.85rem);
   }
   /* Sized to the Streamlit bar: a phone's primary navigation should read as a real bar,
      not a thin strip. Bigger glyph, roomier label, taller target. */
@@ -1655,14 +1738,14 @@ table.sheet.ss-standings td {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
-    padding: 1.15rem 0.2rem 1.05rem;
+    gap: 0.45rem;
+    padding: 1.3rem 0.2rem 1.15rem;
     color: var(--ink-3);
     text-decoration: none;
-    font-size: 0.76rem;
+    font-size: 0.8rem;
     font-weight: 600;
     /* Comfortably past the 44px minimum tap target. */
-    min-height: 88px;
+    min-height: 96px;
     -webkit-tap-highlight-color: transparent;
   }
   .bottom-link span {
@@ -1978,9 +2061,26 @@ table.sheet.lu-table .lu-pos {
 }
 
 /* -------- rail: status tiles + live category totals -------- */
+/*
+ * The rail stays put while the board scrolls.
+ *
+ * `top` is 1rem, NOT `nav-h + 1rem`. The sticky offset is measured against the nearest
+ * scroll container, and that is now `.app-scroll` — which starts BELOW the header, since
+ * the header sits outside it (see the scrolling-model note at the top of this file).
+ * Adding the nav's height again pushed the rail 62px down and wasted exactly that much of
+ * the height it needs.
+ *
+ * `max-height` + `overflow-y` are what actually make it hold still. A sticky box TALLER
+ * than the scrollport cannot stay fixed — the browser scrolls it until its bottom edge
+ * arrives, which is why this drifted ~19px instead of sticking (measured: 775px of rail
+ * in a 698px scrollport). Capping it to the visible height and letting its own contents
+ * scroll means it is never taller than the space it has to stay inside.
+ */
 .lu-rail {
   position: sticky;
-  top: calc(var(--nav-h) + 1rem);
+  top: 1rem;
+  max-height: calc(100vh - var(--nav-h) - 2rem);
+  overflow-y: auto;
   min-width: 0;
 }
 .lu-rail-tiles {
@@ -2025,8 +2125,15 @@ table.sheet.lu-table .lu-pos {
 @media (max-width: 900px) {
   .lu-layout { grid-template-columns: 1fr; }
   /* Totals first on a phone — the number a swap changes should be visible without
-     scrolling past ten-plus cards to find it. */
-  .lu-rail { position: static; order: -1; }
+     scrolling past ten-plus cards to find it. Not sticky here, so the height cap and its
+     inner scrollbar have to be undone too, or the rail becomes a short scrolling box
+     stranded at the top of the page. */
+  .lu-rail {
+    position: static;
+    order: -1;
+    max-height: none;
+    overflow-y: visible;
+  }
   .lu-rail-tiles { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 560px) {
@@ -2487,6 +2594,7 @@ table.sheet.lu-table .lu-pos {
 .pv-f-team { flex: 0 0 132px; min-width: 0; }
 .pv-f-owner { flex: 1 1 150px; min-width: 0; }
 .pv-f-basis { flex: 0 0 104px; min-width: 0; }
+.pv-f-gp { flex: 0 0 88px; min-width: 0; }
 .pv-injured { flex: 0 0 auto; padding-bottom: 0.45rem; white-space: nowrap; }
 /* The panel is exactly as wide as its trigger, so it reads as that control opening
    rather than a wider box overhanging the filter beside it. */
@@ -2506,7 +2614,8 @@ table.sheet.lu-table .lu-pos {
   .pv-f-owner { flex: 1 1 200px; }
   .pv-f-pos,
   .pv-f-team,
-  .pv-f-basis { flex: 0 1 auto; }
+  .pv-f-basis,
+  .pv-f-gp { flex: 0 1 auto; }
 }
 
 /* -------- Player Value: the ranked card list -------- */
@@ -2766,7 +2875,26 @@ table.sheet.lu-table .lu-pos {
 /* Full content width, so the board's edges line up with the header and every other page
    — as on the Player Card below. It was capped at 920px and centred, which left it
    visibly inset and squeezed the two game logs into half of that each. */
-.pv-cmp-pickers { margin: 0 0 0.8rem; }
+/* Two search boxes with "vs" between them. `align-items: center` keeps the label on the
+   fields' centre line, and the boxes share the width evenly so neither reads as primary. */
+.pv-cmp-pickers {
+  margin: 0 0 0.8rem;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.pv-cmp-pickers .pd-ac { flex: 1 1 0; }
+
+@media (max-width: 560px) {
+  /* Side by side these are ~163px each on a phone, which truncates both the typed name
+     and the results under it. Stacking gives each the full width; "vs" becomes the
+     divider between them rather than a squeeze in the middle. */
+  .pv-cmp-pickers {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .pv-cmp-pickers .pd-ac { flex: 1 1 100%; }
+  .pv-cmp-pickers > .caption { text-align: center; width: 100%; }
+}
 .pv-cmp { margin: 0.6rem 0 0; }
 .pv-cmp-head {
   display: grid;
@@ -2844,6 +2972,80 @@ table.sheet.lu-table .lu-pos {
 /* Full content width, so the card's edges line up with the header and every other
    page. It used to be capped at 860px and centred, which left it visibly inset. */
 .pd-search { margin: 0 0 0.6rem; }
+
+/* -------- player search (type-to-filter combobox) -------- */
+.pd-ac { position: relative; flex: 1 1 auto; min-width: 0; }
+.pd-ac-input { width: 100%; }
+.pd-ac-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 2px);
+  left: 0;
+  /*
+   * Sized to its CONTENT, not to the input. Pinning `right: 0` made the list exactly as
+   * wide as the field, which is fine on the Player Card but truncates every name on the
+   * trade board, where the field shares its row with the "All teams" select and is barely
+   * half the panel ("Shai Gilgeo…", "Donovan M…").
+   *
+   * `min-width: 100%` keeps it at least as wide as the field it belongs to, `max-content`
+   * lets it grow to the longest name, and the cap stops a long name from running off a
+   * phone. min-width beats max-width in the cascade, so a field wider than the cap still
+   * gets a full-width list.
+   */
+  right: auto;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(340px, 78vw);
+  margin: 0;
+  padding: 0.2rem;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.09);
+  /* Capped so a broad query ("a") can't run a 50-row list off the bottom of a phone. */
+  max-height: 320px;
+  overflow-y: auto;
+}
+.pd-ac-opt {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Comfortably past the 44px tap target once padding is counted. */
+  min-height: 38px;
+}
+.pd-ac-on { background: var(--row-highlight); }
+/* The name yields first: in a narrow box a long name must ellipsis rather than push the
+   team/position off the row, since that pair is what disambiguates similar names. */
+.pd-ac-n {
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pd-ac-m { font-size: 0.7rem; color: var(--ink-3); white-space: nowrap; flex: 0 0 auto; }
+
+/* The averages heading carries the Season/30D/15D switch on its right. */
+.pd-sec-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.pd-basis { margin: 0; gap: 0.3rem; }
+.pd-basis-note { margin: 0.3rem 0 0; }
 .pd { margin: 0.6rem 0 0; }
 .pd-head { display: flex; align-items: center; gap: 1.3rem; margin-bottom: 0.9rem; }
 .pd-head .pv-shot { flex: 0 0 auto; width: 100px; height: 100px; }
@@ -2978,9 +3180,133 @@ table.sheet.lu-table .lu-pos {
   font-size: 0.9rem;
 }
 .trade-add { flex: 0 0 auto; }
+/* Name, then trend/value beneath it. `min-width: 0` so a long name ellipsises instead of
+   pushing the Offer/Target button out of the rail. */
+.tl-id { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.tl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-nums { font-size: 0.78rem; color: var(--ink-2); white-space: nowrap; }
 
 /* ---- the trade board: the two sides side by side, so you can see what you are
    trading against what. The old version hid both rosters inside dropdowns. ---- */
+/* Board + a Trends rail beside it, so an idea is visible while you build the deal rather
+   than only after scrolling past the verdict. Mirrors the Lineup page's main/rail split. */
+.trade-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  align-items: start;
+  gap: 1.6rem;
+}
+.trade-main { min-width: 0; }
+.trade-rail {
+  position: sticky;
+  top: 1rem;
+  /* Capped for the same reason as the Lineup rail: a sticky box taller than the
+     scrollport cannot stay put, it drifts until its bottom edge arrives. */
+  max-height: calc(100vh - var(--nav-h) - 2rem);
+  overflow-y: auto;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem 1rem;
+}
+.trade-rail-h { font-size: 1rem; margin: 0 0 0.5rem; }
+.trade-rail-sec { margin: 0.9rem 0 0.35rem; }
+.trade-rail-sec:first-of-type { margin-top: 0; }
+
+/* Which way the deal leans — one line between the board and the verdict. */
+.trade-favors {
+  margin: 0 0 0.9rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 0.88rem;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.tf-you { background: var(--cobalt-soft); color: var(--cobalt); }
+.tf-them { background: var(--clay-soft, var(--surface-2)); color: var(--clay); }
+
+/*
+ * Suggestions that would level the deal — a SMALL row of chips, not a grid of cards.
+ * As cards these were the biggest thing on the page after the board, which put a
+ * secondary convenience above the answer it is meant to support.
+ */
+.trade-equal { margin: 0 0 0.9rem; }
+.trade-equal-h {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0.35rem;
+}
+.trade-equal-h .tp-sub {
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.trade-equal-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.teq {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.5rem 0.22rem 0.3rem;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  max-width: 100%;
+}
+.teq:hover { border-color: var(--cobalt); background: var(--cobalt-soft); }
+.teq-plus {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 15px;
+  text-align: center;
+  font-weight: 700;
+}
+/* Name + value only. The owner line came off with the card treatment: at chip size it was
+   the longest thing in the row ("Tobias Harris Fan Club") for the least information, and
+   which side the player comes from is already stated in the heading. */
+.teq-name {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teq-val { font-weight: 700; font-size: 0.75rem; color: var(--ink-3); flex: 0 0 auto; }
+
+/* The picked-players ledger inside each side. */
+.tp-table { width: 100%; margin: 0.6rem 0 0; }
+.tp-table td, .tp-table th { padding: 0.35rem 0.4rem; }
+.tp-table tfoot td { border-top: 2px solid var(--line); font-weight: 700; }
+.tp-x-cell { width: 1%; text-align: right; }
+.tp-x {
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.tp-x:hover { color: var(--bad); }
+
 .trade-board {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2991,39 +3317,46 @@ table.sheet.lu-table .lu-pos {
      everything below it, so the board jumped on every click. */
   align-items: stretch;
 }
+/*
+ * INPUTS, not the headline. These two panels are where you type; the answer is the result
+ * card below, and that is what should carry the visual weight. So: no card background, no
+ * full border, no fixed height — just a tinted top rule marking which way value moves and
+ * the rows themselves. The card treatment made two mostly-empty boxes the loudest thing
+ * on the page.
+ */
 .trade-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  /* A fixed height keeps the board still: the block and the list absorb their own
-     overflow instead of the panel growing. */
-  height: 30rem;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 0.85rem 0.9rem 0.9rem;
+  border-top: 2px solid var(--line);
+  padding: 0.5rem 0 0;
 }
 /* Which way the value is moving, in the app's two team colours. */
-.trade-panel-out { border-top: 3px solid var(--clay); }
-.trade-panel-in { border-top: 3px solid var(--cobalt); }
+.trade-panel-out { border-top-color: var(--clay); }
+.trade-panel-in { border-top-color: var(--cobalt); }
 
+/* Title, whose side it is, and the running total — one line. */
 .tp-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.6rem;
-  margin-bottom: 0.6rem;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+  min-width: 0;
 }
+.tp-title { flex: 0 0 auto; }
 .tp-sub {
-  font-weight: 700;
-  font-size: 1rem;
-  margin-top: 0.15rem;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The running total, on the header line and pushed to the right. */
 .tp-total {
-  font-size: 1.35rem;
+  margin-left: auto;
+  font-size: 1.05rem;
   font-weight: 700;
   line-height: 1.1;
   flex: 0 0 auto;
@@ -3031,56 +3364,44 @@ table.sheet.lu-table .lu-pos {
 .trade-panel-out .tp-total { color: var(--clay); }
 .trade-panel-in .tp-total { color: var(--cobalt); }
 
-/* The block itself — what's currently on offer from this side. */
-/* The block scrolls at four-ish players rather than pushing the list off the panel. */
-.tp-slot {
-  flex: 0 0 auto;
-  min-height: 3.4rem;
-  max-height: 9.5rem;
+/* Picked players: plain hairline-separated rows. No box, no dashed drop-zone, no table
+   header — the rows are legible on their own and the frame was most of the panel. */
+.tp-picks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Long deals scroll rather than stretching the board. */
+  max-height: 13rem;
   overflow-y: auto;
-  border: 1px dashed var(--line-strong);
-  border-radius: 10px;
-  padding: 0.4rem;
-  margin-bottom: 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
 }
 .tp-empty {
-  margin: auto;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--ink-3);
-  text-align: center;
+  padding: 0.35rem 0;
 }
 .tp-pick {
-  display: grid;
-  /* name | meta | value | remove — four children, four columns. With three the × wrapped
-     onto a line of its own and the row grew to double height. */
-  grid-template-columns: 1fr auto auto auto;
-  align-items: baseline;
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
-  width: 100%;
-  font: inherit;
-  text-align: left;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--ink);
-  cursor: pointer;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line-2);
 }
-.tp-pick:hover { border-color: var(--bad); }
+.tp-pick-id { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .tp-pick-name {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tp-pick-meta { font-size: 0.7rem; color: var(--ink-3); white-space: nowrap; }
-.tp-pick-val { font-size: 0.85rem; font-weight: 700; }
-.tp-pick-x { color: var(--ink-3); font-size: 1rem; line-height: 1; }
-.tp-pick:hover .tp-pick-x { color: var(--bad); }
+.tp-pick-meta {
+  font-size: 0.68rem;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-pick-val { margin-left: auto; font-size: 0.85rem; font-weight: 700; flex: 0 0 auto; }
 .tp-clear {
   align-self: flex-end;
   font: inherit;
@@ -3101,86 +3422,54 @@ table.sheet.lu-table .lu-pos {
 .tp-controls .field { flex: 1 1 auto; min-width: 0; }
 .trade-team { flex: 0 1 40%; }
 
-/* A scroll box, not a wall: ~270 candidates on the other side. Takes whatever height the
-   panel has left, so the two lists always end at the same line. */
-.tp-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  border-top: 1px solid var(--line-2);
-}
-.tp-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: baseline;
-  gap: 0.5rem;
-  width: 100%;
-  font: inherit;
-  text-align: left;
-  padding: 0.35rem 0.4rem;
-  border: 0;
-  border-bottom: 1px solid var(--line-2);
-  background: none;
-  color: var(--ink);
-  cursor: pointer;
-}
-.tp-row:hover { background: var(--surface-2); }
-.tp-row-on { background: var(--cobalt-soft); }
-.tp-row-name {
-  font-size: 0.86rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tp-row-on .tp-row-name { font-weight: 700; }
-.tp-row-meta {
-  font-size: 0.68rem;
-  color: var(--ink-3);
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tp-row-val { font-size: 0.8rem; font-weight: 600; }
+/* `.tp-list` / `.tp-row` lived here: the always-visible candidate list each panel used to
+   carry. The search box replaced it, so both are gone rather than left as dead selectors. */
 
 /* ---- the result: verdict beside the category shift, one card the width of the board ---- */
+/* Verdict on top, table underneath. It was a two-column grid with the figures beside the
+   table; three numbers do not need a column of their own, and taking it back gives the
+   nine-row table the full card width. */
+/* THE headline. The two input panels above are deliberately unboxed now, so this is the
+   only card on the page — the answer is what the page is for, and it should read that
+   way at a glance rather than competing with the controls that produced it. */
 .trade-result {
-  display: grid;
-  grid-template-columns: minmax(210px, 15rem) 1fr;
-  gap: 1.2rem;
-  /* The verdict column stretches to the table's height and spreads its facts down it —
-     top-aligned, the three lines left a block of empty card under them. */
-  align-items: stretch;
   background: var(--card);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong, var(--line));
   border-radius: 12px;
-  padding: 1rem 1.1rem;
+  padding: 1.1rem 1.2rem;
   margin-bottom: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 .trade-result-idle {
   display: flex;
   justify-content: center;
   padding: 0.9rem 1.1rem;
 }
-.tr-verdict { display: flex; flex-direction: column; min-width: 0; }
-.tv-net-num { font-size: 2.4rem; font-weight: 700; line-height: 1.05; margin: 0.1rem 0 0.6rem; }
-/* Label over value, so the three facts line up as a column of figures. */
-.tr-facts {
-  margin: 0;
-  flex: 1 1 auto;
+/* A row of equal stat tiles, hairline-separated. Ragged inline pairs left the figures on
+   an uneven baseline and the labels reading as prose; a tile grid lines every value up. */
+.tr-verdict {
+  display: grid;
+  grid-template-columns: 1.3fr repeat(4, 1fr);
+  align-items: stretch;
+  gap: 0 1rem;
+  min-width: 0;
+  padding-bottom: 0.85rem;
+  margin-bottom: 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+.tr-tile {
   display: flex;
   flex-direction: column;
-  justify-content: space-evenly;
-  gap: 0.45rem;
+  gap: 0.12rem;
+  min-width: 0;
+  padding-left: 1rem;
+  border-left: 1px solid var(--line-2);
 }
-.tr-facts div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.6rem;
-  border-top: 1px solid var(--line-2);
-  padding-top: 0.4rem;
-}
+/* The headline needs no divider before it. */
+.tr-tile-lead { padding-left: 0; border-left: 0; }
+.tv-net-num { font-size: 2.2rem; font-weight: 700; line-height: 1.05; margin: 0.05rem 0 0; }
+.tr-tile-v { font-size: 1.35rem; font-weight: 700; line-height: 1.15; margin: 0.05rem 0 0; }
+.tr-sep { color: var(--ink-3); margin: 0 0.15rem; font-weight: 400; }
 .tr-facts dt {
   font-size: 0.62rem;
   font-weight: 700;
@@ -3188,7 +3477,7 @@ table.sheet.lu-table .lu-pos {
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.tr-facts dd { margin: 0; font-size: 0.9rem; text-align: right; }
+.tr-facts dd { margin: 0; font-size: 1.05rem; font-weight: 600; }
 .tr-count { color: var(--ink-3); font-size: 0.72rem; }
 /* The table fills the rest of the card, so nine short rows stop reading as a stub in a
    field of white. */
@@ -3197,12 +3486,34 @@ table.sheet.lu-table .lu-pos {
 .tr-shift table.sheet th { background: none; }
 
 
+@media (max-width: 900px) {
+  /* The rail drops below the board rather than squeezing it. Not sticky once it is in
+     the flow — so the height cap and inner scrollbar come off too, same as the Lineup
+     rail, or it becomes a short scrolling box stranded mid-page. */
+  .trade-layout { grid-template-columns: 1fr; gap: 1rem; }
+  .trade-rail {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
 @media (max-width: 767px) {
   /* One panel per row: two 190px-wide panels side by side on a phone are unusable. */
   .trade-board { grid-template-columns: 1fr; gap: 0.7rem; }
-  .trade-panel { height: 24rem; }
-  .trade-result { grid-template-columns: 1fr; gap: 0.9rem; padding: 0.8rem 0.9rem; }
+  /* Already stacked at every width now; only the padding needs tightening on a phone. */
+  .trade-result { padding: 0.8rem 0.9rem; }
+  /* Five tiles across is ~70px each on a phone. Two rows of readable tiles instead, with
+     the dividers dropped since they no longer line up between rows. */
+  .tr-verdict {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.7rem 0.9rem;
+  }
+  .tr-tile { padding-left: 0; border-left: 0; }
+  .tr-tile-lead { grid-column: 1 / -1; }
   .tv-net-num { font-size: 1.9rem; }
+  .tv-net-num { font-size: 1.9rem; }
+  .trade-equal-list { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 767px) {
@@ -3875,13 +4186,12 @@ table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
     padding: 0.2rem 0.35rem;
     border-radius: 4px;
   }
-  /* The winner, in grey rather than green: this sheet is a comparison, not a verdict,
-     and fifteen coloured cells read as decoration. Deliberately darker than
-     --surface-2, which the header row already uses, so a win is never confused with
-     ordinary chrome. */
+  /* Same tint as the desktop sheet's .rc-win, not the grey chip this used to be — that
+     read as a heavy tan block on a phone-width row where it's most of the row's width.
+     A light green tint reads as "won" without turning the cell into a slab. */
   .cs-vert .cs-vert-win {
-    background: #e4e0d6;
-    color: var(--ink);
+    background: rgba(46, 125, 70, 0.12);
+    color: var(--good);
     font-weight: 700;
   }
 }
@@ -3909,10 +4219,9 @@ table.sheet.rc-box th { padding: 0.35rem 0.5rem; }
    than a default sheet's. The generic `table.sheet.sortable th { padding: 0 }` ties on
    specificity with the rule above and loses by order, which would leave the header's
    own padding AND the button's — so the padding is moved onto the button explicitly.
-   The one non-sortable header has no button, so it carries the padding on a span. */
+   Every header here is sortable, so the padding lives on the button. */
 table.sheet.sortable.rc-box th { padding: 0; }
 table.sheet.sortable.rc-box .th-sort { padding: 0.35rem 0.5rem; }
-table.sheet.rc-box .rc-opp-h { display: inline-block; padding: 0.35rem 0.5rem; }
 table.sheet.rc-box .rc-player {
   font-weight: 600;
   white-space: nowrap;
@@ -3950,20 +4259,6 @@ table.sheet.rc-box .rc-totals td {
 /* The totals row's first cell has no class of its own, so it needs naming here or it
    keeps the --card background every other frozen body cell uses. */
 table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
-/* GAMES: OPPONENTS — a list of short labels, not a number, so it gets room and left
-   alignment rather than the numeric columns' tabular-nums/right-align. */
-table.sheet.rc-box .rc-opp {
-  color: var(--ink-2);
-  font-size: 0.7rem;
-  max-width: 220px;
-  white-space: normal;
-}
-/* On a phone this column alone can run wider than every stat column combined — a list
-   of up to ~14 opponent codes next to single-digit rebounds. The stat line is the part
-   worth the width there; opponents-per-game is a desktop-only extra. */
-@media (max-width: 767px) {
-  table.sheet.rc-box .rc-opp { display: none; }
-}
 
 /* -------- Matchup Acquisition Limit -------- */
 .acq-line {
@@ -3977,49 +4272,45 @@ table.sheet.rc-box .rc-opp {
   border-radius: 8px;
   font-size: 0.72rem;
 }
-/* `min-width: 0` alone isn't enough to stop a nowrap child from forcing the column wider
-   than its share — the flex base has to be pinned too, or the two sides overlap. */
+/*
+ * Team name on its own line, the two figures sharing the line under it — GP sits to the
+ * RIGHT of acquisitions rather than below it, at every width.
+ *
+ * `min-width: 0` alone isn't enough to stop a nowrap child from forcing the column wider
+ * than its share — the flex base has to be pinned too, or the two sides overlap.
+ *
+ * Wrapping rather than a fixed row: `.acq-label` is nowrap, so if a long team name or a
+ * narrow screen leaves the pair short of room, they drop onto separate lines instead of
+ * printing through each other.
+ */
 .acq-side {
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.8rem;
+  row-gap: 0.1rem;
   min-width: 0;
   flex: 1 1 0;
 }
-.acq-side-right { text-align: right; align-items: flex-end; }
-.acq-name { font-weight: 700; color: var(--ink); }
+.acq-name { flex: 0 0 100%; font-weight: 700; color: var(--ink); }
+/* Row direction, so horizontal alignment is `justify-content`, not `align-items`. */
+.acq-side-right { text-align: right; justify-content: flex-end; }
 /* nowrap so a figure like "14/14" can never break mid-number. The two labels are their
-   own elements rather than one string with a separator, which is what lets the mobile
-   rule below lay them out as a row and desktop keep them stacked. */
+   own elements rather than one string with a separator, which is what lets them lay out
+   as a row that can wrap under pressure. */
 .acq-label { color: var(--ink-3); white-space: nowrap; }
 
 @media (max-width: 767px) {
   /*
-   * STACKED on a phone. Side by side, two "Acquisitions (Used/Max): 14/14" labels can't
+   * The two SIDES stack on a phone. Side by side, two "Acquisitions: 14/14" labels can't
    * both fit in ~360px, and because .acq-label is nowrap they didn't shrink — they ran
    * straight through each other, printing one string on top of the other. Each side gets
-   * its own full-width row instead, so the labels keep their nowrap (a figure like 14/14
-   * must never break mid-number) without ever competing for the same line.
+   * its own full-width row instead. (The figures WITHIN a side still share a line; that
+   * is the base rule above and holds at every width.)
    */
   .acq-line { flex-direction: column; gap: 0.5rem; }
-  .acq-side-right { text-align: left; align-items: flex-start; }
-  /*
-   * Within a side, the team name takes a line of its own and the two figures share the
-   * one under it — GP sits to the RIGHT of acquisitions rather than below it, which
-   * turned each side into three stacked lines and the block into six.
-   *
-   * Wrapping rather than a fixed row: `.acq-label` is nowrap, so if a long name or a
-   * narrow screen leaves the pair short of room they drop onto separate lines instead
-   * of overlapping — the same failure the stacking above was added to fix.
-   */
-  .acq-side {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: baseline;
-    column-gap: 0.8rem;
-    row-gap: 0.1rem;
-  }
-  .acq-name { flex: 0 0 100%; }
+  .acq-side-right { text-align: left; justify-content: flex-start; }
 }
 
 /* -------- Scoreboard three-way tabs (You / Matchup / Opponent) --------
@@ -4082,4 +4373,203 @@ table.sheet.rc-box .rc-opp {
   .sbx-panels { display: block; }
   .sbx-panel { display: none; }
   .sbx-panel-active { display: block; }
+}
+
+/* ===================== CHEAT SHEETS =====================
+   Draft-style ranked columns — G / F / C, the slots a lineup actually has to fill.
+   Laid out like a printed cheat sheet: a framed panel, a control bar across the top,
+   then three columns of numbered rows with your roster and the comparison group shaded
+   the whole way down.
+   ======================================================== */
+
+/* The whole sheet sits in one frame, controls included — it reads as a single tool
+   rather than a toolbar that happens to sit above three cards. */
+.cs-sheet {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+  margin-top: 0.9rem;
+}
+.cs-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.55rem 0.9rem;
+  padding: 0.85rem 1.1rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+/* The "Filters" button that stands in for the bar below 900px — hidden on desktop, where
+   the bar itself is always visible. */
+.cs-bar-toggle {
+  display: none;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1.1rem;
+  background: var(--card);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.cs-bar-toggle-car { color: var(--ink-3); font-size: 0.7rem; }
+.cs-ctl { display: inline-flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.cs-ctl-l { color: var(--ink-2); font-size: 0.82rem; white-space: nowrap; }
+.cs-ctl .field-select { min-width: 12.5rem; }
+/* Value basis and Min GP have short option labels ("15D", "Any") — a full-width select
+   next to them is mostly empty space, and it's that space costing the row its fit. */
+.cs-ctl .field-select-sm { min-width: 5rem; width: auto; }
+/* The legend IS the control: a colour chip inside each picker says which shade that
+   side of the comparison paints, so the columns need no separate key. */
+.cs-swatch {
+  width: 1.6rem;
+  height: 1.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.cs-swatch-mine { background: #d8e6fb; border-color: #a9c7ee; }
+.cs-swatch-against { background: #fbf6d0; border-color: #ddd08d; }
+.cs-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Three tracks, generously gapped. `minmax(0, 1fr)` rather than `1fr`: a long player
+   name would otherwise set a min-content floor and push the last column off the page. */
+.cs-cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
+  padding: 1rem 1.1rem 1.1rem;
+  align-items: start;
+}
+.cs-col {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  overflow: hidden;
+  min-width: 0;
+}
+.cs-col-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.cs-col-n {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+/* The list scrolls INSIDE its column: ~150 guards would otherwise make the page metres
+   long, and the controls at the top are what you steer with. */
+.cs-list { max-height: 38rem; overflow-y: auto; }
+
+/* Roomy rows — the previous pass packed them tight enough that the shading ran together
+   into one block and individual players stopped being scannable. */
+.cs-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.cs-row:last-child { border-bottom: 0; }
+.cs-rank {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  font-size: 0.78rem;
+  flex: 0 0 1.9rem;
+  text-align: right;
+}
+/* The only element allowed to shrink, so team, position and badge never get pushed out. */
+.cs-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--cobalt);
+  font-weight: 500;
+}
+.cs-pos,
+.cs-team {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+}
+.cs-pos { color: var(--ink-2); }
+/* Fixed rail on the right so the injury flags line up down the column instead of
+   ragging along behind names of different lengths. */
+.cs-flag {
+  flex: 0 0 2.6rem;
+  display: inline-flex;
+  justify-content: flex-end;
+}
+.cs-row-mine { background: #e3edfc; }
+.cs-row-mine .cs-name { font-weight: 700; }
+.cs-row-against { background: #fcf8e0; }
+.cs-empty { padding: 0.7rem 0.8rem; margin: 0; }
+
+@media (max-width: 900px) {
+  .cs-cols { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  .cs-list { max-height: 24rem; }
+  .cs-cols { padding: 0.8rem; }
+
+  /* The bar becomes a drawer behind the toggle button: closed by default, full-width
+     stacked controls when open — nothing to scroll sideways to find, nothing wrapping
+     into a ragged second line. */
+  .cs-bar-toggle { display: flex; }
+  .cs-bar {
+    display: none;
+    overflow-x: visible;
+    flex-wrap: wrap;
+    padding: 0.9rem 0.8rem;
+    gap: 0.8rem;
+  }
+  .cs-bar.cs-bar-open { display: flex; }
+  .cs-ctl { flex: 1 1 100%; width: 100%; }
+  .cs-ctl .field-select,
+  .cs-ctl .field-select-sm { flex: 1 1 auto; width: 100%; min-width: 0; }
+  .cs-check { flex: 1 1 100%; }
+}
+
+/* -------- player links --------
+   Every player name in the app links to their card (components/PlayerLink.tsx). In a
+   dense table a page of blue underlined names would be unreadable, so the link inherits
+   its surroundings and only declares itself on hover. */
+.plink {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.plink:hover { color: var(--cobalt); text-decoration: underline; }
+.plink:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+  border-radius: 3px;
 }

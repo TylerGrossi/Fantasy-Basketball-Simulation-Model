@@ -187,9 +187,11 @@ export interface PoolPlayer {
    *  on one (retired, overseas, two-way churn) — the projection treats that as "peak". */
   age?: number;
   exp?: number;
-  /** The last-30-day window's own per-game line, plus its `gp`. Absent when the player
-   *  had no games in that window — which is NOT the same as a line of zeros. */
+  /** The recent windows' own per-game lines, plus each window's `gp`. Absent when the
+   *  player had no games in that window — which is NOT the same as a line of zeros, and
+   *  is why the Player Card falls back to the season line rather than printing noughts. */
   last30?: Partial<Record<string, number>> & { gp?: number };
+  last15?: Partial<Record<string, number>> & { gp?: number };
 }
 
 export interface SeasonPlayerLine {
