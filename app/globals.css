@@ -1813,16 +1813,6 @@ table.sheet.ss-standings td {
 
 /* -------- home hero: centred, matching the Streamlit landing page -------- */
 .home-hero { text-align: center; padding: 2.6rem 1rem 1.4rem; }
-/* The mobile hero's app tile. `alt=""` in the markup — the title right underneath already
-   names the app, so announcing it twice would just be noise to a screen reader. */
-.home-logo {
-  display: block;
-  width: 76px;
-  height: 76px;
-  margin: 0 auto 0.85rem;
-  border-radius: 17px;
-  box-shadow: 0 2px 10px rgba(27, 29, 34, 0.09);
-}
 .home-eyebrow {
   font-size: 0.72rem;
   letter-spacing: 0.16em;
@@ -2582,7 +2572,18 @@ table.sheet.lu-table .lu-pos {
   z-index: 200;
   top: calc(100% + 0.25rem);
   left: 0;
-  min-width: 100%;
+  /*
+   * At least 11rem, whatever the trigger's width.
+   *
+   * `min-width: 100%` alone sizes the panel to the BUTTON, and a narrow button gives a
+   * panel too narrow to hold its own option labels — the punt-category picker rendered a
+   * column of "F", "F", "3" because "FG%", "FT%" and "3PM" were being clipped. They clip
+   * rather than overflow because `.ms-list` sets `overflow-y: auto`, and a non-visible
+   * value on one axis makes the other compute to `auto` too, so the list scrolls
+   * horizontally instead of letting the text out. A floor here fixes every caller at once
+   * rather than per-picker.
+   */
+  min-width: max(100%, 11rem);
   max-width: 320px;
   background: var(--card);
   border: 1px solid var(--line);
@@ -3090,9 +3091,21 @@ table.sheet.lu-table .lu-pos {
 }
 .pd-basis { margin: 0; gap: 0.3rem; }
 .pd-basis-note { margin: 0.3rem 0 0; }
-.pd { margin: 0.6rem 0 0; }
-.pd-head { display: flex; align-items: center; gap: 1.3rem; margin-bottom: 0.9rem; }
-.pd-head .pv-shot { flex: 0 0 auto; width: 100px; height: 100px; }
+/* The card's vertical rhythm is deliberately tight: the whole profile — identity, bio,
+   value tiles, thirteen percentile bars and the two logs — is meant to land on ONE screen,
+   so every block above the bars is sized to what it needs and no more. */
+.pd { margin: 0.35rem 0 0; }
+
+/* Mobile drops the "Player Card" title and its instruction line: the search box and the
+   player's own headshot + name say what the page is, and the two lines of chrome were
+   pushing the card itself below the fold. Order is left alone — search first, then the
+   card — which is the DOM order already. */
+@media (max-width: 767px) {
+  .pd-page-head { display: none; }
+}
+
+.pd-head { display: flex; align-items: center; gap: 1.1rem; margin-bottom: 0.6rem; }
+.pd-head .pv-shot { flex: 0 0 auto; width: 84px; height: 84px; }
 .pd-id { min-width: 0; }
 .pd-name {
   font-weight: 800;
@@ -3124,28 +3137,42 @@ table.sheet.lu-table .lu-pos {
 .pd-owner { color: var(--ink-3); }
 .pd-owner b { color: var(--ink); }
 /* Bio facts (label over value), between hairlines. */
+/* A GRID of equal tracks, not a wrapping flex row. Flex sized each fact to its own text,
+   so six of them broke 3 / 2 / 1 — a ragged three-line block whose shape changed with
+   the player (a long "2015: Rd 1, Pk 22 (CHI)" pushed a fact onto its own row). Equal
+   tracks make the row count a function of WIDTH alone: six facts land on one line on a
+   desktop card and two lines on a phone, the same way for every player.
+   `auto-fit` + a 6.5rem floor is what picks the column count per width. */
 .pd-bio {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.1rem 2.2rem;
-  padding: 0.8rem 0.1rem;
-  margin-bottom: 1.1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  gap: 0.7rem 1.2rem;
+  padding: 0.5rem 0.1rem;
+  margin-bottom: 0.7rem;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
-.pd-bio-f { display: flex; flex-direction: column; }
+.pd-bio-f { display: flex; flex-direction: column; min-width: 0; }
 .pd-bl {
   font-size: 0.58rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.pd-bv { font-size: 0.9rem; font-weight: 600; color: var(--ink); margin-top: 0.15rem; }
+/* Wraps inside its own track rather than widening it — a long draft line must not be
+   what decides the whole block's column count. */
+.pd-bv {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 0.15rem;
+  overflow-wrap: anywhere;
+}
 .pd-values {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 0.6rem;
-  margin-bottom: 1.1rem;
+  margin-bottom: 0.7rem;
 }
 .pd-vtile {
   display: flex;
@@ -3155,7 +3182,7 @@ table.sheet.lu-table .lu-pos {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 0.7rem 0.4rem;
+  padding: 0.5rem 0.4rem;
 }
 .pd-vl {
   font-size: 0.62rem;
@@ -3186,27 +3213,128 @@ table.sheet.lu-table .lu-pos {
   text-transform: none;
   font-size: 0.72rem;
 }
-.pd-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  column-gap: 2.6rem;
-  margin-bottom: 1.1rem;
-}
-.pd-stat {
+/* -------- Player Card percentile bars --------
+   Diverging bars: cobalt below league average, neutral around it, clay above. The two
+   poles are validated for colour-blind separation (ΔE 28 under protanopia); every bar
+   also prints its percentile and its raw figure, so nothing here is carried by colour
+   alone. See components/PlayerCardView.tsx for why intensity is not graded within a side. */
+.pct-scale {
   display: flex;
-  align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.15rem;
-  border-bottom: 1px solid var(--line-2);
+  /* Aligned to the TRACK, not the row, so "Average" sits over the 50% tick rather than
+     over the middle of the label column. */
+  margin: 0 0 0.25rem;
+  /* Clears BOTH text columns and their gaps, so "Average" lands over the 50% tick. */
+  padding-left: calc(9.5rem + 3.4rem + 1.2rem);
+  padding-right: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
-.pd-sl { font-size: 0.82rem; color: var(--ink-2); }
-.pd-sv {
-  font-family: var(--mono);
+/* A full line of air between categories — enough that the four groups read as four
+   things, rather than as one long list with rules through it. */
+.pct-group + .pct-group { margin-top: 1.6rem; }
+.pct-group-h {
+  margin: 0 0 0.22rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line-2);
+  padding-bottom: 0.2rem;
+}
+
+/* Stat on the LEFT — name then figure — and the bar on the right. The two text columns
+   are fixed-width so the figures form a straight edge down the page and every bar starts
+   from the same x; a bar whose origin shifted per row could not be compared by eye. */
+.pct-row {
+  display: grid;
+  grid-template-columns: 9.5rem 3.4rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.26rem 0;
+}
+.pct-label {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The track is the recessive part — it is the 0-100 space the fill is read against. */
+.pct-track {
+  position: relative;
+  display: block;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: visible;
+}
+/* League average. Without a marked baseline a diverging bar is just a longer bar. */
+.pct-tick {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--line-strong);
+}
+.pct-fill {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  min-width: 3%;
+}
+/* Red / white / blue, Baseball Savant's scale, using the app's OWN cobalt and bad-red
+   rather than new hexes. The pair clears colour-blind separation comfortably — ΔE 29.8
+   under protanopia, better than the literal Savant hexes managed (23.9).
+
+   The midpoint is the lightest neutral that still clears the 2:1 visibility floor against
+   this card (2.05:1). It cannot be literally white: a white bar on a near-white card is
+   an invisible bar, which would read as missing data rather than as average. */
+.pct-lo { background: #2f6fed; }
+.pct-mid { background: #b0b2b9; }
+.pct-hi { background: #c0392b; }
+/* The percentile rides the END of its own bar, so the number and the length it encodes
+   are never read apart. The ring is the 2px surface gap an overlapping mark needs. */
+.pct-bubble {
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  transform: translate(50%, -50%);
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 11px;
+  border: 2px solid var(--card);
+  background: inherit;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* The neutral band is too light to carry white text. */
+.pct-mid .pct-bubble { color: var(--ink); }
+.pct-value {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  font-size: 0.98rem;
+  font-size: 0.95rem;
   color: var(--ink);
+  text-align: right;
+}
+.pct-track-empty { background: transparent; }
+.pct-none {
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  font-style: italic;
+  line-height: 19px;
 }
 
 /* -------- Trade Simulator -------- */
@@ -3634,7 +3762,13 @@ table.sheet.lu-table .lu-pos {
   .pd-head .pv-shot { width: 78px; height: 78px; }
   .pd-name { font-size: 1.3rem; }
   .pd-vv { font-size: 1.3rem; }
-  .pd-stats { grid-template-columns: 1fr; column-gap: 0; }
+  /* The label column is the first thing to give on a phone — the bar and its figure are
+     the content, the label just names the row. The scale strip's padding has to follow
+     it, or "Average" stops sitting over the 50% tick. */
+  .pct-row { grid-template-columns: 6rem 2.6rem minmax(0, 1fr); gap: 0.4rem; }
+  .pct-label { font-size: 0.72rem; }
+  .pct-value { font-size: 0.82rem; }
+  .pct-scale { padding-left: calc(6rem + 2.6rem + 0.8rem); }
 }
 
 /* ===================== AGENT (AI assistant chat) =====================
@@ -4411,6 +4545,18 @@ table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
    the matchup rather than on your own box score. Flex `order` only — no markup change,
    so the mobile tab order is untouched. */
 .sbx-panel-matchup { order: -1; }
+/*
+ * Close the gap between the scoreboard and the box score under it.
+ *
+ * It was ~38px built from three separate margins that only ever stack up HERE, where the
+ * panels are laid out one under another: the live badge's own bottom margin, the panels'
+ * flex gap, and `.rc-box-title`'s 1.4rem top margin. Each is reasonable alone — the
+ * heading's margin is what separates the two tables on the Week Recap page, where they
+ * follow each other directly — so both overrides are scoped to this stack rather than
+ * changed at source, and the recap keeps its spacing.
+ */
+.sbx-panel .rc-box-title { margin-top: 0.35rem; }
+.sbx-panel-matchup .live-badge { margin-bottom: 0.15rem; }
 
 @media (max-width: 767px) {
   .sbx-tabs { display: flex; }
@@ -4772,7 +4918,26 @@ table.sheet.lr-table th.num { width: 4rem; }
 .rm-badge.trade { background: rgba(47, 111, 237, 0.14); color: var(--cobalt); }
 .rm-badge.moved { background: var(--surface-2); color: var(--ink-2); }
 .rm-badge.draft { background: var(--surface-2); color: var(--ink-3); }
-table.sheet.rm-table td { vertical-align: middle; }
+/* FIXED layout, so the columns are sized by these rules rather than by whatever rows
+   happen to be visible. With the default `auto` layout the browser re-measures content
+   on every render, so filtering to one team (or a short name like "VJ Maxx") visibly
+   resized every column — the table jumped each time a filter changed. The min-width
+   keeps it scrolling inside .table-scroll on a phone instead of crushing the columns. */
+table.sheet.rm-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 46rem;
+}
+table.sheet.rm-table th:nth-child(1),
+table.sheet.rm-table td:nth-child(1) { width: 9rem; }
+table.sheet.rm-table th:nth-child(2),
+table.sheet.rm-table td:nth-child(2) { width: 15rem; }
+table.sheet.rm-table th:nth-child(3),
+table.sheet.rm-table td:nth-child(3) { width: 8rem; }
+table.sheet.rm-table th:nth-child(5),
+table.sheet.rm-table td:nth-child(5) { width: 6rem; }
+/* Player (4th) takes the remainder. Long names ellipsis rather than forcing a reflow. */
+table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
 .rm-date {
   font-family: var(--mono);
   font-size: 0.72rem;
@@ -4816,25 +4981,32 @@ table.sheet.rm-table td { vertical-align: middle; }
   background: var(--card);
 }
 .sr-title { font-size: 1.02rem; margin: 0 0 0.9rem; }
-.sr-shots { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+.sr-shots { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; }
 .sr-shot-col { flex: 1 1 0; display: flex; justify-content: center; min-width: 0; }
+/* No frame: these sit in a row above their own bars, so the bar already gives each one
+   its edge — a border around every headshot just adds ten boxes to look past.
+   FLUID, capped at 3.9em: with a third column in the panel the ten columns can be
+   narrower than a fixed 3.9em headshot, and a fixed width would overflow its column and
+   overlap its neighbours rather than shrink. */
 .sr-shot {
-  width: 42px;
-  height: 42px;
+  width: 100%;
+  max-width: 3.9em;
+  aspect-ratio: 1 / 1;
   border-radius: 8px;
   background-size: cover;
   background-position: center top;
   background-color: var(--surface-2);
-  border: 1px solid var(--line);
 }
 .sr-shot-blank { background-image: none; }
 
+/* Grows into whatever height the card has left (see .sr-panel) instead of a fixed
+   height, which is what keeps the chart level with the table beside it. */
 .sr-bars {
   display: flex;
   align-items: flex-end;
   gap: 0.4rem;
-  height: 11rem;
-  border-bottom: 2px solid var(--ink);
+  flex: 1 1 auto;
+  min-height: 8rem;
 }
 .sr-bar-col {
   flex: 1 1 0;
@@ -4870,10 +5042,114 @@ table.sheet.rm-table td { vertical-align: middle; }
   color: var(--ink-2);
   text-align: center;
 }
-.sr-insight { margin: 0.8rem 0 0; }
-
 @media (max-width: 700px) {
-  .sr-shot { width: 30px; height: 30px; border-radius: 6px; }
+  .sr-shot { border-radius: 6px; }
   .sr-bars { height: 8rem; }
   .sr-bar-label { font-size: 0.6rem; }
+}
+
+/* Starter Rankings panel: the Total Value leaderboard sits to the left of the chart
+   card, and clicking a row swaps which team's starters the chart shows (see
+   StarterRankingsPanel.tsx). Team names read as ESPN-style blue links and the selected
+   row gets a solid fill, same red/orange-on-white contrast ESPN uses for "this is the
+   one you're looking at" in its own power-rankings widget. */
+/* `stretch` (not flex-start) so the chart card ends level with the value table beside
+   it — the bars absorb the difference via `flex: 1` on .sr-bars rather than leaving a
+   band of dead space under a short chart. */
+.sr-panel {
+  display: flex;
+  align-items: stretch;
+  gap: 1rem;
+  margin: 1.4rem 0;
+}
+/* Wide enough for the longest team name plus a signed total on one line — at 17rem
+   "Bryant's Brilliant Team" forced the table into its own horizontal scrollbar. */
+.sr-value-wrap { flex: 0 0 23rem; }
+.sr-panel > .sr-card {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+table.sheet.sr-value-table { font-size: 0.86rem; }
+table.sheet.sr-value-table th { font-size: 0.66rem; padding: 0.6rem 0.85rem; }
+table.sheet.sr-value-table td { padding: 0.58rem 0.85rem; }
+table.sheet.sr-value-table tbody tr:nth-child(even) td { background: var(--surface-2); }
+table.sheet.sr-value-table tr.row-link:hover td { background: var(--row-highlight); }
+.sr-value-team-btn {
+  font: inherit;
+  font-weight: 600;
+  color: var(--cobalt);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+/* `tbody` is load-bearing, not decoration: the zebra rule above is
+   `…tbody tr:nth-child(even) td`, which carries one MORE element selector than a
+   `…tr.sr-value-active td` would, so it wins the cascade and the selected row keeps the
+   striped background while still taking this rule's pale text — i.e. an even-numbered
+   row (VJ Maxx at #2) renders invisible. Matching the element count and sitting later in
+   the file is what makes the highlight actually apply. */
+table.sheet.sr-value-table tbody tr.sr-value-active td {
+  background: var(--clay);
+  color: var(--paper);
+  font-weight: 700;
+}
+table.sheet.sr-value-table tbody tr.sr-value-active .sr-value-team-btn {
+  color: var(--paper);
+}
+table.sheet.sr-value-table tbody tr.sr-value-active:hover td { background: var(--clay); }
+
+/* Strength by Position — the same percentiles as the bar chart, ordered by strength
+   instead of board position. Sits third in .sr-panel. */
+.sbp-card {
+  flex: 0 0 12rem;
+  min-width: 0;
+  padding: 1.1rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+}
+.sbp-title { font-size: 0.92rem; margin: 0 0 0.8rem; }
+/* space-between spreads the eight rows over whatever height the panel's tallest column
+   sets, so this card fills to the same bottom edge as the other two. */
+.sbp-rows {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+.sbp-row { display: flex; align-items: center; gap: 0.5rem; }
+.sbp-label {
+  flex: 0 0 2.2rem;
+  text-align: right;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.sbp-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 0.85rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.sbp-fill { display: block; height: 100%; border-radius: 999px; }
+.sbp-good { background: var(--good); }
+.sbp-bad { background: var(--bad); }
+
+@media (max-width: 900px) {
+  .sr-panel { flex-wrap: wrap; }
+  .sr-value-wrap { flex: 1 1 100%; width: 100%; }
+  .sr-panel > .sr-card { flex: 1 1 100%; }
+  .sbp-card { flex: 1 1 100%; }
+  /* Stacked, the rows have no tall neighbour to spread against — keep them compact. */
+  .sbp-rows { justify-content: flex-start; }
 }

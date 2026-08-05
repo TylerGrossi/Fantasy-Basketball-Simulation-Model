@@ -56,58 +56,177 @@ export function headshotUrl(playerId: number | null | undefined): string | null 
 /** One starting slot's result: your player there, and how they rank against the
  *  league's other starters in that same slot. */
 export interface StarterRank {
-  /** "PG" / "SG" / "G" / "SF" / "PF" / "F" / "C" / "Util1" / "Util2" / "Util3". */
+  /** "PG" / "SG" / "SF" / "PF" / "C" / "G" / "F" / "Util1" / "Util2" / "Util3". */
   slot: string;
   player: PoolPlayer | null;
   /** 1 = best in the league at this slot. Null when the slot is empty for this team. */
   rank: number | null;
-  /** How many players this rank is out of — the league's team count for a single-count
-   *  slot, or teamCount * 3 for the pooled UTIL group. */
+  /** How many players this rank is out of — one per team for a position-locked slot,
+   *  or three per team for the pooled UTIL group. */
   poolSize: number;
 }
 
-/** Single-count starting slots, backcourt -> frontcourt, matching ESPN's own ordering
- *  for this widget (PG, SG, G, SF, PF, F, C — flex slots sit next to their pair). */
-const SINGLE_SLOTS = ["PG", "SG", "G", "SF", "PF", "F", "C"];
+/** ESPN's ten starting slots, in board order — position-locked first, then the
+ *  combination slots, then UTIL. Same layout the Lineup board uses. */
+export const STARTER_LAYOUT = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "UTIL", "UTIL"];
 
 /**
- * ESPN's "Starter Rankings" widget: for each of your starting slots, where your player
- * ranks against the league's other players in that same slot, by 9-cat value.
- *
- * UTIL gets different treatment than the others. A single-count slot (PG, ...) has
- * exactly one player per team, so "rank against the league" is unambiguous. UTIL has
- * THREE per team with no inherent order — ESPN doesn't call one of them "the starting
- * UTIL" — so every team's three UTIL players are pooled into one group of
- * `teamCount * 3`, and your three are ranked within that pool, best-to-worst labeled
- * Util1/Util2/Util3.
+ * Can this player legally fill this slot? Mirrors `eligibleFor` in LineupView — G takes
+ * either guard, F either forward, UTIL anyone. Read from `eligibleSlots` (every position
+ * ESPN lists a player at), never the single default `position`.
  */
-export function starterRankings(pool: PoolPlayer[], teamName: string): StarterRank[] {
+export function eligibleForSlot(p: PoolPlayer, slot: string): boolean {
+  if (slot === "UTIL") return true;
+  const raw = p.eligibleSlots?.length ? p.eligibleSlots : p.position ? [p.position] : [];
+  const e = new Set(raw.map((s) => s.trim().toUpperCase()));
+  if (slot === "G") return e.has("PG") || e.has("SG") || e.has("G");
+  if (slot === "F") return e.has("SF") || e.has("PF") || e.has("F");
+  return e.has(slot);
+}
+
+/**
+ * Seat as many of `players` into distinct `slots` as possible (Kuhn's algorithm for
+ * maximum bipartite matching). Returns `slotIndex -> playerIndex`, null where unfilled.
+ */
+function maxMatching(players: PoolPlayer[], slots: string[]): Array<number | null> {
+  const slotOf: Array<number | null> = slots.map(() => null);
+  const augment = (pi: number, seen: boolean[]): boolean => {
+    for (let si = 0; si < slots.length; si++) {
+      if (seen[si] || !eligibleForSlot(players[pi], slots[si])) continue;
+      seen[si] = true;
+      const cur = slotOf[si];
+      if (cur === null || augment(cur, seen)) {
+        slotOf[si] = pi;
+        return true;
+      }
+    }
+    return false;
+  };
+  for (let pi = 0; pi < players.length; pi++) {
+    augment(pi, slots.map(() => false));
+  }
+  return slotOf;
+}
+
+/** How many of `players` can be seated at once — `players.length` means "all of them fit". */
+function seatable(players: PoolPlayer[], slots: string[]): number {
+  return maxMatching(players, slots).filter((x) => x !== null).length;
+}
+
+/**
+ * The best legal starting lineup a roster could field, as `layout`-parallel slots.
+ *
+ * NOT the lineup that was actually set. The season is over, so every player's
+ * `lineupSlot` is frozen at whatever last Sunday's roster happened to look like — a team
+ * whose manager stopped setting lineups in March would be judged on a lineup nobody
+ * chose. Ranking on the best AVAILABLE ten measures the roster instead of the last
+ * click, which is the comparison this widget is actually for.
+ *
+ * Two passes, because "which ten" and "who goes where" are different questions:
+ *
+ *  1. PICK the ten. Highest value first, taking a player only if everyone taken so far
+ *     can still be seated. Greedy is provably optimal here — seatable sets of players
+ *     form a transversal matroid, and greedy is exactly what matroids are the condition
+ *     for. Filling slots one at a time in board order is NOT: with a single centre on
+ *     the roster, taking him at PF (where he outranks the alternatives) leaves C empty
+ *     and strands more value than it gains.
+ *  2. SEAT them. Best player into the earliest slot he fits, but only when everyone left
+ *     can still fill the slots that remain — so PG gets your best guard rather than the
+ *     leftovers, without that choice orphaning a later slot.
+ */
+export function bestLineup(
+  roster: PoolPlayer[],
+  layout: string[] = STARTER_LAYOUT
+): Array<PoolPlayer | null> {
+  const ranked = [...roster].sort((a, b) => b.value - a.value);
+
+  const chosen: PoolPlayer[] = [];
+  for (const p of ranked) {
+    if (chosen.length >= layout.length) break;
+    const trial = [...chosen, p];
+    if (seatable(trial, layout) === trial.length) chosen.push(p);
+  }
+
+  const out: Array<PoolPlayer | null> = layout.map(() => null);
+  const left = [...chosen]; // still value-descending
+  for (let si = 0; si < layout.length; si++) {
+    for (let k = 0; k < left.length; k++) {
+      if (!eligibleForSlot(left[k], layout[si])) continue;
+      const rest = left.filter((_, j) => j !== k);
+      if (seatable(rest, layout.slice(si + 1)) === rest.length) {
+        out[si] = left[k];
+        left.splice(k, 1);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * ESPN's "Starter Rankings" widget: for each starting slot, where this team's player
+ * ranks against every other team's player in that same slot, by 9-cat value. Every team
+ * is measured on its BEST possible lineup (see `bestLineup`), not the one last set.
+ *
+ * UTIL is pooled rather than ranked slot-by-slot. A position-locked slot holds exactly
+ * one player per team, so "rank against the league" is unambiguous; UTIL holds three
+ * with no inherent order, so all teams' UTIL players go into one group of `teams * 3`
+ * and this team's three are ranked within it, best-first as Util1/Util2/Util3.
+ */
+export function starterRankings(
+  pool: PoolPlayer[],
+  teamName: string,
+  layout: string[] = STARTER_LAYOUT
+): StarterRank[] {
+  const byOwner = new Map<string, PoolPlayer[]>();
+  for (const p of pool) {
+    if (!p.owner || isFreeAgent(p)) continue;
+    const list = byOwner.get(p.owner) ?? [];
+    list.push(p);
+    byOwner.set(p.owner, list);
+  }
+
+  const lineups = new Map<string, Array<PoolPlayer | null>>();
+  for (const [owner, roster] of byOwner) lineups.set(owner, bestLineup(roster, layout));
+
+  const mine = lineups.get(teamName) ?? layout.map(() => null);
   const out: StarterRank[] = [];
 
-  for (const slot of SINGLE_SLOTS) {
-    const ranked = pool.filter((p) => p.lineupSlot === slot).sort((a, b) => b.value - a.value);
-    const idx = ranked.findIndex((p) => p.owner === teamName);
+  layout.forEach((slot, si) => {
+    if (slot === "UTIL") return; // pooled below
+    const field = [...lineups.values()]
+      .map((l) => l[si])
+      .filter((p): p is PoolPlayer => p != null)
+      .sort((a, b) => b.value - a.value);
+    const p = mine[si];
     out.push({
       slot,
-      player: idx >= 0 ? ranked[idx] : null,
-      rank: idx >= 0 ? idx + 1 : null,
-      poolSize: ranked.length,
-    });
-  }
-
-  const utilRanked = pool.filter((p) => p.lineupSlot === "UTIL").sort((a, b) => b.value - a.value);
-  const myUtils = utilRanked.filter((p) => p.owner === teamName);
-  for (let i = 0; i < 3; i++) {
-    const p = myUtils[i] ?? null;
-    out.push({
-      slot: `Util${i + 1}`,
       player: p,
-      // Reference equality, not name: two same-named players can't collide, and this
-      // avoids a second pass matching on identity into the same sorted array.
-      rank: p ? utilRanked.indexOf(p) + 1 : null,
-      poolSize: utilRanked.length,
+      // Reference identity, not name — two players can share a name, and the field is
+      // built from these very objects.
+      rank: p ? field.indexOf(p) + 1 : null,
+      poolSize: field.length,
     });
-  }
+  });
+
+  const utilIdx = layout.flatMap((s, i) => (s === "UTIL" ? [i] : []));
+  const utilField = [...lineups.values()]
+    .flatMap((l) => utilIdx.map((i) => l[i]))
+    .filter((p): p is PoolPlayer => p != null)
+    .sort((a, b) => b.value - a.value);
+  const myUtils = utilIdx
+    .map((i) => mine[i])
+    .filter((p): p is PoolPlayer => p != null)
+    .sort((a, b) => b.value - a.value);
+  utilIdx.forEach((_, n) => {
+    const p = myUtils[n] ?? null;
+    out.push({
+      slot: `Util${n + 1}`,
+      player: p,
+      rank: p ? utilField.indexOf(p) + 1 : null,
+      poolSize: utilField.length,
+    });
+  });
 
   return out;
 }

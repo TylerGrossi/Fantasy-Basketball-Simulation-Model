@@ -8,31 +8,67 @@
  * the export already carries, and it should be read as one. Every number on the draft
  * board is an estimate with a stated method, not a fact.
  *
- * WHY NOT JUST RANK THIS SEASON'S STATS: because that ranking is wrong in four known,
- * correctable ways, and each one is a step below.
+ * THE CENTRAL IDEA: a per-game line is THREE things multiplied together, and a projection
+ * has to take them apart before it can put them back.
  *
- *   1. FORM      a player's last 30 days carry role information the season average has
- *                already averaged away.
- *   2. SAMPLE    a 14-game line is mostly noise; a 74-game line is mostly signal. They
- *                should not be trusted equally.
- *   3. AGE       identical lines from a 22-year-old and a 34-year-old are not worth the
- *                same thing next season.
- *   4. LUCK      shooting percentages regress hard, and they regress in proportion to
- *                how few attempts they rest on. An 89% free-throw shooter on 40 attempts
- *                is not an 89% free-throw shooter.
+ *     per-game production  =  production per minute  x  minutes per game
+ *     season value         =  per-game production    x  games available
  *
- * Plus a fifth thing a per-game ranking ignores entirely: AVAILABILITY. 78 games of a
- * good player beats 52 games of a slightly better one, and games played is itself
- * strongly mean-reverting, so last season's 52 does not project as next season's 52.
+ * Conflating them is what makes a naive ranking wrong. An injured star reads as a worse
+ * player instead of an unavailable one. A player whose minutes doubled because the man
+ * ahead of him got hurt reads as having improved. A player traded into a bigger role
+ * reads as unchanged. All three are the SAME error — attributing a change in opportunity
+ * to a change in ability, or vice versa.
  *
- * The pipeline, in order:
+ * So the model works in per-36 space, where opportunity has been divided out, and
+ * projects minutes and games as their own quantities:
  *
- *   season line + last-30 line  ->  blend            (form)
- *                               ->  regress          (sample size)
- *                               ->  age curve        (aging)
- *                               ->  shrink rates     (luck)
- *                               ->  project games    (availability)
- *                               ->  z-score + tiers  (scoring, in `scoreProjections`)
+ *   3 seasons of history  ->  per-36 blend       (skill, opportunity removed)
+ *                         ->  regress            (sample size, in MINUTES)
+ *                         ->  age curve          (aging)
+ *                         ->  shrink rates       (shooting luck)
+ *                         ->  x projected minutes (role)
+ *                         ->  x projected games   (availability)
+ *                         ->  z-score + tiers     (scoring, in `scoreProjections`)
+ *
+ * Three seasons, weighted toward the present. One season is too few to tell a career year
+ * from a career; the third season back is mostly there to stop a single outlier — a lost
+ * year, a fluke shooting season — from setting the whole projection.
+ *
+ * WHAT IT STILL CANNOT SEE: the model has box scores, not depth charts. A player whose
+ * minutes spiked because a teammate tore an ACL and a player whose minutes spiked because
+ * he earned the job look identical in this data. Both are treated as PARTLY persistent —
+ * the minutes projection carries most of the current role forward but regresses it toward
+ * the player's own multi-year baseline, which is the honest split when you cannot tell the
+ * two apart. Confirmed offseason trades and depth-chart moves are not in here at all.
+ *
+ * ---------------------------------------------------------------------------------------
+ * UNFINISHED. The page is hidden from the nav (HIDDEN_FROM_NAV in lib/nav.ts) because the
+ * ranking is still wrong in ways an owner spotted immediately. Do not un-hide it until
+ * these are addressed. Recorded here so the next pass starts from evidence:
+ *
+ *   1. STARS WITH LOST SEASONS ARE STILL TOO LOW. The rebuild moved Giannis 51 -> 37 and
+ *      Trae Young 75 -> 39, but 37 is still not a defensible draft slot for him, and
+ *      Wembanyama (4th) reads low too. Note he is only 2 ranks better on `perGame` than on
+ *      `total`, so this is NOT the availability discount — it is the production estimate
+ *      or the category scoring. Giannis's real 9-cat profile (65% FT on volume, ~0 threes,
+ *      3+ turnovers) genuinely punishes him, so check whether the z-scoring is
+ *      over-weighting the ratio categories before touching the projection itself.
+ *
+ *   2. YOUNG PLAYERS ON THIN SAMPLES ARE TOO HIGH. Kon Knueppel ranked 10th. The likely
+ *      cause is compounding: the age GROWTH multiplier and the per-36 extrapolation both
+ *      reward a young player with limited minutes, and nothing caps their product. A
+ *      per-36 rate from a bench role does not survive a starter's minutes, which is
+ *      exactly what the model currently assumes when it multiplies one by the other.
+ *
+ *   3. TIERS ARE DEGENERATE. Measured on the live board: 23 tiers, seven of them with one
+ *      player, the first twelve holding 29 players between them, then a wall of tiers of
+ *      exactly TIER_MAX, then a single tier of 140. The cause is in `assignTiers` — the
+ *      threshold is `mean + TIER_SIGMA * sd` over ALL gaps in the top 160, and the top of
+ *      the board has gaps far larger than the middle, so nearly every early gap clears it
+ *      and nearly no later one does. It needs a LOCAL scale (a rolling median of nearby
+ *      gaps) and a minimum tier size, not a different sigma.
+ * ---------------------------------------------------------------------------------------
  *
  * The split between this file's two halves matters for the page's payload: `projectPool`
  * is the expensive, fixed part and runs ONCE on the server; `scoreProjections` is the
@@ -41,7 +77,7 @@
  * lines cross between them.
  */
 
-import type { PoolPlayer } from "./league";
+import type { PoolPlayer, SeasonLine } from "./league";
 import { playerStatus } from "./playerPool";
 
 /* -------------------------------------------------------------------------- */
@@ -104,52 +140,123 @@ export interface DraftRow extends ProjectedLine {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 1. Form — blending the season with the last 30 days                         */
+/* 1. Multi-year blend — per-36 production across up to three seasons          */
 /* -------------------------------------------------------------------------- */
 
 /**
- * How much weight the last-30 window can take, at most.
+ * Season weights, newest first. Heavily current, but not only current.
  *
- * Deliberately a minority share. The last 30 days is the smaller sample of the two and
- * is the one being used to detect a genuine role change, so it has to be able to move
- * the projection without being able to define it — a hot March cannot outvote a season.
+ * The current season has to lead — it is the most recent evidence of what a player is and
+ * of the role he holds. But at 100% weight one lost season rewrites a career, which is
+ * exactly the Giannis case: 36 games at reduced minutes does not turn a 30-point player
+ * into a 27-point player, it turns him into a 30-point player who was hurt.
  */
-const MAX_RECENT_WEIGHT = 0.35;
+const SEASON_WEIGHT = [0.6, 0.25, 0.15];
 
-/** Last-30 games at which that weight is reached. Below it, weight scales down. */
-const RECENT_FULL_GP = 14;
+/**
+ * Games at which a season reaches half its nominal weight.
+ *
+ * Applied ON TOP of the season weights, so a 20-game season contributes less than an
+ * 80-game one at the same recency. This is the ONLY place a short season is discounted —
+ * it lowers that season's vote, and never the player's projected rate. Availability is a
+ * separate quantity, projected separately, further down.
+ */
+const SEASON_CRED_K = 20;
 
-function blendForm(p: PoolPlayer): { line: Line; weight: number } {
-  const season: Line = {};
-  for (const s of PROJ_STATS) season[s] = Number(p[s as keyof PoolPlayer] ?? 0);
+/** Minutes are per-36; a player below this in a season has no meaningful rate to take. */
+const MIN_FLOOR = 4;
 
-  const l30 = p.last30;
-  const l30gp = Number(l30?.gp ?? 0);
-  // No last-30 window is NOT a window of zeros — a player who did not play in it has no
-  // recent evidence either way, so the season line stands unaltered.
-  if (!l30 || l30gp <= 0) return { line: season, weight: 0 };
+/** One season converted to per-36. Returns null when there are no minutes to divide by. */
+function per36(s: SeasonLine): Line | null {
+  if (!s.min || s.min < MIN_FLOOR) return null;
+  const k = 36 / s.min;
+  const out: Line = {};
+  for (const stat of PROJ_STATS) out[stat] = Number(s[stat as keyof SeasonLine] ?? 0) * k;
+  return out;
+}
 
-  const weight = MAX_RECENT_WEIGHT * Math.min(1, l30gp / RECENT_FULL_GP);
+interface Blend {
+  /** Weighted per-36 line across the seasons that had usable minutes. */
+  line: Line;
+  /** Total minutes behind it — the sample the regression below is sized against. */
+  minutes: number;
+  /**
+   * The player's established role, in minutes per game, from the seasons BEFORE this one.
+   *
+   * Deliberately excludes the current season. This is the number the current role is
+   * regressed toward, and a regression target computed from the thing being regressed is
+   * no target at all — with the current season included, an injured player's reduced
+   * minutes were most of their own baseline and barely pulled back at all.
+   */
+  priorMin: number;
+  /** Games behind the current season, for weighting how much its role signal is worth. */
+  currentGp: number;
+  seasons: number;
+}
+
+/**
+ * Blend a player's history into one per-36 line, plus the sample and role behind it.
+ *
+ * DD is the one stat ESPN's career feed does not publish, so it is carried from the
+ * current season alone by the caller — a projected double-double rate built from two
+ * seasons of data and one of guesswork would be worse than one honest season.
+ */
+function blendHistory(history: SeasonLine[]): Blend | null {
+  let wsum = 0;
+  let minutes = 0;
+  let seasons = 0;
+  // Prior-season role, weighted only by how much each season was played.
+  let priorNum = 0;
+  let priorDen = 0;
+  const acc: Line = {};
+  for (const stat of PROJ_STATS) acc[stat] = 0;
+
+  const used = history.slice(0, SEASON_WEIGHT.length);
+  used.forEach((s, i) => {
+    const rate = per36(s);
+    if (!rate || s.gp <= 0) return;
+    const cred = s.gp / (s.gp + SEASON_CRED_K);
+    const w = SEASON_WEIGHT[i] * cred;
+    if (w <= 0) return;
+    for (const stat of PROJ_STATS) acc[stat] += rate[stat] * w;
+    minutes += s.min * s.gp;
+    wsum += w;
+    seasons++;
+    if (i > 0) {
+      priorNum += s.min * cred;
+      priorDen += cred;
+    }
+  });
+
+  if (!wsum || !seasons) return null;
   const line: Line = {};
-  for (const s of PROJ_STATS) {
-    const recent = Number(l30[s] ?? season[s]);
-    line[s] = season[s] * (1 - weight) + recent * weight;
-  }
-  return { line, weight };
+  for (const stat of PROJ_STATS) line[stat] = acc[stat] / wsum;
+  const current = used[0];
+  return {
+    line,
+    minutes,
+    // With no earlier season to compare against, the current role IS the baseline and
+    // the regression below becomes a no-op — which is the right answer for a rookie.
+    priorMin: priorDen > 0 ? priorNum / priorDen : Number(current?.min ?? 0),
+    currentGp: Number(current?.gp ?? 0),
+    seasons,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
-/* 2. Sample size — regressing a short season toward its position              */
+/* 2. Sample size — regressing a thin history toward its position              */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Games at which a player's own line and the prior carry equal weight.
+ * MINUTES at which a player's own rate and the prior carry equal weight.
  *
- * At k = 12 a 70-game season keeps 85% of itself (the projection is essentially the
- * player), a 30-game season keeps 71%, and a 10-game season keeps 45% — which is about
- * right for a line nobody should believe.
+ * Minutes, not games, because the sample that determines a per-36 rate is time on court:
+ * 30 games at 34 minutes is a real sample and 30 games at 9 minutes is not, and a
+ * games-based rule cannot tell them apart. ~1200 is around a third of a full season's
+ * minutes, so a healthy starter clears it in one year and a deep-bench player never quite
+ * does across three.
  */
-const SAMPLE_K = 12;
+const SAMPLE_MIN_K = 1200;
 
 /**
  * The prior a short season is pulled toward: the 40th percentile of the player's own
@@ -261,16 +368,8 @@ export function ageMultiplier(
  */
 const RATE_K: Record<string, number> = { fg: 240, ft: 55, tp: 120 };
 
-/** Shrunk rate: `(made + k*prior) / (attempts + k)`, on SEASON TOTALS, not per game. */
-function shrinkRate(
-  perGameMade: number,
-  perGameAtt: number,
-  gp: number,
-  prior: number,
-  k: number
-): number {
-  const att = perGameAtt * gp;
-  const made = perGameMade * gp;
+/** Shrunk rate: `(made + k*prior) / (attempts + k)`, on TOTALS, not per game. */
+function shrinkTotals(made: number, att: number, prior: number, k: number): number {
   if (att + k <= 0) return prior;
   return (made + k * prior) / (att + k);
 }
@@ -280,15 +379,62 @@ function shrinkRate(
 /* -------------------------------------------------------------------------- */
 
 /**
- * How much of last season's games-played carries forward.
+ * Season weights for AVAILABILITY — flatter than the production weights above.
  *
- * Games played is one of the most mean-reverting quantities in the sport — season to
- * season it correlates only weakly with itself, because most missed time is one-off
- * injury rather than a durable trait. Half weight on the player, half on the field is
- * roughly what that correlation supports; anything more would make one unlucky ankle
- * into a permanent verdict.
+ * Deliberately not `SEASON_WEIGHT`. Games played is one of the most mean-reverting
+ * quantities in the sport: season to season it correlates only weakly with itself,
+ * because most missed time is one-off injury rather than a durable trait. Leaning as hard
+ * on the current season for games as for production would make one unlucky ankle a
+ * permanent verdict — which is the exact complaint this model was rebuilt to answer. A
+ * three-year availability record is a far better guide to next year than the last twelve
+ * months, and these weights say so.
+ */
+const GP_SEASON_WEIGHT = [0.45, 0.3, 0.25];
+
+/**
+ * How much of that multi-year games record carries forward, against the field's median.
+ *
+ * Half on the player, half on the field is roughly what the year-over-year correlation
+ * supports once the player's own number is already a three-year average.
  */
 const GP_CARRY = 0.5;
+
+/* -------------------------------------------------------------------------- */
+/* 6. Role — projected minutes per game                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How much of the CURRENT season's minutes carry, against the multi-year baseline.
+ *
+ * This one constant is the whole answer to "his role changed". Minutes are the cleanest
+ * role signal in a box score, and the two cases that matter pull in opposite directions:
+ *
+ *   - A player traded into a bigger job, or who won one, should keep most of the raise.
+ *   - A player whose minutes spiked covering an injured teammate should give most of it
+ *     back, because the job was never his.
+ *
+ * Nothing in this data distinguishes them — that would take a depth chart. At 0.65 the
+ * current role leads and the multi-year baseline pulls the rest, which splits the
+ * difference in the direction of "opportunity is stickier than it looks, but not
+ * permanent". A player whose minutes have been flat for three years is unaffected either
+ * way, since his current season IS his baseline.
+ */
+const MIN_CARRY = 0.65;
+
+/**
+ * A full season's worth of credibility, used to scale MIN_CARRY down for a short one.
+ *
+ * An injury-shortened season is weak evidence about a ROLE as well as about production:
+ * a star on a minutes restriction over 36 games has not been demoted, and letting those
+ * 36 games set next season's minutes was what left Giannis projected at 29 MPG against a
+ * 34-35 MPG career. So the current season carries the full MIN_CARRY only when it was
+ * actually played; below that, its share falls and the prior-season role takes the rest.
+ */
+const ROLE_FULL_GP = 70;
+
+/** Bounds on the projected role, so no single season can invent or erase a rotation spot. */
+const MIN_CEIL = 38;
+const MIN_FLOOR_PROJ = 8;
 /** Games lost per year of age past this. Old players miss more, and it compounds. */
 const GP_AGE_FROM = 31;
 const GP_AGE_COST = 1.4;
@@ -322,13 +468,26 @@ export function projectPool(pool: PoolPlayer[]): ProjectedLine[] {
   const byGroup = new Map<string, PoolPlayer[]>([["G", []], ["W", []], ["B", []]]);
   for (const p of priorSource) byGroup.get(positionGroup(p))!.push(p);
 
-  /** Per-stat 40th-percentile line for a position group (falling back to the whole pool). */
+  /**
+   * Every player's blended per-36 line, computed once and reused — the priors are built
+   * out of these, so they have to exist before the per-player loop runs.
+   *
+   * A player with no usable history keeps `null` and takes the single-season fallback
+   * path below, where minutes are unknown and the projection stays in per-game space.
+   */
+  const blends = new Map<string, Blend | null>();
+  for (const p of players) {
+    blends.set(p.name, p.history?.length ? blendHistory(p.history) : null);
+  }
+
+  /** Per-stat 40th-percentile PER-36 line for a position group. */
   const priorLine = (group: string): Line => {
     const peers = (byGroup.get(group) ?? []).length >= 8 ? byGroup.get(group)! : priorSource;
     const out: Line = {};
     for (const s of PROJ_STATS) {
       const vals = peers
-        .map((p) => Number(p[s as keyof PoolPlayer] ?? 0))
+        .map((p) => blends.get(p.name)?.line[s])
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
         .sort((a, b) => a - b);
       out[s] = percentile(vals, PRIOR_PCTILE);
     }
@@ -349,6 +508,29 @@ export function projectPool(pool: PoolPlayer[]): ProjectedLine[] {
       a += Number(p[att as keyof PoolPlayer] ?? 0) * gp;
     }
     return a > 0 ? m / a : 0;
+  };
+
+  /**
+   * A player's shooting over their whole HISTORY, as season totals.
+   *
+   * The rate shrinkage below is sized by attempts, so feeding it three seasons instead of
+   * one roughly triples the sample and shrinks a settled shooter far less. It also stops a
+   * 36-game season from dragging a career 65% free-throw shooter toward the league mean on
+   * the strength of one interrupted year.
+   */
+  const careerShooting = (p: PoolPlayer, made: ProjStat, att: ProjStat) => {
+    let m = 0;
+    let a = 0;
+    for (const s of (p.history ?? []).slice(0, SEASON_WEIGHT.length)) {
+      m += Number(s[made as keyof SeasonLine] ?? 0) * s.gp;
+      a += Number(s[att as keyof SeasonLine] ?? 0) * s.gp;
+    }
+    if (a <= 0) {
+      const gp = Number(p.gp ?? 0);
+      m = Number(p[made as keyof PoolPlayer] ?? 0) * gp;
+      a = Number(p[att as keyof PoolPlayer] ?? 0) * gp;
+    }
+    return { made: m, att: a };
   };
   const ratePriors = new Map(
     ["G", "W", "B"].map((g) => [
@@ -384,13 +566,26 @@ export function projectPool(pool: PoolPlayer[]): ProjectedLine[] {
     const actual: Line = {};
     for (const s of PROJ_STATS) actual[s] = Number(p[s as keyof PoolPlayer] ?? 0);
 
-    // 1. form
-    const { line: blended, weight: formWeight } = blendForm(p);
+    // 1. multi-year blend, in per-36 space. `null` = no usable minutes anywhere, so the
+    //    player falls back to their raw per-game line and a league-typical role.
+    const blend = blends.get(p.name) ?? null;
+    const currentMin = Number(p.history?.[0]?.min ?? 0);
+    const base: Line = blend
+      ? blend.line
+      : (() => {
+          // Fallback: treat the per-game line AS IF it were per-36. It is the same shape
+          // of number, and the role multiplier below is 1 for these players, so the
+          // projection reduces exactly to the old per-game behaviour.
+          const out: Line = {};
+          for (const s of PROJ_STATS) out[s] = actual[s];
+          return out;
+        })();
 
-    // 2. sample size
-    const w = gp / (gp + SAMPLE_K);
+    // 2. sample size, measured in MINUTES rather than games — see SAMPLE_MIN_K.
+    const sampleMin = blend ? blend.minutes : gp * 24;
+    const w = sampleMin / (sampleMin + SAMPLE_MIN_K);
     const regressed: Line = {};
-    for (const s of PROJ_STATS) regressed[s] = blended[s] * w + prior[s] * (1 - w);
+    for (const s of PROJ_STATS) regressed[s] = base[s] * w + prior[s] * (1 - w);
 
     // 3. age
     const aged: Line = {};
@@ -398,58 +593,116 @@ export function projectPool(pool: PoolPlayer[]): ProjectedLine[] {
       aged[s] = regressed[s] * ageMultiplier(age, exp, FAMILY[s] ?? "scoring");
     }
 
-    // 4. rates. Attempts are projected like any other volume stat; the RATE is shrunk
-    //    separately, and makes are then derived from the pair — so FGM, FGA and FG%
-    //    can never disagree with each other on the card the way three independently
-    //    projected numbers would.
-    const projFgPct = shrinkRate(actual.FGM, actual.FGA, gp, rp.fg, RATE_K.fg);
-    const projFtPct = shrinkRate(actual.FTM, actual.FTA, gp, rp.ft, RATE_K.ft);
-    const projTpPct = shrinkRate(actual["3PM"], actual["3PA"], gp, rp.tp, RATE_K.tp);
+    // 4. role. The current season's minutes lead; the multi-year baseline pulls a spike
+    //    (or a dip) part of the way back. See MIN_CARRY for why this is the honest split.
+    let projMin = 0;
+    if (blend && currentMin >= MIN_FLOOR) {
+      // How much this season's role signal is worth, discounted if it was cut short.
+      const credFull = ROLE_FULL_GP / (ROLE_FULL_GP + SEASON_CRED_K);
+      const credNow = blend.currentGp / (blend.currentGp + SEASON_CRED_K);
+      const roleW = MIN_CARRY * Math.min(1, credNow / credFull);
+      projMin = roleW * currentMin + (1 - roleW) * blend.priorMin;
+      projMin = Math.min(MIN_CEIL, Math.max(MIN_FLOOR_PROJ, projMin));
+    }
+    // Scale per-36 back to per-game. Without minutes the base line is already per-game.
+    const roleScale = blend && projMin > 0 ? projMin / 36 : 1;
+    const scaled: Line = {};
+    for (const s of PROJ_STATS) scaled[s] = aged[s] * roleScale;
 
-    const proj: Line = { ...aged };
+    // 5. rates. Attempts are projected like any other volume stat; the RATE is shrunk
+    //    separately over the player's whole history, and makes are then derived from the
+    //    pair — so FGM, FGA and FG% can never disagree with each other on the card the
+    //    way three independently projected numbers would.
+    const fgTot = careerShooting(p, "FGM", "FGA");
+    const ftTot = careerShooting(p, "FTM", "FTA");
+    const tpTot = careerShooting(p, "3PM", "3PA");
+    const projFgPct = shrinkTotals(fgTot.made, fgTot.att, rp.fg, RATE_K.fg);
+    const projFtPct = shrinkTotals(ftTot.made, ftTot.att, rp.ft, RATE_K.ft);
+    const projTpPct = shrinkTotals(tpTot.made, tpTot.att, rp.tp, RATE_K.tp);
+
+    const proj: Line = { ...scaled };
     proj.FGM = proj.FGA * projFgPct;
     proj.FTM = proj.FTA * projFtPct;
     proj["3PM"] = proj["3PA"] * projTpPct;
+    // Double-doubles are the one stat ESPN's career feed omits, so they come from this
+    // season alone, scaled by the change in role rather than blended across years.
+    proj.DD = actual.DD * (blend && currentMin >= MIN_FLOOR ? projMin / currentMin : 1);
     // Points follow from the shot profile: 2 per field goal, 1 more for a three, 1 per
     // free throw. Verified against the export — the identity holds to rounding — so
     // deriving it is strictly better than projecting points as a fourteenth free
     // parameter that could then contradict the shooting line beside it.
     proj.PTS = 2 * proj.FGM + proj["3PM"] + proj.FTM;
 
-    // 5. games
+    // 6. availability, from the multi-year games record rather than this season alone.
+    //    This is where an injury is finally allowed to matter — and ONLY here. It has
+    //    already been kept out of the production rate above, which is the entire point:
+    //    a hurt star projects as a healthy star who plays fewer games, not a worse one.
+    const gpHistory = (p.history ?? []).slice(0, GP_SEASON_WEIGHT.length);
+    let ownGp = gp;
+    if (gpHistory.length) {
+      let num = 0;
+      let den = 0;
+      gpHistory.forEach((s, i) => {
+        num += s.gp * GP_SEASON_WEIGHT[i];
+        den += GP_SEASON_WEIGHT[i];
+      });
+      ownGp = den > 0 ? num / den : gp;
+    }
     const sev = playerStatus(p.status)[1];
-    let projGp = GP_CARRY * gp + (1 - GP_CARRY) * fieldGp;
+    let projGp = GP_CARRY * ownGp + (1 - GP_CARRY) * fieldGp;
     if (age != null) projGp -= GP_AGE_COST * Math.max(0, age - GP_AGE_FROM);
     if (sev === "out") projGp -= GP_INJURY_COST;
     projGp = Math.round(Math.min(GP_CEIL, Math.max(GP_FLOOR, projGp)));
 
     // ---- Why it moved ------------------------------------------------------
-    if (gp < PRIOR_MIN_GP) drivers.push(`${gp} games — heavily regressed`);
+    // Ordered by how much a drafter needs to know it: role first (it moves the line
+    // most), then availability, then the slower structural stuff.
+    if (blend && projMin > 0 && currentMin >= MIN_FLOOR) {
+      const d = projMin - currentMin;
+      if (Math.abs(d) >= 1.5) {
+        drivers.push(
+          `Role ${d > 0 ? "up" : "down"}: ${currentMin.toFixed(1)} → ${projMin.toFixed(1)} MPG`
+        );
+      }
+    }
+    if (gp < PRIOR_MIN_GP && projGp - gp >= 10) {
+      drivers.push(`Missed ${82 - gp} games — rate kept, availability discounted`);
+    } else if (projGp - gp >= 8) drivers.push(`Games regress up: ${gp} → ${projGp}`);
+    else if (gp - projGp >= 8) drivers.push(`Games regress down: ${gp} → ${projGp}`);
+    if (blend && blend.seasons >= 2) {
+      // Only worth saying when the older years actually pulled the line somewhere the
+      // current season would not have.
+      const cur = p.history?.[0];
+      const curRate = cur ? per36(cur) : null;
+      if (curRate && Math.abs(blend.line.PTS - curRate.PTS) >= 1.5) {
+        drivers.push(
+          blend.line.PTS > curRate.PTS
+            ? `${blend.seasons}-yr blend lifts a down year`
+            : `${blend.seasons}-yr blend cools a career year`
+        );
+      }
+    }
     if (age != null && age < PEAK_START && (exp == null || exp <= 4)) {
       drivers.push(`Age ${age} — growth curve`);
     }
     if (age != null && age > PEAK_END) drivers.push(`Age ${age} — decline curve`);
-    if (formWeight > 0.15) {
-      const seasonPts = actual.PTS;
-      const l30Pts = Number(p.last30?.PTS ?? seasonPts);
-      if (Math.abs(l30Pts - seasonPts) >= 2) {
-        drivers.push(l30Pts > seasonPts ? "Finished hot (last 30)" : "Faded late (last 30)");
-      }
-    }
-    if (Math.abs(projFtPct - p.ftPct) >= 0.03 && actual.FTA * gp < 150) {
+    if (Math.abs(projFtPct - p.ftPct) >= 0.03 && ftTot.att < 300) {
       drivers.push(`FT% regressed to ${(projFtPct * 100).toFixed(0)}%`);
     }
-    if (Math.abs(projTpPct - p.tpPct) >= 0.03 && actual["3PA"] * gp < 200) {
+    if (Math.abs(projTpPct - p.tpPct) >= 0.03 && tpTot.att < 400) {
       drivers.push(`3P% regressed to ${(projTpPct * 100).toFixed(0)}%`);
     }
-    if (projGp - gp >= 8) drivers.push(`Games regress up: ${gp} → ${projGp}`);
-    else if (gp - projGp >= 8) drivers.push(`Games regress down: ${gp} → ${projGp}`);
 
     // Confidence is about the INPUTS, not the ranking: how much of this projection is
-    // the player and how much is the prior filling in for a player we barely saw.
+    // the player and how much is the prior filling in for a player we barely saw. Now
+    // measured over the whole history, so a star with one lost season is not "low" —
+    // three years of minutes is a lot of evidence even when the last one was short.
     let confidence: Confidence = "med";
-    if (gp < PRIOR_MIN_GP || (age != null && age >= 35)) confidence = "low";
-    else if (gp >= 55 && age != null && age >= 23 && age <= 31) confidence = "high";
+    const seasons = blend?.seasons ?? 0;
+    if (sampleMin < SAMPLE_MIN_K || (age != null && age >= 35)) confidence = "low";
+    else if (sampleMin >= 3500 && seasons >= 2 && age != null && age >= 23 && age <= 31) {
+      confidence = "high";
+    }
 
     return {
       name: p.name,

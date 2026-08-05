@@ -166,9 +166,13 @@ export const IN_SEASON_ONLY = ["/playoffs"];
  * desktop dropdowns AND the mobile sub-row AND the offseason promotion below, so it
  * cannot reappear through one of the three while looking hidden in the other two.
  *
- * The ROUTE stays live, exactly as with IN_SEASON_ONLY: /draft still renders for anyone
- * with the link or a bookmark, and `sectionFor` still resolves it to Tools so a direct
- * visit keeps its sub-row. Hidden from the menus, not deleted.
+ * The ROUTE stays live, exactly as with IN_SEASON_ONLY: a page here still renders for
+ * anyone with the link or a bookmark, and `sectionFor` still resolves it to its section
+ * so a direct visit keeps its sub-row. Hidden from the menus, not deleted.
+ *
+ * /draft is hidden again: the projection model behind it is mid-rebuild and still ranks
+ * players wrongly enough that the board would mislead (see the note in lib/projection.ts).
+ * The route stays live to work on.
  */
 export const HIDDEN_FROM_NAV = ["/draft"];
 
@@ -178,6 +182,7 @@ export const HIDDEN_FROM_NAV = ["/draft"];
  *
  * Same contract as HIDDEN_FROM_NAV: the routes stay live and `sectionFor` still resolves
  * them, so a link or bookmark works on a phone; they just aren't advertised there.
+ *
  */
 export const HIDDEN_ON_MOBILE = ["/season", "/lineup"];
 
@@ -185,8 +190,12 @@ export const HIDDEN_ON_MOBILE = ["/season", "/lineup"];
  * The mirror image of IN_SEASON_ONLY: pages the offseason should lead with rather than
  * hide. The Draft Guide is the only Tools page whose subject is ahead of you instead of
  * behind you, so from April to October it is the reason to open the app — it moves to
- * the front of the Tools row and becomes what the Tools icon opens to. In season it
- * stays where it is, because then the timely page is the one about this week.
+ * the front of the Tools menu. In season it stays where it is, because then the timely
+ * page is the one about this week.
+ *
+ * DESKTOP ONLY in practice, since /draft is in HIDDEN_ON_MOBILE: the promotion runs over
+ * whatever survived filtering, and on mobile the draft board is already gone by then. The
+ * `landing` rule below is written to notice that rather than assume the promotion took.
  */
 const OFFSEASON_FIRST = "/draft";
 

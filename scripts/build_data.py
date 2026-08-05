@@ -235,6 +235,111 @@ PLAYER_POOL_STATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO",
 _NBA_TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
 _NBA_ROSTER_URL = ("https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
                    "/teams/{team_id}/roster")
+_ATHLETE_STATS_URL = ("https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
+                      "/athletes/{pid}/stats")
+
+# How many seasons of career history to carry, current included.
+HISTORY_SEASONS = 3
+
+# ESPN's per-season "averages" labels -> the keys the projection uses. The made-attempt
+# pairs ("11.2-20.3") are split by _split_pair below rather than mapped directly.
+_HIST_SIMPLE = {
+    "REB": "REB", "AST": "AST", "STL": "STL", "BLK": "BLK", "TO": "TO", "PTS": "PTS",
+}
+
+
+def _hist_num(v):
+    """One ESPN stat cell as a float. Their blanks are '-', not null."""
+    try:
+        return float(str(v).strip())
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _split_pair(v):
+    """`'11.2-20.3'` -> `(11.2, 20.3)`. ESPN prints makes-attempts as ONE field."""
+    try:
+        made, att = str(v).split("-")
+        return float(made), float(att)
+    except (TypeError, ValueError):
+        return 0.0, 0.0
+
+
+def fetch_player_history(player_ids, season_year, workers=8):
+    """
+    Up to `HISTORY_SEASONS` seasons of per-game history per player, newest first.
+
+    THE POINT IS MINUTES AND AVAILABILITY. The fantasy export carries one season, so a
+    star who missed half of it looks like a worse player rather than an injured one, and a
+    player whose role doubled mid-career looks the same as one whose role never moved.
+    Career history separates the three things a projection has to tell apart: what a
+    player produces per minute, how many minutes the role gives him, and how many games
+    he is available for.
+
+    Costs ONE request per player (~290) because ESPN publishes no bulk career endpoint —
+    unlike ages, which come 30-at-a-time off team rosters. Threaded to keep that near the
+    length of a single round trip; a failure is per-player and simply omits that player's
+    history rather than failing the export.
+
+    Rows are keyed by season and de-duplicated by GP: a player traded mid-season gets one
+    row per team PLUS a combined row, and the combined row is the one with the most games.
+    """
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    ids = [int(i) for i in player_ids if i]
+
+    def one(pid):
+        try:
+            data = D.HTTP.get(_ATHLETE_STATS_URL.format(pid=pid), timeout=20).json()
+        except Exception:  # noqa: BLE001
+            return pid, None
+        avg = next(
+            (c for c in (data.get("categories") or []) if c.get("name") == "averages"),
+            None,
+        )
+        if not avg:
+            return pid, None
+        labels = avg.get("labels") or []
+        best = {}
+        for row in avg.get("statistics") or []:
+            try:
+                yr = int((row.get("season") or {}).get("year"))
+            except (TypeError, ValueError):
+                continue
+            if yr > season_year or yr <= season_year - HISTORY_SEASONS:
+                continue
+            cells = dict(zip(labels, row.get("stats") or []))
+            gp = _hist_num(cells.get("GP"))
+            # Keep the fullest row for the season — the combined line for a traded player.
+            if yr not in best or gp > best[yr]["gp"]:
+                fgm, fga = _split_pair(cells.get("FG"))
+                ftm, fta = _split_pair(cells.get("FT"))
+                tpm, tpa = _split_pair(cells.get("3PT"))
+                out = {
+                    "season": yr,
+                    "gp": int(gp),
+                    "min": _round(_hist_num(cells.get("MIN")), 2),
+                    "FGM": _round(fgm, 2), "FGA": _round(fga, 2),
+                    "FTM": _round(ftm, 2), "FTA": _round(fta, 2),
+                    "3PM": _round(tpm, 2), "3PA": _round(tpa, 2),
+                }
+                for label, key in _HIST_SIMPLE.items():
+                    out[key] = _round(_hist_num(cells.get(label)), 2)
+                best[yr] = out
+        rows = sorted(best.values(), key=lambda r: -r["season"])
+        return pid, (rows or None)
+
+    out = {}
+    failed = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for pid, rows in ex.map(one, ids):
+            if rows:
+                out[pid] = rows
+            else:
+                failed += 1
+    if failed:
+        print(f"  ! career history missing for {failed}/{len(ids)} players")
+    return out
 
 
 def fetch_player_ages():
@@ -306,6 +411,14 @@ def build_player_pool(app):
         print(f"  ! player pool failed: {exc}")
         return []
     ages = fetch_player_ages()
+    # Career history, for the draft projection's minutes/availability split. Fetched for
+    # the whole pool in one threaded pass rather than per player on demand.
+    hist_ids = [p.get("PlayerId") for p in pool
+                if p.get("PlayerId") == p.get("PlayerId") and p.get("PlayerId")]
+    t_hist = time.perf_counter()
+    history = fetch_player_history(hist_ids, config.ESPN_SEASON_YEAR)
+    print(f"  career history: {len(history)} players ({time.perf_counter() - t_hist:.1f}s)",
+          flush=True)
     out = []
     for p in pool:
         # EligibleSlots comes back as a plain list from build_stat_df, except when the
@@ -351,6 +464,12 @@ def build_player_pool(app):
             row["age"] = bio["age"]
         if "exp" in bio:
             row["exp"] = bio["exp"]
+
+        # Career per-game history, newest first. Absent for a rookie or a player ESPN has
+        # no career page for; the projection falls back to the single-season path.
+        hrows = history.get(row["playerId"])
+        if hrows:
+            row["history"] = hrows
 
         # The recent windows as their own per-game categories, alongside the season line.
         # `recent`/`recent15` collapse each window to one z-score; these are the raw

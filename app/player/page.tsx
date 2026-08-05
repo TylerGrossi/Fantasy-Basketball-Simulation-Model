@@ -22,8 +22,13 @@ export default async function Page({
 
   return (
     <>
-      <h1>Player Card</h1>
-      <p className="caption">Search any player and see their full profile.</p>
+      {/* Desktop-only chrome. On a phone the card itself leads with the player's
+          headshot and name, which says what the page is far better than a title and a
+          sentence of instructions — and buys back the vertical space they cost. */}
+      <div className="pd-page-head">
+        <h1>Player Card</h1>
+        <p className="caption">Search any player and see their full profile.</p>
+      </div>
       <PlayerCardView league={slim} initialName={initialName} />
     </>
   );

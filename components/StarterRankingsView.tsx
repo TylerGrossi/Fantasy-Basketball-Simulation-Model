@@ -15,13 +15,6 @@ export default function StarterRankingsView({
   team: string;
   ranks: StarterRank[];
 }) {
-  // The one line of "so what" under the chart — the slot you're weakest at, matching
-  // ESPN's own caption under this widget. Ties keep whichever comes first in display
-  // order; there's nothing principled to break a tie on, and only one sentence fits.
-  const worst = ranks
-    .filter((r): r is StarterRank & { rank: number } => r.rank !== null)
-    .sort((a, b) => b.rank - a.rank)[0];
-
   return (
     <section className="sr-card">
       <h2 className="sr-title">Starter Rankings Within Your League for: {team}</h2>
@@ -60,11 +53,6 @@ export default function StarterRankingsView({
         })}
       </div>
 
-      {worst && (
-        <p className="caption sr-insight">
-          You have the #{worst.rank} {worst.slot} in the league.
-        </p>
-      )}
     </section>
   );
 }

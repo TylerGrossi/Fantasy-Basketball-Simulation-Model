@@ -34,7 +34,11 @@ Data is split into two tiers, because a team's projected category total is
 `mu = current_total + Σ(avg × games_left)` and `sd` depends only on the projection:
 
 - **SLOW** (`scripts/build_data.py`, scheduled): player averages, games left, variances →
-  `public/data/league.json`. ~47 KB for the whole league.
+  `public/data/league.json`. **~722 KB** as of 2026-08-04 — it was 47 KB when this was
+  written and has grown with the season tables, the transaction feed and (the big one)
+  three seasons of per-player career history for the draft projection. Nothing reads all
+  of it: `trimLeague` gates the heavy sections per page, so check payload with
+  `curl -s <url> | wc -c` rather than assuming the file size is the cost.
 - **LIVE** (`app/api/live`, per request): current banked totals. One ESPN call. Current
   totals are certain, so they shift the mean and add **no** uncertainty — which is exactly
   why the expensive half is cacheable.
@@ -104,11 +108,31 @@ Done: repo split, `build_data.py` (matchups, free agents, season-wide data), the
 engine + cross-language tests, and **nine pages** — Scoreboard, Matchup, Roster,
 Streamers, Bench, Season, Schedule, Rankings, Playoffs.
 
-**Feature parity reached: 18 routes.** Home, Scoreboard, Matchup, Roster, Streamers,
-Bench, Season, Season Stats, League Stats, Schedule, Rankings, Playoffs, Player Value,
-Player Card, Compare, Trade, Agent, Settings — plus the desktop header (with Stats/Tools
+**Feature parity reached** at 18 routes — plus the desktop header (with Stats/Tools
 dropdowns) and the full mobile pattern (no header; bottom icon bar + section sub-row +
-This Week top sub-bar). The Agent chat page was the last gap; **parity is complete**.
+This Week top sub-bar). The Agent chat page was the last gap.
+
+**Now at 23 routes**, i.e. ahead of the Streamlit app. Added since parity: Lineup, Cheat
+Sheets, League Rosters, Recent Moves, Draft Guide. Four are not in every menu and all four
+switches are in `lib/nav.ts` — **Draft Guide** is hidden everywhere (its projection model
+is mid-rebuild; see `docs/FEATURE-IDEAS.md` E1 for the three known defects), **Playoff
+Odds** is in-season only, and **Season Summary** and **Lineup** are desktop-only. Hidden
+from the menus never means disabled: every one still renders at its URL.
+
+**Export fields added 2026-08-04** (all in `lib/league.ts`): `playerPool[].lineupSlot` and
+`.acquisitionType` (League Rosters), `.history` — up to three seasons of per-game lines
+*including minutes*, which nothing else in the export carries — plus `rosterSlots`,
+`seasonData.recentMoves`, and `standings[].moveToActive` / `.moveToIR`.
+
+**`acquisitionType` gotcha:** this league returns `ADD` for a wire pickup, **not**
+`FREEAGENCY`. Mapping only the obvious names silently blanked 45 of 142 rostered players.
+`acquisition_label()` in `build_data.py` title-cases anything unrecognised instead of
+dropping it, so the next unknown code shows up as itself rather than vanishing.
+
+**~290 per-athlete requests is affordable.** The old assumption that per-player fan-out
+was too expensive for the pipeline is false: `fetch_player_history` fetches all 289 in
+**1.9s** with an 8-worker `ThreadPoolExecutor`, failing per player rather than per run.
+Copy that shape — it unblocks anything needing per-player detail at pool scale.
 
 ### The Agent (`/agent`, `app/api/agent`)
 
@@ -235,29 +259,37 @@ persisting them (localStorage) rather than resetting each visit.
 
 ## What this project is
 
-A **Streamlit web app** that runs **Monte Carlo simulations** for an ESPN Fantasy
-Basketball league (head-to-head, category scoring). It pulls live data from ESPN
-via the `espn-api` package, projects the rest of a matchup week, and reports win
-probability, category breakdowns, streamer pickups, bench decisions, league
+Analytics for one ESPN Fantasy Basketball league (head-to-head, category scoring). It
+pulls data from ESPN via the `espn-api` package, projects the rest of a matchup week, and
+reports win probability, category breakdowns, streamer pickups, bench decisions, league
 standings, and playoff/championship odds.
+
+**Two front ends, mid-migration** — see the migration note at the top of this file. The
+**Next.js app** (`app/`, `components/`, `lib/`) is the live site and where new work goes;
+the **Streamlit app** (`legacy/`) is the original, still deployed on Render. New features
+belong in the Next.js app unless there is a specific reason otherwise.
 
 Single owner, single league. It is a personal tool, not a product — favor clarity
 and correctness over generality.
 
-## Repo map
+## Repo map — the LEGACY Streamlit app (`legacy/`)
+
+> **Paths below are relative to `legacy/`.** These files were at the repo root when this
+> table was written and have since moved; the links are written against their real
+> locations. For the Next.js app see the architecture section at the top of this file.
 
 | File | Role |
 |------|------|
-| [streamlit_app.py](streamlit_app.py) | UI entry point. `main()`, the section nav (`render_top_nav` + `NAV_SECTIONS`), the per-page `if active_page == …` bodies, the Home landing, Season Summary, and Settings. Orchestrates everything. |
-| [data.py](data.py) | ESPN connection, roster/matchup/box-score fetch, NBA schedule scraping, and **games-left counting** (injury-aware, IR-aware, 10-per-day cap). |
-| [simulation.py](simulation.py) | Simulation engine: per-team category sim, matchup comparison, streamer analysis, bench strategy, league stats, playoff bracket. |
-| [visualizations.py](visualizations.py) | **All charts, as inline SVG / HTML-CSS — no charting library.** Five charts (win-probability gauge, category analysis, score distribution, championship probability, rank trend) plus the scoreboard HTML. Each returns a **string** for `st.markdown(..., unsafe_allow_html=True)`. Colors come from the `var(--*)` custom properties in `styles.py`. |
-| [config.py](config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
-| [styles.py](styles.py) | The "Analyst Sheet" design system as one big CSS string (`CUSTOM_CSS`), including the fixed-header / centered-column layout shell. Light-only (no `DARK_CSS`). |
-| [assets/icon_font.py](assets/icon_font.py) | **Self-hosted Bootstrap Icons** — the font subset to the ~37 glyphs the app uses, base64-embedded as `@font-face` (`ICON_FONT_CSS`, imported as `from assets.icon_font import …`). Injected separately so it can never render-block the layout. Regenerate with [assets/build_icon_font.py](assets/build_icon_font.py) if the icon set changes. |
-| [assets/touch_icon.py](assets/touch_icon.py) | Base64 PNG of the basketball mark (`TOUCH_ICON_PNG_B64`), injected via `components.html` as an `apple-touch-icon` `<link>` so "Add to Home Screen" shows the app's logo instead of Streamlit's default. Regenerate the PNG with the Pillow snippet in its docstring/history if the mark changes. |
-| [.streamlit/config.toml](.streamlit/config.toml) | Streamlit's native light theme (must match `styles.py`). |
-| [.streamlit/secrets.toml](.streamlit/secrets.toml) | Template only — real creds are in `config.py`. |
+| [streamlit_app.py](legacy/streamlit_app.py) | UI entry point. `main()`, the section nav (`render_top_nav` + `NAV_SECTIONS`), the per-page `if active_page == …` bodies, the Home landing, Season Summary, and Settings. Orchestrates everything. |
+| [data.py](legacy/data.py) | ESPN connection, roster/matchup/box-score fetch, NBA schedule scraping, and **games-left counting** (injury-aware, IR-aware, 10-per-day cap). |
+| [simulation.py](legacy/simulation.py) | Simulation engine: per-team category sim, matchup comparison, streamer analysis, bench strategy, league stats, playoff bracket. |
+| [visualizations.py](legacy/visualizations.py) | **All charts, as inline SVG / HTML-CSS — no charting library.** Five charts (win-probability gauge, category analysis, score distribution, championship probability, rank trend) plus the scoreboard HTML. Each returns a **string** for `st.markdown(..., unsafe_allow_html=True)`. Colors come from the `var(--*)` custom properties in `styles.py`. |
+| [config.py](legacy/config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
+| [styles.py](legacy/styles.py) | The "Analyst Sheet" design system as one big CSS string (`CUSTOM_CSS`), including the fixed-header / centered-column layout shell. Light-only (no `DARK_CSS`). |
+| [assets/icon_font.py](legacy/assets/icon_font.py) | **Self-hosted Bootstrap Icons** — the font subset to the ~37 glyphs the app uses, base64-embedded as `@font-face` (`ICON_FONT_CSS`, imported as `from assets.icon_font import …`). Injected separately so it can never render-block the layout. Regenerate with [assets/build_icon_font.py](legacy/assets/build_icon_font.py) if the icon set changes. |
+| [assets/touch_icon.py](legacy/assets/touch_icon.py) | Base64 PNG of the basketball mark (`TOUCH_ICON_PNG_B64`), injected via `components.html` as an `apple-touch-icon` `<link>` so "Add to Home Screen" shows the app's logo instead of Streamlit's default. Regenerate the PNG with the Pillow snippet in its docstring/history if the mark changes. |
+| [.streamlit/config.toml](legacy/.streamlit/config.toml) | Streamlit's native light theme (must match `styles.py`). |
+| [.streamlit/secrets.toml](legacy/.streamlit/secrets.toml) | Template only — real creds are in `config.py`. |
 | `Old Models/` | The original single-file version. Historical reference; do not edit or import. |
 
 ## Run & verify
@@ -293,7 +325,7 @@ via `data.connect_to_espn(...)` using the constants in `config.py`.
 
 ESPN connection details (`ESPN_LEAGUE_ID`, `ESPN_S2`, `ESPN_SWID`,
 `ESPN_SEASON_YEAR`, `DEFAULT_TEAM_NAME`, `DEFAULT_TEAM_ID`) live in
-[config.py](config.py). **Do not add them back as UI inputs.** *Which team* is chosen
+[config.py](legacy/config.py). **Do not add them back as UI inputs.** *Which team* is chosen
 on the **Settings** page and *which week* in the **This Week** left rail — never the
 creds. `DEFAULT_TEAM_NAME` is currently `"VJ Maxx"` (the league champion). Team names
 come from the API and are resolved to an id with `data.resolve_team_id`.
@@ -302,7 +334,7 @@ come from the API and are resolved to an id with `data.resolve_team_id`.
 
 Light, print-inspired, restrained. The owner explicitly dislikes flashy / "AI-slop"
 looks and **emoji** — use none (Bootstrap Icons are fine; they render via the
-self-hosted embedded font in [assets/icon_font.py](assets/icon_font.py), not a CDN). Keep it calm.
+self-hosted embedded font in [assets/icon_font.py](legacy/assets/icon_font.py), not a CDN). Keep it calm.
 
 | Token | Value | Use |
 |-------|-------|-----|
@@ -408,9 +440,9 @@ whole stylesheet was render-blocked and the header — brand, icons, label-hidde
 behind Streamlit's default blue decoration bar.
 
 **Icons elsewhere** (section headers, cards) still use `<i class="bi …">`, now backed by
-the **self-hosted embedded font** in [assets/icon_font.py](assets/icon_font.py) — no CDN `@import`. Never
+the **self-hosted embedded font** in [assets/icon_font.py](legacy/assets/icon_font.py) — no CDN `@import`. Never
 re-add a leading `@import url(cdn)`; a leading `@import` is render-blocking. If you use a new
-`bi-*` class, regenerate the subset ([assets/build_icon_font.py](assets/build_icon_font.py)) so the glyph is included.
+`bi-*` class, regenerate the subset ([assets/build_icon_font.py](legacy/assets/build_icon_font.py)) so the glyph is included.
 
 **The native sidebar is used only for the This Week rail** (above) — it is force-hidden on
 every other page, so don't render unrelated widgets into it.
@@ -527,7 +559,7 @@ browser / against live ESPN. See **Gotchas** for the traps involved.
    `plotly`, `altair`, or `st.line_chart`/`st.bar_chart` (those pull ~1 MB of Vega) — add a
    function to `visualizations.py` instead.
 2. **Closed-form Monte Carlo.** See the block comment above `_draw_player_totals` in
-   [simulation.py](simulation.py). A sum of independent normals is normal, so a player's
+   [simulation.py](legacy/simulation.py). A sum of independent normals is normal, so a player's
    n-game total is one draw, not n. `simulate_team` is **~40x** faster (385ms → 10ms at
    10k sims) with a statistically identical distribution. `analyze_streamers` also
    simulates each roster player **once** and subtracts the dropped player's contribution,
@@ -546,7 +578,7 @@ browser / against live ESPN. See **Gotchas** for the traps involved.
    path — every rerun of Matchup / Scoreboard / Roster / Bench / Streamers paid it again,
    which is why those pages never got faster on a second visit while Schedule (already
    cached) dropped to ~0.03s. **`get_box_scores_cached(period)` in
-   [streamlit_app.py](streamlit_app.py) is now the single entry point**; it picks the TTL
+   [streamlit_app.py](legacy/streamlit_app.py) is now the single entry point**; it picks the TTL
    from whether that period is still being played — `LIVE_BOX_SCORE_TTL` (90s) while live,
    3600s once final, since a completed week never changes. `get_matchup_info` takes the
    result via its `boxscores=` argument. Tab switches went **1.05s → 0.71s** (Current

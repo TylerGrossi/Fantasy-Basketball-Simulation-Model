@@ -206,6 +206,27 @@ export interface PoolPlayer {
    *  is why the Player Card falls back to the season line rather than printing noughts. */
   last30?: Partial<Record<string, number>> & { gp?: number };
   last15?: Partial<Record<string, number>> & { gp?: number };
+  /**
+   * Up to three seasons of career per-game history, NEWEST FIRST, from ESPN's athlete
+   * pages (scripts/build_data.py `fetch_player_history`).
+   *
+   * Carries `min`, which nothing else in the export does — and minutes are what let the
+   * draft projection separate the three things a single season conflates: production per
+   * minute, the minutes a role gives you, and the games you were available for. Absent
+   * for a player ESPN has no career page for; the projection falls back to a
+   * single-season path.
+   */
+  history?: SeasonLine[];
+}
+
+/** One past season's per-game line. `min` is minutes per game. */
+export interface SeasonLine {
+  season: number;
+  gp: number;
+  min: number;
+  FGM: number; FGA: number; FTM: number; FTA: number;
+  "3PM": number; "3PA": number;
+  REB: number; AST: number; STL: number; BLK: number; TO: number; PTS: number;
 }
 
 export interface SeasonPlayerLine {

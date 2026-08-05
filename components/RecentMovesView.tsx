@@ -30,7 +30,11 @@ function badgeClass(action: string) {
   return "moved";
 }
 
-export default function RecentMovesView({ rows }: { rows: RecentMoveRow[] }) {
+/** A move plus the player's 9-cat value, joined by the page. `null` when that player is
+ *  no longer in the exported pool. */
+export type MoveRow = RecentMoveRow & { value?: number | null };
+
+export default function RecentMovesView({ rows }: { rows: MoveRow[] }) {
   const [player, setPlayer] = useState("");
   const [teams, setTeams] = useState<string[]>([]);
   const [actions, setActions] = useState<string[]>([]);
@@ -124,6 +128,7 @@ export default function RecentMovesView({ rows }: { rows: RecentMoveRow[] }) {
                 <th>Team</th>
                 <th>Move</th>
                 <th>Player</th>
+                <th className="num">Value</th>
               </tr>
             </thead>
             <tbody>
@@ -146,6 +151,11 @@ export default function RecentMovesView({ rows }: { rows: RecentMoveRow[] }) {
                   <td>
                     <PlayerLink name={r.player} />
                     {r.position && <span className="lu-name-sub"> {r.position}</span>}
+                  </td>
+                  <td className="num">
+                    {r.value == null
+                      ? "—"
+                      : `${r.value >= 0 ? "+" : ""}${r.value.toFixed(1)}`}
                   </td>
                 </tr>
               ))}

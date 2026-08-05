@@ -194,18 +194,39 @@ export default function DraftBoardView({
           from the league export, and it should be read as an estimate with a method
           rather than as a fact.
         </p>
+        <p>
+          The central idea: a per-game line is three things multiplied together —{" "}
+          <em>production per minute</em>, <em>minutes per game</em>, and{" "}
+          <em>games available</em> — and the model takes them apart before putting them
+          back. Conflating them is what makes a raw ranking punish an injured star as
+          though he had got worse, and reward a player whose minutes only rose because
+          someone ahead of him got hurt.
+        </p>
         <ol className="dg-steps">
           <li>
-            <strong>Form.</strong> The season line is blended with the player&rsquo;s last
-            30 days, which take up to 35% weight depending on how many games they contain.
-            A role change late in the year survives; a hot fortnight does not outvote a
-            season.
+            <strong>Three seasons, weighted to the present.</strong> Production is blended
+            across up to three seasons at roughly 60/25/15, newest first, and each season
+            is discounted further by how much of it was actually played. One lost year
+            bends the projection; it does not define it.
           </li>
           <li>
-            <strong>Sample size.</strong> Short seasons are pulled toward a
-            position-specific baseline — a 10-game line keeps about 45% of itself, a
-            70-game line about 85%. The baseline is a fringe regular, not an average
-            starter, so an unknown does not float up the board for being unknown.
+            <strong>Per-36, not per game.</strong> Every season is divided by its own
+            minutes before blending, so what is carried forward is a rate of production
+            rather than a rate times an opportunity. This is what keeps an injury out of
+            the production estimate entirely.
+          </li>
+          <li>
+            <strong>Role.</strong> Minutes are projected separately: mostly this
+            season&rsquo;s, pulled back toward the player&rsquo;s earlier-season baseline —
+            and pulled back harder when this season was short, because a star on a minutes
+            restriction has not been demoted. That regression is also what deflates a
+            player whose minutes spiked filling in for someone else.
+          </li>
+          <li>
+            <strong>Sample size.</strong> Thin histories are pulled toward a
+            position-specific baseline, measured in <em>minutes</em> rather than games —
+            30 games at 34 minutes is real evidence and 30 games at 9 minutes is not. The
+            baseline is a fringe regular, so an unknown does not float up for being unknown.
           </li>
           <li>
             <strong>Age.</strong> Growth below 25 (capped by how many seasons a player has
@@ -215,15 +236,19 @@ export default function DraftBoardView({
           </li>
           <li>
             <strong>Shooting luck.</strong> FG%, FT% and 3P% are shrunk toward a
-            positional league rate in proportion to how few attempts they rest on. Makes
-            are then rebuilt from attempts × the shrunk rate, so the shooting line on each
-            card is internally consistent.
+            positional league rate in proportion to how few attempts they rest on — now
+            over the whole three-year history, so a settled shooter is barely moved. Makes
+            are rebuilt from attempts × the shrunk rate, so each card&rsquo;s shooting line
+            is internally consistent.
           </li>
           <li>
-            <strong>Availability.</strong> Games played is strongly mean-reverting, so
-            next season&rsquo;s games are half last season&rsquo;s and half the
-            field&rsquo;s, minus an age penalty. <em>Season value</em> multiplies per-game
-            value by that durability; <em>per game</em> ignores it.
+            <strong>Availability.</strong> Games are projected from the three-year record
+            on a <em>flatter</em> weighting than production — missed time is mostly
+            one-off, so a single hurt season should not become a verdict — then halved
+            against the field and docked for age and current injury.{" "}
+            <em>Season value</em> multiplies per-game value by that durability;{" "}
+            <em>per game</em> ignores it. Comparing the two rankings separates &ldquo;how
+            good&rdquo; from &ldquo;how often&rdquo;.
           </li>
         </ol>
         <p>
@@ -237,9 +262,11 @@ export default function DraftBoardView({
         </p>
         <p className="caption">
           Known limits: the pool is every rostered player plus the top free agents from
-          last season, so it has no rookies and nobody who was out of the league. It knows
-          nothing about trades, signings or depth charts made since the season ended, and
-          it cannot see minutes — only production. Treat the tiers as the output, and the
+          last season, so it has no rookies and nobody who was out of the league. It has
+          box scores, not depth charts — a player whose minutes rose because he won the job
+          and one whose minutes rose because a teammate tore an ACL look identical here,
+          and both are treated as partly persistent. It knows nothing about trades or
+          signings made since the season ended. Treat the tiers as the output, and the
           exact ranks inside a tier as noise.
         </p>
       </div>

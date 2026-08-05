@@ -11,7 +11,24 @@ import RecentMovesView from "@/components/RecentMovesView";
  */
 export default async function Page() {
   const league = await loadLeague();
-  const rows = league.seasonData?.recentMoves ?? [];
+  const moves = league.seasonData?.recentMoves ?? [];
+
+  /**
+   * Join each move to the player's 9-cat value, so the feed can be judged and not just
+   * read — dropping a +13 is a different story from dropping a −2.
+   *
+   * Done HERE rather than in the export: the value already ships in `playerPool`, and
+   * writing it into `recentMoves` too would be the same number in two places, free to
+   * drift the moment one is regenerated without the other.
+   *
+   * Only the joined rows cross to the client, never the pool itself (see trimLeague's
+   * note about payload size). `null` for the handful of players who have since left the
+   * pool entirely — 12 of 838 rows — which the column prints as a dash.
+   */
+  const valueOf = new Map(
+    (league.seasonData?.playerPool ?? []).map((p) => [p.name, p.value])
+  );
+  const rows = moves.map((m) => ({ ...m, value: valueOf.get(m.player) ?? null }));
 
   if (!rows.length) {
     return (
@@ -25,9 +42,6 @@ export default async function Page() {
   return (
     <>
       <h1>Recent Moves</h1>
-      <p className="caption">
-        The league&apos;s latest adds, drops, waiver claims, and trades, newest first.
-      </p>
       <RecentMovesView rows={rows} />
     </>
   );

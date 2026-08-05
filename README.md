@@ -48,15 +48,21 @@ npm run dev                 # http://localhost:3000
 Other scripts: `npm run build` (production build), `npm run start` (serve the build),
 `npm run typecheck`.
 
-**Pages** (18 routes): Home · Scoreboard · Matchup · Roster · Streamers · Bench ·
-Season Summary · Season Stats · League Stats · Schedule · Power Rankings · Playoffs ·
-Player Value · Player Card · Compare · Trade Simulator · Agent · Settings.
+**Pages** (23 routes): Home · Scoreboard · Matchup · Roster · Streamers · Bench ·
+Season Summary · Season Stats · League Stats · League Rosters · Recent Moves · Schedule ·
+Power Rankings · Playoffs · Player Value · Player Card · Compare · Trade Simulator ·
+Lineup · Cheat Sheets · Draft Guide · Agent · Settings.
+
+Four of those are deliberately not in every menu, all switched from `lib/nav.ts`:
+**Draft Guide** is hidden everywhere (the projection model behind it is mid-rebuild — see
+`docs/FEATURE-IDEAS.md` E1), **Playoff Odds** only appears while a season is in progress,
+and **Season Summary** and **Lineup** are desktop-only. Every one of them still renders if
+you visit the URL — hidden from the menus, not disabled.
 
 **Agent** is the AI assistant: it answers from your league's real numbers (it calls
 tools that read the export — player values, rosters, category ranks, power rankings)
 and can search the web for live NBA news. It needs `GEMINI_API_KEY`; without one every
-other page works and the Agent page says what's missing. Playoff Odds only appears in
-the menus while a season is in progress.
+other page works and the Agent page says what's missing.
 
 **Navigation** deliberately differs by device, as the Streamlit app did. Desktop is one
 flat header (brand, links, Stats/Tools dropdowns, gear) plus a left "This Week" rail on

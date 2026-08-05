@@ -4,8 +4,8 @@ A backlog of things this app could do, drawn from what the established fantasy
 basketball tools offer and filtered for what makes sense here: **one owner, one ESPN
 head-to-head category league, all maths in the browser, Analyst Sheet aesthetic.**
 
-Written 2026-08-01, revised the same day as items shipped. Nothing here is
-committed work — it is a menu. Strike items out as they land.
+Written 2026-08-01, last revised **2026-08-04**. Nothing here is committed work — it is a
+menu. Strike items out as they land.
 
 The one exception to "one owner, one league" is **section H**, which is the idea of
 opening the app to anybody with an ESPN league. It is documented, deliberately not
@@ -17,26 +17,52 @@ scheduled, and it is the only item that changes the premise every other item res
 |-----|---------|
 | `SHIPS TODAY` | Everything it needs is already in `public/data/league.json`. Pure front-end work. |
 | `PIPELINE` | Needs new fields out of `scripts/build_data.py`. Still one scheduled export, no new infrastructure. |
-| `NEW DATA` | Needs a source the project does not have yet (multi-season archive, per-game player logs at scale, live NBA schedule in the export). |
+| `NEW DATA` | Needs a source the project does not have yet (per-game player logs at scale, live NBA schedule in the export). |
 | `PLATFORM` | Changes what the app *is*, not what it shows. New infrastructure — a database, accounts, per-user data. Only section H. |
 
 Effort is a rough t-shirt size for the front-end half.
+
+### What changed the NEW DATA line (2026-08-04)
+
+Two things happened while building the Draft Guide that move items across tags, so read
+the tags below with these in mind.
+
+**1. Career history is in the export.** `playerPool[].history` now carries up to three
+seasons of per-game lines from ESPN's athlete endpoint — crucially including **minutes**,
+which nothing in the fantasy export had. That is what lets a projection separate
+production per minute from role from availability. 289/289 players resolved.
+
+**2. Per-player fan-out is cheap.** The long-standing assumption that ~290 per-athlete
+requests was too expensive for the pipeline is **false**, and this is the more useful
+finding. `fetch_player_history` in [scripts/build_data.py](../scripts/build_data.py) does
+exactly that in **1.9 seconds** with an 8-worker `ThreadPoolExecutor`, failing per player
+rather than per run. Any item below whose only blocker was "that's ~290 requests" is now
+a `PIPELINE` item, not `NEW DATA`. Copy that function's shape.
+
+**Cost:** `league.json` went 404 KB → 722 KB. Only the Draft Guide reads `playerPool`, and
+`trimLeague` already gates it per page, so no other route pays for it — but it is worth
+watching if more per-player history is added.
 
 ---
 
 ## What already exists
 
-So nothing below duplicates it. Eighteen routes: Home, Scoreboard, Matchup, Roster,
-Streamers, Bench, Season Summary, Season Stats, League Stats, Schedule, Power Rankings,
-Playoff Odds, Player Value, Player Card, Compare, Trade Simulator, Agent, Settings.
-Parity with the Streamlit app is complete.
+So nothing below duplicates it. **Twenty-three routes**: Home, Scoreboard, Matchup,
+Roster, Streamers, Bench, Season Summary, Season Stats, League Stats, League Rosters,
+Recent Moves, Schedule, Power Rankings, Playoff Odds, Player Value, Player Card, Compare,
+Trade Simulator, Lineup, Cheat Sheets, Draft Guide, Agent, Settings. Parity with the
+Streamlit app was reached some time ago; the new app is now ahead of it.
+
+Two of those are **not in the menus** and are reachable only by URL — Draft Guide
+(`HIDDEN_FROM_NAV`, see E1) and Playoff Odds (`IN_SEASON_ONLY`). Season Summary and
+Lineup are desktop-only (`HIDDEN_ON_MOBILE`). All four switches live in `lib/nav.ts`.
 
 The engine already does: closed-form category probabilities, Poisson-binomial exact
 score distribution, all-play records, luck, power rankings with rank history, playoff
 and championship odds, streamer sweeps, bench decisions, and 9-cat player values with
 30-day and 15-day trends.
 
-**Shipped since this list was written** (2026-08-01, same day — the doc aged fast):
+**Shipped 2026-08-01:**
 
 - **Trade Simulator rebuilt** as a two-panel board: both rosters visible and searchable,
   a per-team filter, live per-side value totals, and a result card pairing the verdict
@@ -51,25 +77,54 @@ and championship odds, streamer sweeps, bench decisions, and 9-cat player values
   this season, derived by diffing the game log against the team schedule.
 - **Agent tooling**: `find_players` (filtered search that returns names) and
   `league_rosters`, a model picker with observed rate-limit state, and a stall watchdog.
-- **Season History** (`/history`) — **A1** below, now shipped and removed from the list.
-  Week-by-week all-play, the deserved record, and per-week "robbed / gifted" flags. Its
-  season total independently reproduces the standings' 68.1% all-play, computed a
-  completely different way, which is the check that the week-level numbers are right.
+- **Weekly all-play** — **A1**, shipped and removed from the list. Week-by-week all-play,
+  the deserved record, and per-week "robbed / gifted" flags. Its season total
+  independently reproduces the standings' 68.1% all-play by a completely different route,
+  which is the check that the week-level numbers are right.
+  **Correction (2026-08-04):** an earlier revision of this doc said this shipped at a
+  `/history` route and called that page "the natural home for A3 and A4". There is no
+  `/history` route and there never was. The logic lives in
+  [lib/history.ts](../lib/history.ts) and is consumed by **`/schedule`**. A3 and A4 below
+  should target `/schedule`, or a new route, but do not go looking for `/history`.
+
+**Shipped 2026-08-04:**
+
+- **League Rosters** (`/league-rosters`) — every team's roster in ESPN's own layout: slot,
+  player, how they were acquired, and 9-cat value, cards ordered by total roster value.
+  Needed two new export fields (`lineupSlot`, `acquisitionType`) and the league's roster
+  shape (`rosterSlots`) so unfilled spots render as "Empty".
+- **Transaction Counter** on League Stats — ESPN's own widget (Loss / Trade / Acq / Drop /
+  Activate / IR). `moveToActive` and `moveToIR` are not on espn-api's `Team` object and are
+  read from the raw `mTeam` payload.
+- **Recent Moves** (`/recent-moves`) — the league-wide transaction feed, 838 rows, with
+  client-side filters.
+- **Player Card percentile bars** — the card's stat list became Baseball-Savant-style
+  percentile bars against the league (`lib/percentiles.ts`). Basis-aware and symmetric: a
+  15D percentile ranks against everyone else's 15D. Diverging red/neutral/blue, validated
+  for colour-blind separation.
+- **FBBSim branding** — new logo throughout: header lockup, favicon, Apple touch icon,
+  maskable PWA icons, and an Open Graph share card (there was previously no OG metadata at
+  all, so a shared link had no preview). All assets are generated from one master by
+  [scripts/make_icons.py](../scripts/make_icons.py).
+- **Draft Guide** — see **E1**. Shipped, then hidden again pending model work.
 
 ---
 
 ## The shortlist
 
-If only three things get built, these are the ones. All are `SHIPS TODAY`, all use
-`periodResults` — 22 weeks of final 14-stat totals for every team, which is the most
-under-used asset in the export.
+Revised 2026-08-04.
 
-1. ~~**Weekly all-play**~~ — **shipped** at `/history`.
-2. **Punt analysis** (B1) — the defining question of a category league, and nothing in the app answers it.
-3. **League record book** (A3) — cheap, and it is the feature people actually come back for.
+1. **Fix the Draft Guide model** (E1) — the only *shipped* thing currently hidden from
+   users. Three specific defects are written down with evidence; this is debugging against
+   a list, not open-ended research. It is also the timely one: the season is over.
+2. **Punt analysis** (B1) — the defining question of a category league. Half-answered now:
+   the Draft Guide punts, but nothing tells you what you *actually* punted last season or
+   what your record would have been under each build.
+3. **League record book** (A3) — cheap, and it is the feature people actually come back
+   for. Reduces over `periodResults`, which `/schedule` already loads.
 
-`/history` is now the natural home for A3 and A4: the page already loads
-`periodResults` and reduces over it.
+A3 and A4 belong on **`/schedule`** (which already loads `periodResults` and imports
+`lib/history.ts`) or on a new route — *not* on `/history`, which does not exist.
 
 ---
 
@@ -126,10 +181,13 @@ opens with it — and the app currently has no view of it.
 Z-score per category against the league, as a diverging bar. Basketball Monster's Team
 Analysis in one screen: where you are strong, where you are weak, and how balanced.
 
-### B3. Punt-aware player values `SHIPS TODAY` · M
-The existing 9-cat value assumes you want all nine. Recompute value excluding punted
-categories, so Player Value and Trade Simulator rank players for *your* build. This is
-the feature that makes B1 actionable rather than trivia.
+### B3. Punt-aware player values `SHIPS TODAY` · S
+**Mostly done.** The Draft Guide already does this: `scoreProjections` in
+[lib/projection.ts](../lib/projection.ts) takes a category list, and dropping one removes
+its term from every z-sum and re-ranks in under a millisecond. What is left is carrying
+the same control onto **Player Value** and the **Trade Simulator**, which still assume you
+want all nine — and the mechanism to copy is already written and fast enough to run on
+every keystroke.
 
 ---
 
@@ -157,15 +215,25 @@ disproportionately and is easy to overlook during the regular season.
 
 ## D. Player tools
 
-### D2. Player consistency `NEW DATA` · M
-Game-to-game volatility, not just the average — a 20-point floor is worth more in H2H
-than a boom-bust 20-point mean. The Player Card already pulls per-game logs from ESPN
-client-side, so the data path exists; doing it for the whole pool needs ~290 requests,
-which argues for a pipeline job rather than the browser.
+### D2. Player consistency `PIPELINE` · M
+**Reclassified from `NEW DATA` on 2026-08-04.** Game-to-game volatility, not just the
+average — a 20-point floor is worth more in H2H than a boom-bust 20-point mean. The
+blocker was always "the whole pool needs ~290 requests"; `fetch_player_history` now does
+exactly that in 1.9s threaded, so this is ordinary pipeline work. Fetch each player's game
+log server-side, export a standard deviation (or a floor/ceiling pair) per stat, and the
+front end is a column.
 
 ### D3. Usage shift after an injury `NEW DATA` · L
 Basketball Monster's "Usage Monster": when a starter goes down, who absorbs the touches.
-The highest-value waiver signal there is, and the hardest to source here.
+Still the hardest item here, but **partly unblocked**: the export now carries minutes per
+season, so *season-over-season* role change is already computable and is what the Draft
+Guide's minutes projection runs on. What is still missing is the **within-season, dated**
+view — you cannot ask "what happened to this player's usage the week his teammate went
+down" without per-game logs (D2) joined to the injury dates the Player Card already
+derives. Do D2 first; this is mostly D2 plus a join.
+
+True usage rate (`USG%`) needs team possession totals, which are not in any endpoint the
+project currently reads. Minutes plus shot attempts are the workable proxy.
 
 ---
 
@@ -173,12 +241,41 @@ The highest-value waiver signal there is, and the hardest to source here.
 
 The season is over, so this is the timely category.
 
-### E1. Draft board with tiers `SHIPS TODAY` · M
-Rank the pool by 9-cat value with tier breaks at the natural gaps. Optionally
-punt-aware once B3 exists.
+### E1. Draft board with tiers — **BUILT, HIDDEN, UNFINISHED** · M
+`/draft` exists and is complete as a *page*: search, position filter, punt-category
+multiselect, 9-cat vs league-categories toggle, season-value vs per-game ranking, min-games
+filter, tiers, and an expandable card per player showing the projected line against the
+actual with named drivers. It is **removed from the nav** (`HIDDEN_FROM_NAV` in
+`lib/nav.ts`) because the *model* behind it is wrong in ways an owner spotted in seconds.
+
+It also closed most of **B3** — the board is punt-aware today; punting a category drops its
+term from every z-sum and re-ranks instantly.
+
+The projection was rebuilt 2026-08-04 around per-36 production × projected minutes ×
+projected games (see the header comment in [lib/projection.ts](../lib/projection.ts)). That
+moved Giannis 51 → 37 and Trae Young 75 → 39, and it is still not good enough. **Three
+known defects, recorded in the source so they are not re-derived:**
+
+1. **Stars with lost seasons are still too low.** Giannis at 37, Wembanyama reads low. He
+   is only 2 ranks better on `perGame` than on `total`, which *rules out* the availability
+   discount — so the fault is in the production estimate or the category scoring. Check
+   whether the ratio categories are over-weighted in the z-sum before touching the
+   projection itself.
+2. **Young players on thin samples are too high** (Kon Knueppel at 10). Prime suspect is
+   compounding: the age growth multiplier and the per-36 extrapolation both reward a young
+   player on limited minutes and nothing caps their product. A per-36 rate earned in a
+   bench role does not survive starter's minutes.
+3. **Tiers are degenerate.** Measured live: 23 tiers, seven with a single player, the first
+   twelve holding 29 players between them, then a wall of tiers at exactly `TIER_MAX`, then
+   one tier of 140. `assignTiers` thresholds on `mean + sigma·sd` over *all* gaps in the top
+   160, but the top of the board has far larger gaps than the middle, so nearly every early
+   gap clears it and nearly none later does. Needs a **local** scale (rolling median of
+   nearby gaps) plus a minimum tier size — **not** a different sigma.
 
 ### E2. Keeper value `NEW DATA` · S
-Value against draft cost. Needs draft position data, which is not in the export.
+Value against draft cost. Needs draft position data, which is not in the export — though
+`acquisitionType` (added for League Rosters) now at least distinguishes drafted players
+from wire pickups, which is the cheap half of it.
 
 ---
 
@@ -205,6 +302,14 @@ record book into a real one, and it is the thing every league-history product is
 actually selling. **Cheapest possible version: keep a dated copy of the export at the
 end of each season.** Worth doing before next season starts, because the data cannot be
 recovered afterwards.
+
+**Partly addressed 2026-08-04, but do not let that lull you.** `playerPool[].history` now
+carries three seasons *per player*, refetched from ESPN every run — so **player** history
+is recoverable and needs no archive. **League** history is not: standings, weekly results,
+matchups, rosters and transactions all come from the fantasy league and are still
+overwritten every run. That half is the irreversible one, and it is the half section A
+needs. The archive is still worth doing, and still worth doing before the next season
+starts.
 
 ---
 

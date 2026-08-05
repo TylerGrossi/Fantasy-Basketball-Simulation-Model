@@ -1,7 +1,6 @@
 import RankTrendChart from "@/components/RankTrendChart";
-import StarterRankingsView from "@/components/StarterRankingsView";
+import StarterRankingsPanel from "@/components/StarterRankingsPanel";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
-import { starterRankings } from "@/lib/playerPool";
 
 /** Power rankings by all-play %, plus how each rank moved week to week. */
 export default async function Page() {
@@ -71,8 +70,18 @@ export default async function Page() {
       <h2>Rank movement</h2>
       <RankTrendChart weeks={pr.weeks} teams={pr.teams} yourTeamId={me.id} />
 
+      {/* Heading lives here, not inside the panel, so it sits at the same level as
+          "Rank movement" above it — and inside the guard, so a missing player pool
+          doesn't leave a title standing over nothing. */}
       {pool.length > 0 && (
-        <StarterRankingsView team={me.name} ranks={starterRankings(pool, me.name)} />
+        <>
+          <h2>Value Power Rankings</h2>
+          <StarterRankingsPanel
+            pool={pool}
+            teamNames={league.teams.map((t) => t.name)}
+            defaultTeam={me.name}
+          />
+        </>
       )}
     </>
   );

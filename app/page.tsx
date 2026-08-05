@@ -106,7 +106,11 @@ const ANSWERS: Array<[string, string, string, string]> = [
 const FLOW: Array<[string, string, string]> = [
   [
     "Read",
-    "ESPN rosters, box scores and the NBA schedule. Games remaining are counted injury-aware, under the league's ten-per-day cap.",
+    // Kept to ~100 characters so it sets three lines in a quarter-width column like the
+    // other three steps — the original ran to four and left this card taller than its
+    // neighbours. "account for injuries" also reads plainer than the "injury-aware" it
+    // replaces, which matters in a band written to be jargon-free.
+    "ESPN rosters, box scores and the NBA schedule. Games left account for injuries and the ten-per-day cap.",
     "ESPN API + schedule scrape",
   ],
   [
@@ -262,15 +266,6 @@ export default async function Page() {
       {/* ---------------- mobile: the launcher ---------------- */}
       <div className="home-mobile">
         <div className="home-hero">
-          {/* The app tile. Mobile has no header, so this is the only place the brand mark
-              appears in the phone UI — everywhere else it is the home-screen icon. */}
-          <img
-            src="/logo-tile.png"
-            alt=""
-            className="home-logo"
-            width={384}
-            height={384}
-          />
           <div className="home-eyebrow">
             {leagueName} &middot; {status}
           </div>
