@@ -525,13 +525,18 @@ const toneOf = (v: number) =>
  */
 function WindowTable({ p }: { p: PoolPlayer }) {
   /*
-   * A row prints only if the window clears the same games bar the percentile bars use.
+   * A row prints whenever it has games. Nothing else.
    *
-   * Below it the row is all dashes rather than a number, because "29.0 points over the
-   * last 30 days" off ONE game is not a 30-day average — it is one game wearing a 30-day
-   * label, and it sits in a column next to a genuine 65-game season line where it reads as
-   * the same kind of thing. The bars say "Not qualified" for exactly these windows; the
-   * table agreeing with them is the point.
+   * It used to be gated on `MIN_GP` — the threshold that decides whether a PERCENTILE can
+   * be drawn — and that produced impossible tables. The bar differs per row (15 season, 5
+   * for 30 days, 3 for 15), so a player with six games all year failed the season's bar of
+   * fifteen while clearing the 30-day bar of five: a dashed-out Season line sitting above a
+   * populated 30 Day line, claiming he played six games in the last month and none in the
+   * season that contains it.
+   *
+   * The two questions are different. "What did he do" is a fact and belongs here whatever
+   * the sample. "Can he be ranked against the league" needs a sample, and the bars already
+   * answer it on their own by printing Not qualified. This table is the fact.
    */
   const rows = (
     [
@@ -541,7 +546,7 @@ function WindowTable({ p }: { p: PoolPlayer }) {
     ] as Array<{ label: string; basis: ValueBasis }>
   ).map((r) => {
     const gp = gamesFor(p, r.basis);
-    return { ...r, gp, has: gp >= MIN_GP[r.basis] };
+    return { ...r, gp, has: gp > 0 };
   });
   const cats: StatKey[] = ["PTS", "REB", "AST", "STL", "BLK", "TO"];
 
