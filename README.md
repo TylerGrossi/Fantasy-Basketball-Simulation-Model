@@ -1,10 +1,12 @@
 # Fantasy Basketball Win Percentage Simulator
 
-A web-based **Monte Carlo simulation** tool for one ESPN Fantasy Basketball league
-(head-to-head, category scoring). It pulls live data from ESPN, projects the rest of
-a matchup week, and reports win probability, category breakdowns, streamer pickups,
-bench decisions, standings, and playoff odds. Built with Streamlit; charts are hand-rolled
-inline SVG, so the app ships no charting library.
+Analytics for one ESPN Fantasy Basketball league (head-to-head, category scoring). It
+pulls live data from ESPN, projects the rest of a matchup week, and reports win
+probability, category breakdowns, streamer pickups, bench decisions, standings, and
+playoff odds. Charts are hand-rolled inline SVG, so the app ships no charting library.
+
+Two front ends live here — a **Next.js** app (the replacement, and where new work goes)
+and the original **Streamlit** app in `legacy/` (still the deployed site). See below.
 
 > Working on this repo as an AI agent? Start with **[AGENTS.md](AGENTS.md)**.
 
@@ -41,8 +43,8 @@ npm run dev                 # http://localhost:3000
   the Agent page uses**, read out of `legacy/config_secrets.py` so you never copy cookies
   by hand. It's gitignored and is only ever read server-side (by `app/api/live` and
   `app/api/agent`), never bundled into the browser.
-- `npm run data` — regenerates `public/data/league.json` from ESPN (~47 KB, a couple of
-  seconds). Re-run it to refresh rosters, games left and injuries. The *live* category
+- `npm run data` — regenerates `public/data/league.json` from ESPN (~720 KB, under a
+  minute). Re-run it to refresh rosters, games left and injuries. The *live* category
   totals don't come from here — those are fetched per request by `/api/live`.
 
 Other scripts: `npm run build` (production build), `npm run start` (serve the build),
@@ -101,7 +103,7 @@ the **Settings** page chooses which team to analyze, and the **This Week** left 
 
 ## Configuration
 
-ESPN credentials and the default team live in [config.py](config.py) - not in the UI:
+ESPN credentials and the default team live in [config.py](legacy/config.py) - not in the UI:
 
 | Setting | Where |
 |---------|-------|
@@ -128,7 +130,9 @@ Application → Cookies).
 Completed weeks have no games left, so they display as **final results** rather than
 projections.
 
-## The app
+## The Streamlit app (`legacy/`)
+
+> This section describes the **legacy** app only. The Next.js page list is above.
 
 A **fixed top nav bar** switches pages; content sits in a centered column beneath it.
 Season-wide pages stand alone, while the matchup pages share a **This Week** left rail
@@ -151,7 +155,7 @@ standings and the champion; use the **This Week** rail to revisit any week or ro
 ## Category variance
 
 Per-category game-to-game variance used by the simulation (higher = noisier), from
-[config.py](config.py):
+[config.py](legacy/config.py):
 
 | Category | Variance |
 |----------|----------|
@@ -166,8 +170,8 @@ Per-category game-to-game variance used by the simulation (higher = noisier), fr
 The UI follows a light, print-inspired "Analyst Sheet" theme (graphite ink on warm
 paper, a single cobalt accent, monospace figures) — **light-only, no dark mode**. It
 uses a fixed full-width top nav and a centered content column. The palette is defined
-in [styles.py](styles.py), [.streamlit/config.toml](.streamlit/config.toml), and
-[visualizations.py](visualizations.py). See [AGENTS.md](AGENTS.md#design-system--analyst-sheet-do-not-drift-from-this)
+in [styles.py](legacy/styles.py), [.streamlit/config.toml](legacy/.streamlit/config.toml), and
+[visualizations.py](legacy/visualizations.py). See [AGENTS.md](AGENTS.md#design-system--analyst-sheet-do-not-drift-from-this)
 for the tokens.
 
 ## Project layout

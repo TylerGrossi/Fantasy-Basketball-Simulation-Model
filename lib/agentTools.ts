@@ -17,6 +17,7 @@
 
 import type { LeagueData, PoolPlayer, StandingRow } from "./league";
 import { playerStatus } from "./playerPool";
+import { APP_TOUR } from "./appTour";
 
 export interface ToolDeclaration {
   name: string;
@@ -558,6 +559,7 @@ export function createToolRunner(
  * fungible and proposes two-good-players-for-a-superstar packages that no owner would
  * ever accept, which is the fastest way to make the whole assistant feel naive.
  */
+
 export function systemInstruction(teamName: string, seasonOver: boolean, season: number) {
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -613,6 +615,7 @@ export function systemInstruction(teamName: string, seasonOver: boolean, season:
     "history) you may answer directly from your own expertise; verify with web_search if " +
     "the detail is specific, recent, or uncertain. Call multiple tools when useful (e.g. " +
     "lookup_player AND web_search their injury status).\n\n" +
+    APP_TOUR +
     "TRADE REALISM - this matters. Fantasy value is a z-score, but real trades are NOT " +
     "just about matching total value. Elite, top-tier players (roughly the top ~15-20 in " +
     "the league, and especially the top 5) carry a large scarcity PREMIUM: their owner " +

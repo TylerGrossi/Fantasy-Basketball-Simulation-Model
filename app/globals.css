@@ -1301,6 +1301,18 @@ table.sheet .num {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
+/*
+ * Headers stay in the sans even on numeric columns.
+ *
+ * `.num` above is meant for the CELLS, where mono + tabular figures are what keep a column
+ * of numbers aligned. It was also landing on the `<th>`, so a header row read in two
+ * different faces — and because mono has a much smaller x-height at the same font-size,
+ * the sans headers (Player, Seasons, Honors) looked a size larger than the mono ones next
+ * to them. Nothing is being resized here; both were always 0.57rem.
+ *
+ * Alignment and tabular figures are deliberately left alone — only the face changes.
+ */
+table.sheet th.num { font-family: var(--sans); }
 table.sheet .row-muted td {
   color: var(--ink-3);
 }
@@ -2797,59 +2809,6 @@ table.sheet.lu-table .lu-pos {
 }
 
 /* -------- "Last 10 games" disclosure + table -------- */
-.pv-gl { margin-top: 0.7rem; border-top: 1px solid var(--line-2); padding-top: 0.6rem; }
-.pv-gl-sum {
-  cursor: pointer;
-  list-style: none;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--cobalt);
-}
-.pv-gl-sum::-webkit-details-marker { display: none; }
-/* Chevron drawn from two borders — no font glyph, so it can't render as a box. */
-.pv-gl-sum::before {
-  content: "";
-  display: inline-block;
-  width: 0.36rem;
-  height: 0.36rem;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(-45deg);
-  transform-origin: center;
-  margin-right: 0.5rem;
-  position: relative;
-  top: -2px;
-  transition: transform 0.15s;
-}
-.pv-gl[open] .pv-gl-sum::before { transform: rotate(45deg); top: -3px; }
-.pv-gl-body { margin-top: 0.4rem; overflow-x: auto; }
-.pv-gl-tbl {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.78rem;
-}
-.pv-gl-tbl th {
-  color: var(--ink-3);
-  font-weight: 600;
-  text-align: right;
-  padding: 4px 10px;
-  text-transform: uppercase;
-  font-size: 0.62rem;
-  white-space: nowrap;
-}
-.pv-gl-tbl td {
-  color: var(--ink);
-  text-align: right;
-  padding: 4px 10px;
-  white-space: nowrap;
-  border-top: 1px solid var(--line-2);
-}
-.pv-gl-tbl th:first-child,
-.pv-gl-tbl td:first-child,
-.pv-gl-tbl th:nth-child(2),
-.pv-gl-tbl td:nth-child(2) { text-align: left; }
 
 /* -------- Injuries & missed games (Player Card) -------- */
 .inj-current {
@@ -3007,11 +2966,11 @@ table.sheet.lu-table .lu-pos {
    A grid item's default `min-width` is `auto`, which means "at least min-content" — and
    the log table is full of `white-space: nowrap` cells, so the column grew to fit the
    whole table instead of being held to its 1fr track. The left player's log then ran
-   under the right player's. `min-width: 0` lets the track win; `.pv-gl-body`'s existing
+   under the right player's. `min-width: 0` lets the track win; `.table-scroll`'s
    `overflow-x: auto` then does the job it was always there for and the table scrolls
    within its own half. */
 .pv-cmp-log { min-width: 0; }
-.pv-cmp-logs .pv-gl-tbl { font-size: 0.72rem; }
+.pv-cmp-logs .sheet { font-size: 0.7rem; }
 
 /* -------- Player Card: the full one-player profile -------- */
 /* Full content width, so the card's edges line up with the header and every other
@@ -3096,6 +3055,87 @@ table.sheet.lu-table .lu-pos {
    so every block above the bars is sized to what it needs and no more. */
 .pd { margin: 0.35rem 0 0; }
 
+/* ---------------------------------------------------------------- player card layout
+
+   WHO on the left, HOW GOOD on the right — the Baseball Savant arrangement.
+
+   The left rail is fixed-width because everything in it is fixed: a headshot, a name, six
+   bio facts and three value tiles do not get more useful with more room. Every pixel of
+   the remaining width goes to the bars instead, which is the one thing on this page that
+   does — a longer track is a more readable one. */
+.pd-split {
+  display: grid;
+  grid-template-columns: 24.5rem minmax(0, 1fr);
+  gap: 1.1rem;
+  /* Stretch, not `start`: the two panels are bordered cards sitting side by side, and a
+     short left card left a ragged step where its border stopped halfway down the right
+     one. Both now run the full height of the taller. Content inside each still sits at
+     the top — only the box grows. */
+  align-items: stretch;
+}
+.pd-split > * { min-width: 0; }
+.pd-card,
+.pd-rank {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 1.15rem 1.3rem 1.3rem;
+}
+/* The card centres its identity block — photo, name, team, status — because that is the
+   masthead. Everything below it is label/value pairs, which read left-aligned: a centred
+   column of facts gives the eye no common edge to run down. */
+.pd-card { text-align: center; }
+.pd-card .pd-status { justify-content: center; flex-wrap: nowrap; white-space: nowrap; }
+.pd-card .pd-bio { text-align: left; }
+.pd-card .pd-bio-f { align-items: flex-start; }
+/* The heading now carries the window picker inside it, so there is nothing to space
+   apart — it is one line of text with a control set into it. */
+.pd-rank-head { margin: 0 0 0.9rem; }
+.pd-rank-h {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.6;
+}
+/*
+ * A <select> dressed as the word it replaces: the SAME ink as the heading around it, with
+ * a hairline underline as the only hint that it is changeable.
+ *
+ * Deliberately quiet. Coloured blue with a caret it read as the loudest thing in the
+ * heading, which inverted the point — the sentence is the title, and the window is one
+ * adjustable word inside it, not a call to action. The underline is enough: it is the
+ * standard "this word can change" affordance and costs no colour.
+ *
+ * `appearance: none` drops the platform chrome so the control keeps the heading's own type
+ * rather than the OS control font.
+ */
+.pd-rank-sel {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-bottom: 1px dotted var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+  padding: 0 0.1rem 0.05rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.pd-rank-sel:hover { border-bottom-color: var(--ink-2); }
+.pd-rank-sel:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+/* The open menu is platform-drawn, so it needs the ordinary body colours back. */
+.pd-rank-sel option { color: var(--ink); background: var(--card); font-weight: 500; }
+
+@media (max-width: 900px) {
+  /* One column, card first — the identity is what confirms you searched the right player,
+     so it has to come before the numbers. */
+  .pd-split { grid-template-columns: 1fr; }
+}
+
 /* Mobile drops the "Player Card" title and its instruction line: the search box and the
    player's own headshot + name say what the page is, and the two lines of chrome were
    pushing the card itself below the fold. Order is left alone — search first, then the
@@ -3104,17 +3144,31 @@ table.sheet.lu-table .lu-pos {
   .pd-page-head { display: none; }
 }
 
-.pd-head { display: flex; align-items: center; gap: 1.1rem; margin-bottom: 0.6rem; }
-.pd-head .pv-shot { flex: 0 0 auto; width: 84px; height: 84px; }
+/* Photo centred above the name, the way the reference card reads: in a narrow rail there
+   is no room for a headshot BESIDE the name without squeezing both. */
+.pd-head { display: flex; justify-content: center; margin-bottom: 0.7rem; }
+.pd-head .pv-shot { flex: 0 0 auto; width: 104px; height: 104px; }
 .pd-id { min-width: 0; }
+/* One line, always. Sized for the longest real NBA names ("Shai Gilgeous-Alexander",
+   "Nickeil Alexander-Walker") against a 24.5rem rail; the ellipsis is a guard against
+   something longer, not an expected state. */
 .pd-name {
   font-weight: 800;
-  font-size: 1.7rem;
+  font-size: 1.35rem;
   color: var(--ink);
-  line-height: 1.1;
-  overflow-wrap: anywhere;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.pd-team { font-size: 0.95rem; color: var(--ink-2); margin-top: 0.25rem; }
+.pd-team {
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  margin-top: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .pd-status {
   display: flex;
   align-items: center;
@@ -3122,7 +3176,10 @@ table.sheet.lu-table .lu-pos {
   gap: 0.5rem;
   font-size: 0.8rem;
   color: var(--ink-2);
-  margin-top: 0.35rem;
+  margin-top: 0.45rem;
+  /* The identity block ends here, so this is the gap between two SECTIONS, not two
+     lines of one — it was tight enough that status read as part of the bio below it. */
+  margin-bottom: 1.1rem;
 }
 .pd-dot {
   width: 8px;
@@ -3143,31 +3200,60 @@ table.sheet.lu-table .lu-pos {
    tracks make the row count a function of WIDTH alone: six facts land on one line on a
    desktop card and two lines on a phone, the same way for every player.
    `auto-fit` + a 6.5rem floor is what picks the column count per width. */
+/*
+ * One fact per row, label left and value right, rather than a two-column grid of stacked
+ * pairs.
+ *
+ * The grid packed two facts across a 19rem rail, which left each value about 6.5rem — not
+ * enough for "2014: Rd 2, Pk 41 (DEN)", so the draft line broke onto a second and
+ * sometimes third line while the row beside it sat half empty. A full-width row gives
+ * every value the whole rail, and the rail was widened to 22.5rem so the longest of them
+ * (the draft line) fits on one line with room to spare.
+ */
 .pd-bio {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
-  gap: 0.7rem 1.2rem;
-  padding: 0.5rem 0.1rem;
-  margin-bottom: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem 0.1rem;
+  margin-bottom: 0.85rem;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
-.pd-bio-f { display: flex; flex-direction: column; min-width: 0; }
+.pd-bio-f {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.9rem;
+  min-width: 0;
+}
 .pd-bl {
+  flex: 0 0 auto;
   font-size: 0.58rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
-/* Wraps inside its own track rather than widening it — a long draft line must not be
-   what decides the whole block's column count. */
+/* Single line, always. The rail is sized so nothing here needs to wrap; the ellipsis is
+   a guard against a value longer than any real one rather than an expected state. */
+/* Sized down to sit with the label rather than shout over it — these are reference facts,
+   not figures anyone compares, and at 0.88rem they were the largest text in the rail after
+   the player's own name. Smaller also buys the draft line more room before it needs to
+   ellipsis. */
 .pd-bv {
-  font-size: 0.9rem;
+  min-width: 0;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--ink);
-  margin-top: 0.15rem;
-  overflow-wrap: anywhere;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+/* A fact this player doesn't have — an undrafted player, or one who never went to
+   college. The row is still rendered so the card's height never changes, but the dash
+   is set back so six real facts and four don't read as equally emphatic. */
+.pd-bv-none { color: var(--ink-3); font-weight: 500; }
 .pd-values {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -3329,16 +3415,34 @@ table.sheet.lu-table .lu-pos {
   color: var(--ink);
   text-align: right;
 }
-.pct-track-empty { background: transparent; }
+/* An unrankable row keeps the track's outline so the column of bars stays a column —
+   a transparent gap read as a rendering fault rather than as "nothing to rank". The
+   hatching says "not data" without spending a colour that means something elsewhere. */
+.pct-track-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-2) 0 4px,
+    var(--card) 4px 8px
+  );
+}
 .pct-none {
-  font-size: 0.72rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--ink-3);
-  font-style: italic;
-  line-height: 19px;
+  /* Sits on the hatching, so it needs the surface behind it to stay legible. */
+  padding: 0 0.4rem;
+  background: var(--card);
+  border-radius: 3px;
 }
 
 /* -------- Trade Simulator -------- */
 .metrics.metrics-3 { grid-template-columns: repeat(3, 1fr); }
+.metrics.metrics-5 { grid-template-columns: repeat(5, 1fr); }
 .trade-side { font-size: 1rem; margin: 0 0 0.4rem; }
 .trade-sell { color: var(--good); }
 .trade-buy { color: var(--cobalt); }
@@ -3691,6 +3795,8 @@ table.sheet.lu-table .lu-pos {
 @media (max-width: 767px) {
   /* Three tiles across is unreadable on a phone; the third wraps under, as elsewhere. */
   .metrics.metrics-3 { grid-template-columns: repeat(2, 1fr); }
+  /* Needs its own rule: `.metrics.metrics-5` outranks the plain `.metrics` two-up. */
+  .metrics.metrics-5 { grid-template-columns: repeat(2, 1fr); }
   /* Six stacked full-width controls pushed the list a whole screen down. Two-up keeps
      every filter the desktop has while the first rows of data stay above the fold. */
   .pv-filters {
@@ -3737,11 +3843,6 @@ table.sheet.lu-table .lu-pos {
   .pv-stat { padding: 0.3rem 0.1rem; border-radius: 6px; }
   .pv-stat-l { font-size: 0.56rem; }
   .pv-stat-v { font-size: 0.82rem; margin-top: 0.1rem; }
-  .pv-gl { margin-top: 0.55rem; padding-top: 0.45rem; }
-  .pv-gl-sum { font-size: 0.72rem; }
-  .pv-gl-tbl { font-size: 0.64rem; }
-  .pv-gl-tbl th { font-size: 0.55rem; padding: 2px 5px; }
-  .pv-gl-tbl td { padding: 2px 5px; }
 
   .pv-cmp-player .pv-shot { width: 68px; height: 68px; }
   .pv-cmp-name { font-size: 1rem; }
@@ -3756,7 +3857,7 @@ table.sheet.lu-table .lu-pos {
   .pv-cmp-lbl { font-size: 0.56rem; min-width: 2.6rem; }
   .pv-cmp-bar { height: 7px; }
   .pv-cmp-logs { grid-template-columns: 1fr; }
-  .pv-cmp-logs .pv-gl-tbl { font-size: 0.64rem; }
+  .pv-cmp-logs .sheet { font-size: 0.62rem; }
 
   .pd-head { gap: 0.9rem; }
   .pd-head .pv-shot { width: 78px; height: 78px; }
@@ -5152,4 +5253,875 @@ table.sheet.sr-value-table tbody tr.sr-value-active:hover td { background: var(-
   .sbp-card { flex: 1 1 100%; }
   /* Stacked, the rows have no tall neighbour to spread against — keep them compact. */
   .sbp-rows { justify-content: flex-start; }
+}
+
+/* -------- Draft Guide: ESPN rank comparison --------
+   NOTE: the rest of the draft board carries `dg-*` class hooks that have NO rules at all —
+   it renders on the `pv-*` classes it shares with Player Value. That is why this block is
+   small: it styles only the one element that has no `pv-` equivalent, rather than
+   retro-fitting a design onto hooks that are currently, and deliberately, inert. */
+.dg-espn {
+  flex: 0 0 auto;
+  min-width: 2.9rem;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.dg-espn-none { color: var(--line-strong); }
+/* Only a 20+ slot disagreement gets colour — agreeing within a few slots is not a
+   finding, and colouring every row would make the column unreadable. Cobalt = this board
+   is higher than ESPN, clay = lower; the same two hues the value bar already uses. */
+.dg-espn-high { color: var(--cobalt); font-weight: 700; }
+.dg-espn-low { color: var(--clay); font-weight: 700; }
+.dg-espn-gap { margin-left: 0.15rem; font-size: 0.6rem; }
+
+/* -------- Matchup phase switcher (lib/matchupPhase.ts) --------
+   The three states of a head-to-head week — pre / mid / final — as tabs, so they can be
+   compared by clicking rather than by editing a URL. Present on every This Week page that
+   can enter a phase; see components/PhaseBanner.tsx for why the notice is mandatory. */
+.ph { margin: 0 0 0.9rem; }
+.ph-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+/* The banner uses the clay border rather than `.notice`'s cobalt: cobalt is the app's
+   "here is some information" colour and this is closer to a warning — the numbers below
+   it are not real. Same shape, different signal. */
+.ph-note {
+  border-left-color: var(--clay);
+  margin-bottom: 0;
+}
+
+/* -------- Pre-week forecast scorecard (lib/predictions.ts) --------
+   Only ever rendered on a FINISHED matchup that had a forecast logged before it started.
+   Styled as a quiet band rather than a headline: it is the model grading itself, and a
+   single week is not evidence either way. */
+.fc {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 0.9rem 1.1rem;
+  margin: 0 0 1.2rem;
+}
+.fc-h {
+  margin: 0 0 0.7rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.fc-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.fc-cell { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.fc-v { font-size: 1.25rem; font-weight: 700; color: var(--ink); }
+.fc-sub { font-size: 0.66rem; color: var(--ink-3); }
+.fc-note { margin: 0.8rem 0 0; }
+@media (max-width: 767px) {
+  .fc-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+}
+/* Sub-headings inside the pre-game band — smaller than the page's own h2, so the gauge
+   and the distribution read as parts of one section rather than as two new sections. */
+.fc-sub-h {
+  margin: 0 0 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.fc .two-up { margin-bottom: 0.9rem; }
+.fc .fc-row { padding-top: 0.9rem; border-top: 1px solid var(--line-2); }
+
+/* Season Stats view switcher (This season / History). */
+.ss-tabs { margin: 0 0 1rem; gap: 0.4rem; }
+
+/* ==========================================================================
+   History charts (components/HistoryCharts.tsx)
+
+   Hand-rolled HTML/CSS charts with CSS-ONLY hover tooltips — no chart library and
+   no JS, matching every other chart in this app. The geometry is all percentages
+   so the marks and their absolutely-positioned tooltips land on the same spot at
+   any width.
+
+   Marks follow the house spec: bars capped thin with a 4px rounded data-end and a
+   square baseline, 2px lines, >=8px dots with a 2px surface ring, hairline SOLID
+   gridlines one step off the surface, and text in ink tokens only — a colored mark
+   sits beside the text, the text is never colored with the series hue.
+   ========================================================================== */
+
+.hc {
+  /* The chart now sits UNDER its table, so the space belongs above it. */
+  margin: 1.35rem 0 1.4rem;
+  padding: 0.95rem 1.15rem 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.hc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0 0 1.1rem;
+}
+.hc-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.hc-sub {
+  margin-top: 0.28rem;
+  max-width: 62ch;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.hc-foot {
+  margin: 0.85rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line-2);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-3);
+}
+
+/* Legend — always present at two or more series, so identity is never color-alone. */
+.hc-legend { display: flex; flex-wrap: wrap; gap: 0.85rem; padding-top: 0.15rem; }
+.hc-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.hc-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+/* --- the shared mark + tooltip primitives ------------------------------- */
+
+/* A bar. 4px rounded at the data end, square where it meets the baseline. */
+.hc-bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 12px;
+  max-height: 100%;
+  border-radius: 0;
+}
+.hc-bar-r { border-radius: 0 4px 4px 0; }
+.hc-bar-l { border-radius: 4px 0 0 4px; }
+
+/* Dots carry a 2px ring in the surface color so they stay readable where they
+   cross the line or a range bar. The ring is part of the hit target, not decoration. */
+.hc-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  box-shadow: 0 0 0 2px var(--card);
+}
+.hc-dot-win { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; background: var(--good); }
+.hc-dot-inline { top: 50%; }
+
+/* Hairline, solid, one step off the surface — never dashed. */
+.hc-grid-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.hc-hit { position: relative; }
+.hc-tip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -118%);
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.05rem 0.7rem;
+  min-width: 11rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--header-bg);
+  box-shadow: 0 6px 20px rgba(27, 29, 34, 0.13);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--ink);
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.09s ease;
+}
+.hc-tip b { font-weight: 700; }
+.hc-tip-r {
+  justify-self: end;
+  font-family: var(--mono);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.hc-tip-sub { grid-column: 1 / -1; color: var(--ink-3); }
+.hc-tip-up { transform: translate(-50%, -108%); }
+.hc-hit:hover .hc-tip,
+.hc-hit:focus-visible .hc-tip { opacity: 1; }
+
+/* --- 1 · career arc ------------------------------------------------------ */
+
+.hc-arc { display: flex; gap: 0.5rem; }
+.hc-arc-axis { position: relative; width: 2.4rem; flex: none; height: 205px; }
+.hc-arc-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.hc-arc-plot { position: relative; flex: 1; height: 205px; min-width: 0; }
+.hc-arc-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+/* One full-height hit band per season, so hovering anywhere in a season's column
+   reports that season — not only the 9px dot. */
+.hc-arc-hit { position: absolute; top: 0; bottom: 0; }
+.hc-arc-hit .hc-dot { left: 50%; }
+.hc-arc-hit .hc-tip { top: 0; transform: translate(-50%, -108%); }
+.hc-arc-hit.hc-tip-start .hc-tip { left: 0; transform: translate(0, -108%); }
+.hc-arc-hit.hc-tip-end .hc-tip { left: 100%; transform: translate(-100%, -108%); }
+.hc-dot-label {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -180%);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.hc-xaxis {
+  display: flex;
+  justify-content: space-between;
+  margin: 0.5rem 0 0 2.9rem;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--ink-3);
+}
+.hc-xaxis > span { flex: 1; text-align: center; }
+.hc-xaxis-inset { margin-left: 0; }
+.hc-xaxis-inset > span:first-child { text-align: left; }
+.hc-xaxis-inset > span:last-child { text-align: right; }
+
+/* --- 2 · diverging rivalries --------------------------------------------- */
+
+.hc-div { display: flex; flex-direction: column; gap: 0.3rem; }
+.hc-div-row {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr) 2.6rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+.hc-div-name {
+  font-size: 0.74rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-div-track { display: block; height: 18px; }
+.hc-div-center {
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: var(--line-strong);
+}
+/* The 2px surface gap that separates the two arms — white doing the separating,
+   never a stroke drawn around the marks. */
+.hc-div-track .hc-bar-l { margin-right: 1px; }
+.hc-div-track .hc-bar-r { margin-left: 1px; }
+.hc-div-edge {
+  justify-self: end;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* --- 3 · margin histogram ------------------------------------------------ */
+
+.hc-hist { display: flex; align-items: flex-end; gap: 2px; max-width: 34rem; }
+.hc-hist-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.hc-hist-n {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-3);
+  height: 0.85rem;
+}
+.hc-hist-slot {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  max-width: 40px;
+  height: 132px;
+  border-bottom: 1px solid var(--line-strong);
+}
+.hc-hist-bar { width: 100%; border-radius: 4px 4px 0 0; min-height: 1px; }
+.hc-hist-x {
+  font-size: 0.63rem;
+  color: var(--ink-3);
+  text-align: center;
+  line-height: 1.2;
+}
+.hc-hist-x0 { color: var(--ink-2); font-weight: 700; }
+
+/* --- 4 & 5 · ranked rows (tenure bars, manager ranges) ------------------- */
+
+.hc-rank { display: flex; flex-direction: column; gap: 0.3rem; }
+.hc-rank-row {
+  display: grid;
+  grid-template-columns: 10.5rem minmax(0, 1fr) 3rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+.hc-rank-name {
+  font-size: 0.74rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-you .hc-rank-name { font-weight: 700; }
+.hc-rank-track { display: block; height: 18px; }
+.hc-rank-v {
+  justify-self: end;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-2);
+}
+.hc-range {
+  position: absolute;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  opacity: 0.45;
+}
+
+@media (max-width: 767px) {
+  .hc { padding: 0.85rem 0.8rem 0.95rem; }
+  .hc-div-row { grid-template-columns: 6.6rem minmax(0, 1fr) 2.2rem; gap: 0.45rem; }
+  .hc-rank-row { grid-template-columns: 7.5rem minmax(0, 1fr) 2.6rem; gap: 0.45rem; }
+  .hc-div-name, .hc-rank-name { font-size: 0.68rem; }
+  .hc-arc-plot, .hc-arc-axis { height: 165px; }
+  .hc-hist-slot { height: 104px; }
+  .hc-hist-x { font-size: 0.56rem; }
+  .hc-tip { min-width: 9.5rem; font-size: 0.66rem; }
+}
+
+/* A wide sortable table that must fit the content column rather than scroll sideways.
+   The player table carries 15 columns; at the default sheet padding the last one was
+   cut off at the right edge. */
+table.sheet.sheet-tight { font-size: 0.73rem; }
+table.sheet.sheet-tight td { padding: 0.36rem 0.4rem; }
+/*
+ * The header padding goes on the BUTTON, not the th.
+ *
+ * `table.sheet.sortable th` is `padding: 0` and `.th-sort` — a full-width flex button
+ * inside it — carries the padding instead, so the label lines up with the cells below.
+ * Padding the th here as well double-padded every header and slid all fifteen of them out
+ * of register with their own columns; the last one, Honors, showed it worst.
+ */
+table.sheet.sheet-tight th { font-size: 0.57rem; }
+table.sheet.sheet-tight .th-sort { padding: 0.45rem 0.4rem; }
+table.sheet.sheet-tight td:first-child { padding-left: 0.7rem; }
+table.sheet.sheet-tight th:first-child .th-sort { padding-left: 0.7rem; }
+table.sheet.sheet-tight td:last-child { padding-right: 0.7rem; }
+table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
+
+/* Pager for a long sortable table (SortableTable's `pageSize`). Sits under the table,
+   never inside the horizontal scroller — it must stay reachable when the table is wider
+   than the screen. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.7rem 0 1.2rem;
+  font-size: 0.72rem;
+  color: var(--ink-2);
+}
+.pager-count { font-family: var(--mono); color: var(--ink-3); }
+.pager-nav { display: inline-flex; align-items: center; gap: 0.45rem; }
+.pager-page { font-family: var(--mono); color: var(--ink-3); }
+.pager-btn {
+  padding: 0.32rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card);
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--cobalt); color: var(--cobalt); }
+.pager-btn:disabled { opacity: 0.45; cursor: default; }
+.pager-all { font-weight: 600; }
+@media (max-width: 767px) {
+  .pager { justify-content: center; }
+}
+
+/* ------------------------------------------------- player card: window table
+
+   Season / 30 day / 15 day as three rows, replacing three big value tiles. Eight narrow
+   numeric columns in a 24.5rem rail, so everything is sized down and the padding is
+   minimal — the table is meant to be scanned as a block, not read cell by cell. */
+.pd-wt-wrap { margin-bottom: 0.2rem; }
+.pd-wt {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  text-align: right;
+}
+.pd-wt th,
+.pd-wt td { padding: 0.3rem 0.12rem; white-space: nowrap; }
+.pd-wt thead th {
+  font-family: var(--sans);
+  font-size: 0.57rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line);
+}
+/* The row label is the only text column — left-aligned, sans, and wider than the rest. */
+.pd-wt tbody th {
+  font-family: var(--sans);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: left;
+  color: var(--ink-2);
+  padding-right: 0.35rem;
+}
+.pd-wt tbody td { color: var(--ink); }
+.pd-wt tbody tr + tr th,
+.pd-wt tbody tr + tr td { border-top: 1px solid var(--line-2); }
+/* Value closes the row and is the column the page ranks by, so it carries the weight. */
+.pd-wt .pd-wt-val { font-weight: 700; padding-left: 0.3rem; }
+.pd-wt tbody .pd-wt-val { color: var(--ink); }
+.pd-wt-rank {
+  margin: 0.4rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+/* ------------------------------------------- player card: rolling value chart
+
+   Sits under the window table in the left rail. Small on purpose: it answers "what shape
+   was the season" and hands the exact figures back to the table above it. */
+.rv {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+.rv-h {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-align: left;
+  margin-bottom: 0.45rem;
+}
+.rv-note { margin: 0; font-size: 0.72rem; color: var(--ink-3); text-align: left; }
+.rv-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.rv-tick,
+.rv-avg {
+  font-family: var(--mono);
+  font-size: 8px;
+  fill: var(--ink-3);
+}
+.rv-avg { letter-spacing: 0.06em; }
+
+/* Crosshair tooltip for the rolling-value chart. A real HTML panel, not an SVG <title>:
+   a native tooltip cannot be styled, is delayed by the browser, and forces the help
+   cursor. Positioning context is .rv-wrap. */
+.rv-wrap { position: relative; }
+.rv-tip {
+  position: absolute;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--header-bg);
+  box-shadow: 0 4px 14px rgba(27, 29, 34, 0.14);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.rv-tip-v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 0.74rem;
+  color: var(--ink);
+}
+.rv-tip-d { font-size: 0.62rem; color: var(--ink-3); }
+
+
+/* ------------------------------------------- player card: the sheets below the card
+
+   Game Log and Availability, always visible. They used to be <details> disclosures, which
+   is where a section goes to be ignored — and the collapsed state hid the one thing a
+   player page should end in, the raw record. Styled as full-width cards so they read as
+   the continuation of the two panels above rather than as leftovers. */
+/*
+ * THE MIN-WIDTH CHAIN. Every one of these is a flex or grid CONTAINER, and both default
+ * their children to `min-width: auto` — "at least as wide as your content". A wide table
+ * inside a sheet therefore widened the sheet, which widened the column, which pushed the
+ * whole page past the viewport: on a phone the cards ran off the right edge, the game-log
+ * table stopped scrolling inside its own box, and the dial scaled up with everything else.
+ *
+ * `min-width: 0` lets the track win instead, which is what makes `.table-scroll`'s
+ * `overflow-x: auto` do the job it has always been there for.
+ */
+.pd-sheets {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  margin-top: 1.1rem;
+  min-width: 0;
+}
+.pd-sheets > *,
+.pd-sheet,
+.pd-sheet-two > * { min-width: 0; }
+.pd-sheet {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 1rem 1.15rem 1.1rem;
+}
+.pd-sheet-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--line);
+}
+.pd-sheet-h h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+/* The count sits with the title rather than under it — it is a caption on the heading,
+   not a sentence of its own. */
+.pd-sheet-n {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-3);
+}
+.pd-sheet-note { margin: 0; font-size: 0.76rem; color: var(--ink-3); }
+
+/* The Compare page's variant: the section's structure without the card around it, so two
+   of them sit inside the existing two-column grid rather than nesting card in card. */
+.pd-sheet-plain { min-width: 0; }
+.pd-sheet-plain .pd-sheet-h { margin-bottom: 0.5rem; padding-bottom: 0.4rem; }
+.pd-sheet-plain .pd-sheet-h h2 { font-size: 0.8rem; }
+
+/* A full season is ~70 rows. Capped so the log does not push everything else off the
+   page, with the header pinned so the columns survive the scroll. */
+.pd-sheet-scroll { max-height: 26rem; overflow-y: auto; }
+.pd-gl thead th { position: sticky; top: 0; z-index: 1; }
+.pd-gl-res { color: var(--ink-3); }
+
+@media (max-width: 767px) {
+  .pd-sheet { padding: 0.85rem 0.8rem 0.95rem; }
+  .pd-sheet-scroll { max-height: 20rem; }
+}
+
+/* -------------------------------------------- player card: splits & consistency
+
+   Two tables side by side inside one sheet — month/situation, best/worst. They are the
+   same question asked two ways, so they share a heading rather than each claiming one. */
+.pd-sheet-two {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: 1.1rem;
+  /* Stretch, not `start`: two bordered cards side by side with their bottoms at
+     different heights reads as a rendering fault, not as a layout. */
+  align-items: stretch;
+}
+/* The dial floats in whatever height the row ends up at, rather than sitting against the
+   top edge with dead space under it. */
+.pd-sheet-two > .pd-sheet { display: flex; flex-direction: column; }
+.pd-sheet-two .pd-shape { flex: 1; justify-content: center; }
+.pd-split-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.4rem;
+}
+.pd-split-block { min-width: 0; }
+.pd-split-h {
+  margin: 0 0 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+/* The value column closes every one of these tables and is what they are read for. */
+.pd-split-v { font-weight: 700; }
+.pd-sim-own { color: var(--ink-2); }
+
+.pd-con-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0 0 1.1rem;
+}
+.pd-con-metric {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  padding: 0.6rem 0.7rem 0.65rem;
+  text-align: center;
+}
+.pd-con-l {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.pd-con-v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0.15rem 0 0.05rem;
+}
+.pd-con-s { font-size: 0.6rem; color: var(--ink-3); }
+
+/* -------------------------------------------------- player card: category shape */
+
+.pd-shape { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.pd-shape-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Bounded by the card, never by its own intrinsic size — the viewBox is
+     square, so an unbounded width becomes an equally unbounded height. */
+  max-width: min(17rem, 100%);
+  margin: 0 auto;
+}
+.pd-shape-ax {
+  font-family: var(--sans);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  fill: var(--ink-3);
+}
+.pd-shape-key { border-top: 1px solid var(--line-2); padding-top: 0.6rem; }
+.pd-shape-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  font-size: 0.74rem;
+  margin-bottom: 0.25rem;
+}
+.pd-shape-l {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pd-shape-v { font-family: var(--mono); font-weight: 700; color: var(--ink); }
+.pd-shape-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+@media (max-width: 1000px) {
+  .pd-sheet-two { grid-template-columns: 1fr; }
+}
+@media (max-width: 767px) {
+  /* Two dense stat tables side by side on a phone is two unreadable tables. */
+  .pd-split-cols { grid-template-columns: 1fr; gap: 1.1rem; }
+  .pd-con-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ------------------------------------------------- player card: scatter helpers */
+.pd-ue-svg { display: block; width: 100%; height: auto; }
+.pd-ue-ax {
+  font-family: var(--mono);
+  font-size: 8px;
+  fill: var(--ink-3);
+}
+.pd-ue-key { border-top: 1px solid var(--line-2); padding-top: 0.6rem; margin-top: 0.5rem; }
+
+/* ------------------------------------------------------ player card: tabs & shots
+
+   Tabs replace what had become ten stacked sections. Styled as a segmented control
+   rather than underlined links: these switch a panel in place, they do not navigate,
+   and an underline would have read as the nav two rows above it. */
+.pd-tabs {
+  display: flex;
+  gap: 0;
+  margin: 1.4rem 0 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  width: fit-content;
+  max-width: 100%;
+}
+.pd-tab {
+  padding: 0.42rem 1.15rem;
+  border: 0;
+  border-right: 1px solid var(--line-strong);
+  background: var(--card);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pd-tab:last-child { border-right: 0; }
+.pd-tab:hover { color: var(--ink); background: var(--surface-2); }
+.pd-tab-on,
+.pd-tab-on:hover { background: var(--cobalt); color: #fff; }
+
+
+@media (max-width: 860px) {
+  .pd-tabs { width: 100%; }
+  .pd-tab { flex: 1; padding: 0.42rem 0.4rem; font-size: 0.65rem; }
+}
+
+/* -------------------------------------------- player card: volume vs efficiency
+
+   Full-width plot with the hovered player NAMED where he sits, and one status line
+   underneath. The readout used to be a column beside the chart; it cost a fifth of the
+   width to restate four numbers, and a scatter reads better the more room the cloud gets. */
+.pd-ue-svg { display: block; width: 100%; height: auto; }
+.pd-ue-ax { font-family: var(--mono); font-size: 8px; fill: var(--ink-3); }
+.pd-ue-title {
+  font-family: var(--sans);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  fill: var(--ink-3);
+}
+/* Quadrant hints, deliberately at the edge of legibility — orientation, not labels. */
+.pd-ue-q {
+  font-family: var(--sans);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  fill: var(--ink-3);
+  opacity: 0.65;
+}
+/* The in-plot name. `paint-order: stroke` puts a surface-coloured halo BEHIND the glyphs,
+   so a label landing in a dense part of the cloud stays readable without a box. */
+.pd-ue-tag {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--card);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.pd-ue-tag-me { fill: var(--cobalt); }
+
+.pd-ue-bar {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.1rem;
+  margin-top: 0.7rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--line-2);
+  font-size: 0.72rem;
+  color: var(--ink-3);
+}
+.pd-ue-who { font-size: 0.8rem; font-weight: 700; color: var(--ink); }
+.pd-ue-who em { font-style: normal; font-weight: 500; font-size: 0.68rem; color: var(--cobalt); }
+.pd-ue-stat b {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+/* Pushed to the far end so the row reads "who, then the numbers, then the verdict". */
+.pd-ue-quad { margin-left: auto; color: var(--ink-2); }
+
+@media (max-width: 767px) {
+  .pd-ue-quad { margin-left: 0; }
+}
+
+/* ------------------------------------------------------- player card: mobile fixes
+
+   The category dial gets the full card width on a phone. Capped at 17rem it rendered
+   about 270px wide with 8.5px axis labels, which is a diagram you squint at rather than
+   read — and it is the one chart on the page whose whole job is being glanced at. */
+@media (max-width: 767px) {
+  /* Bigger than the 17rem desktop cap, but still capped: `none` let it size to the flex
+     container rather than the card, which overflowed the screen and scaled the whole dial
+     (labels included) far past readable. */
+  .pd-shape-svg { max-width: min(22rem, 100%); }
+  .pd-shape-ax { font-size: 9px; }
+  .pd-shape-key { padding-top: 0.75rem; }
+  .pd-shape-row { font-size: 0.8rem; }
+
+  /* Charts that need a pointer to mean anything. Hidden rather than shrunk: a scatter of
+     278 dots with no hover is a smudge, not a smaller chart. */
+  .pd-desktop-only { display: none; }
 }

@@ -12,6 +12,17 @@ const R = 132;
 const BAND_W = 34;
 const BAR_W = 21;
 const L = Math.PI * R;
+
+/**
+ * Round any number that reaches an SVG attribute.
+ *
+ * An unrounded float here is a HYDRATION MISMATCH: React serialises it at limited
+ * precision into the server HTML while the client keeps the full double, the two strings
+ * differ, and React declines to patch it. It only bites when the gauge shows a real
+ * probability — while the season was over every value was exactly 0 or 1 and every
+ * product was a whole number, so nothing ever disagreed.
+ */
+const n2 = (v: number) => v.toFixed(2);
 const TRACK = `M ${CX - R} ${CY} A ${R} ${R} 0 0 1 ${CX + R} ${CY}`;
 
 const BANDS: Array<[string, number, number]> = [
@@ -50,8 +61,8 @@ export default function WinProbabilityGauge({ percent }: { percent: number }) {
             stroke={color}
             strokeWidth={BAND_W}
             strokeOpacity={0.16}
-            strokeDasharray={`${(end - start) * L} ${L}`}
-            strokeDashoffset={-start * L}
+            strokeDasharray={`${n2((end - start) * L)} ${n2(L)}`}
+            strokeDashoffset={n2(-start * L)}
           />
         ))}
         <path
@@ -59,7 +70,7 @@ export default function WinProbabilityGauge({ percent }: { percent: number }) {
           fill="none"
           stroke={tone}
           strokeWidth={BAR_W}
-          strokeDasharray={`${frac * L} ${L}`}
+          strokeDasharray={`${n2(frac * L)} ${n2(L)}`}
         />
         {[0, 20, 40, 60, 80, 100].map((v) => {
           const t = v / 100;

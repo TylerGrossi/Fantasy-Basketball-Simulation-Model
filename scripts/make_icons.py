@@ -15,7 +15,7 @@ Writes:
     public/logo-word.png     "FBBSim", TRANSPARENT   -> header
     public/logo-tile.png     384x384  -> the app tile, for the mobile home hero
     public/og.png            1200x630 -> link preview when the site is shared
-    app/icon.png             256x256  -> browser tab / favicon (94% ball, vs 78% below)
+    app/icon.png             256x256  -> browser tab / favicon (94% ball, ROUNDED corners)
     app/apple-icon.png       180x180  -> <link rel="apple-touch-icon">
     public/icon-192.png      192x192  -> manifest (Android home screen)
     public/icon-512.png      512x512  -> manifest (splash / high-DPI)
@@ -36,8 +36,10 @@ TWO deliberate departures from the source artwork:
    The ball is scaled to the same 78% of the canvas the artwork's tile uses, so the result
    is the right-hand logo, just with the platform supplying the rounding.
 
-Opaque white background on the icons, for the same reason as before: iOS masks home-screen
-icons and a transparent corner shows through as a hole.
+Opaque white background on the HOME-SCREEN icons, for the same reason as before: iOS masks
+them and a transparent corner shows through as a hole. The favicon is the exception — no
+platform masks a browser-tab icon, so it rounds its own corners and leaves them
+transparent (see FAVICON_RADIUS).
 """
 
 import os
@@ -63,21 +65,32 @@ BALL_ON_TILE = 0.78
 
 WHITE = (255, 255, 255)
 
+# Corner radius for the favicon, as a fraction of its width. Under the artwork tile's own
+# 22% because this canvas is packed tighter (94% ball vs 78%): at 22% the curve starts
+# grazing the ball's edge, and a mark that touches its own corner rounding reads as a
+# mistake rather than a shape.
+FAVICON_RADIUS = 0.18
+
 ICON_TARGETS = [
-    # (path, size, how much of the canvas the ball fills)
+    # (path, size, how much of the canvas the ball fills, corner radius or None)
     #
-    # All of these are the artwork's own mark on white. They differ only in how much of the
-    # canvas the ball takes.
+    # All of these are the artwork's own mark on white. They differ in how much of the
+    # canvas the ball takes, and in whether they round their own corners.
     #
-    # The FAVICON is the odd one out at 94%. It is looked at 16-32px across in a browser
-    # tab, and at that size the generous padding that makes a home-screen icon look composed
-    # is just thrown-away pixels. The home-screen icons keep the artwork's own 78%, because
-    # those ARE seen large, where the padding reads as composition and the white tile is the
-    # artwork's right-hand logo.
-    (os.path.join(ROOT, "app", "icon.png"), 256, 0.94),
-    (os.path.join(ROOT, "app", "apple-icon.png"), 180, BALL_ON_TILE),
-    (os.path.join(ROOT, "public", "icon-192.png"), 192, BALL_ON_TILE),
-    (os.path.join(ROOT, "public", "icon-512.png"), 512, BALL_ON_TILE),
+    # The FAVICON is the odd one out twice over:
+    #
+    #   - 94% ball. It is looked at 16-32px across in a browser tab, and at that size the
+    #     generous padding that makes a home-screen icon look composed is thrown-away
+    #     pixels. The home-screen icons keep the artwork's own 78%, because those ARE seen
+    #     large, where the padding reads as composition.
+    #   - It rounds ITSELF. Nothing masks a favicon — a browser tab draws the file as-is —
+    #     so the rounding has to be in the pixels. The other three must stay hard-cornered
+    #     for exactly the opposite reason: iOS and Android apply their own mask, and an
+    #     already-rounded source double-rounds, leaving pale corners inside the mask.
+    (os.path.join(ROOT, "app", "icon.png"), 256, 0.94, FAVICON_RADIUS),
+    (os.path.join(ROOT, "app", "apple-icon.png"), 180, BALL_ON_TILE, None),
+    (os.path.join(ROOT, "public", "icon-192.png"), 192, BALL_ON_TILE, None),
+    (os.path.join(ROOT, "public", "icon-512.png"), 512, BALL_ON_TILE, None),
 ]
 
 
@@ -103,8 +116,18 @@ def to_alpha(rgb: Image.Image) -> Image.Image:
     return Image.fromarray(out, mode="RGBA")
 
 
-def build_icon(src: Image.Image, size: int, frac: float) -> Image.Image:
-    """The ball on an opaque white square, filling `frac` of the canvas."""
+def build_icon(
+    src: Image.Image, size: int, frac: float, radius: float | None = None
+) -> Image.Image:
+    """
+    The ball on a white square, filling `frac` of the canvas.
+
+    `radius` (a fraction of the width) rounds the corners and returns RGBA with those
+    corners TRANSPARENT, so a browser tab's own background shows through them. Without
+    it the result is the hard-cornered opaque square the platform-masked icons need.
+    The rounding is drawn at 4x and downsampled — a rounded rect drawn straight at 256px
+    stair-steps visibly on the curve.
+    """
     ball = to_alpha(src.crop(BALL))
     # Supersample the resize so the thin seams stay smooth at 180px and below.
     target = max(1, round(size * frac))
@@ -114,9 +137,22 @@ def build_icon(src: Image.Image, size: int, frac: float) -> Image.Image:
         Image.LANCZOS,
     )
 
-    canvas = Image.new("RGBA", (size, size), WHITE + (255,))
-    canvas.alpha_composite(ball, ((size - ball.width) // 2, (size - ball.height) // 2))
-    return canvas.convert("RGB")
+    if radius is None:
+        canvas = Image.new("RGBA", (size, size), WHITE + (255,))
+        canvas.alpha_composite(ball, ((size - ball.width) // 2, (size - ball.height) // 2))
+        return canvas.convert("RGB")
+
+    ss = 4
+    big = size * ss
+    canvas = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    ImageDraw.Draw(canvas).rounded_rectangle(
+        (0, 0, big - 1, big - 1), radius=round(big * radius), fill=WHITE + (255,)
+    )
+    big_ball = ball.resize((ball.width * ss, ball.height * ss), Image.LANCZOS)
+    canvas.alpha_composite(
+        big_ball, ((big - big_ball.width) // 2, (big - big_ball.height) // 2)
+    )
+    return canvas.resize((size, size), Image.LANCZOS)
 
 
 # An inverted favicon - the mark knocked out on a solid orange chip - was tried here and
@@ -209,9 +245,13 @@ def main():
     build_og(src).save(og_path, format="PNG", optimize=True)
     print(f"wrote {os.path.relpath(og_path, ROOT)} (1200x630, link preview)")
 
-    for path, size, frac in ICON_TARGETS:
-        build_icon(src, size, frac).save(path, format="PNG", optimize=True)
-        print(f"wrote {os.path.relpath(path, ROOT)} ({size}x{size}, ball {frac:.0%})")
+    for path, size, frac, radius in ICON_TARGETS:
+        build_icon(src, size, frac, radius).save(path, format="PNG", optimize=True)
+        shape = f"rounded {radius:.0%}" if radius else "square"
+        print(
+            f"wrote {os.path.relpath(path, ROOT)} "
+            f"({size}x{size}, ball {frac:.0%}, {shape})"
+        )
 
 
 if __name__ == "__main__":

@@ -42,7 +42,16 @@ export default function ScoreDistribution({ distribution, total, show = 10 }: Pr
                 <div
                   className="dist-bar"
                   style={{
-                    height: Math.max(2, (p / peak) * PLOT_H),
+                    /*
+                     * Rounded, and with an explicit unit, because a bare float here is a
+                     * HYDRATION MISMATCH. React serialises a unitless number to px at
+                     * limited precision on the server ("3.8469px") while the client keeps
+                     * the full double (3.8468979199764077), so the two disagree and React
+                     * refuses to patch it. Invisible while the season was over — every
+                     * probability was 0 or 1, so every bar was flat at the 2px floor — and
+                     * it surfaced the moment a real distribution was rendered.
+                     */
+                    height: `${Math.max(2, (p / peak) * PLOT_H).toFixed(2)}px`,
                     background: color,
                   }}
                   title={`${k}-${lost}: ${(p * 100).toFixed(1)}%`}

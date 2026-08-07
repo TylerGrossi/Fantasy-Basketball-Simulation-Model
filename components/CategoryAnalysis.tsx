@@ -59,11 +59,13 @@ export default function CategoryAnalysis({ categories, probs }: Props) {
 function Half({ pct, side }: { pct: number; side: "left" | "right" }) {
   const inside = pct >= 13;
   const label = `${Math.round(pct)}%`;
+  // Rounded to keep the server and client HTML byte-identical. An unrounded float here
+  // hydration-mismatches even WITH an explicit unit — the two ends serialise the same
+  // number to different precision — and it only bites when a real probability is on
+  // screen, which out of season means the phase preview.
+  const width = `${Math.max(pct, 0).toFixed(2)}%`;
   const bar = (
-    <div
-      className={`ca-bar ca-bar-${side}`}
-      style={{ width: `${Math.max(pct, 0)}%` }}
-    >
+    <div className={`ca-bar ca-bar-${side}`} style={{ width }}>
       {inside && <span className="ca-bar-text">{label}</span>}
     </div>
   );

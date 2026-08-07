@@ -144,8 +144,8 @@ const DIRECTORY: Array<{
     items: [
       { href: "/scoreboard", name: "Scoreboard", desc: "The matchup category by category, live from ESPN." },
       { href: "/matchup", name: "Matchup", desc: "Win probability, score distribution, per-category projections." },
-      { href: "/streamers", name: "Streamers", desc: "Every pick-up-and-drop pair scored against this week." },
-      { href: "/bench", name: "Bench", desc: "Who to play, who to sit, and what each choice is worth." },
+      { href: "/streamers", name: "Streamers", desc: "Every pick-up-and-drop pair scored against this week.", inSeason: true },
+      { href: "/bench", name: "Bench", desc: "Who to play, who to sit, and what each choice is worth.", inSeason: true },
       { href: "/roster", name: "Roster", desc: "Your players, games left, and per-game averages." },
     ],
   },

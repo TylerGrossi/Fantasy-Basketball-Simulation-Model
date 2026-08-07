@@ -4,9 +4,12 @@
  *
  * Mirrors the Streamlit app's FLAT_NAV / NAV_SECTIONS. Desktop and mobile deliberately
  * differ ("a website is not a phone app"), and the groupings differ too — on mobile
- * Schedule lives under Season and Playoff Odds under Tools, while on desktop Schedule is
- * a top-level link and Playoff Odds sits in the Tools dropdown. That divergence is
- * intentional, carried over from the original.
+ * Schedule and History sit in the Season row, while on desktop Schedule is inside the
+ * League menu and History is a header tab of its own. That divergence is intentional,
+ * carried over from the original.
+ *
+ * The desktop header reads: Season Summary · Current Matchup · League · Tools · History ·
+ * Agent, then the Settings gear (rendered separately in Nav.tsx, not from this list).
  */
 
 export interface NavLink {
@@ -33,6 +36,18 @@ export const WEEK_PAGES = [
 ];
 
 
+/**
+ * The History section. `/history` leads and carries the career totals, so the menu's first
+ * item is the page you land on rather than one you have to come back to.
+ */
+export const HISTORY_PAGES = [
+  { label: "Seasons", href: "/history" },
+  { label: "Players", href: "/history/players" },
+  { label: "Head to Head", href: "/history/head-to-head" },
+  { label: "Managers", href: "/history/managers" },
+  { label: "Matchups", href: "/history/matchups" },
+];
+
 /** Desktop header: brand, then these, then the Settings gear. */
 export const FLAT_NAV: NavEntry[] = [
   { kind: "link", label: "Season Summary", href: "/season" },
@@ -41,7 +56,6 @@ export const FLAT_NAV: NavEntry[] = [
     label: "Current Matchup",
     items: WEEK_PAGES.map((p) => ({ label: p.label, href: p.href })),
   },
-  { kind: "link", label: "Schedule", href: "/schedule" },
   {
     kind: "menu",
     /*
@@ -57,6 +71,10 @@ export const FLAT_NAV: NavEntry[] = [
      */
     label: "League",
     items: [
+      // Schedule leads: it is the page you open to ask "what happened / what's next",
+      // which is a more common question than any of the stat tables under it. It used to
+      // be a top-level header link and moved here to make room for History.
+      { label: "Schedule", href: "/schedule" },
       { label: "Season Stats", href: "/season-stats" },
       { label: "League Stats", href: "/league-stats" },
       { label: "Power Rankings", href: "/rankings" },
@@ -87,6 +105,20 @@ export const FLAT_NAV: NavEntry[] = [
       { label: "Playoff Odds", href: "/playoffs" },
     ],
   },
+  {
+    kind: "menu",
+    /*
+     * Its own menu rather than an item under League: League means "everyone, this
+     * season", and History is the opposite on both counts — one manager, every season,
+     * across every league they have ever played in.
+     *
+     * Split into pages rather than one long one because the five tables answer different
+     * questions; the player table alone is ~200 rows, and stacked together everything
+     * below the first was scrolled past rather than read.
+     */
+    label: "History",
+    items: HISTORY_PAGES,
+  },
   // Agent is a top-level header tab on desktop but lives under Tools on mobile — the
   // same split the Streamlit app used. It is the one page you go to with a question
   // rather than a page you browse, so it earns the header slot on a wide screen.
@@ -102,6 +134,12 @@ export const SEASON_PAGES = [
   { label: "Rosters", href: "/league-rosters" },
   { label: "Recent Moves", href: "/recent-moves" },
   { label: "Schedule", href: "/schedule" },
+  ...HISTORY_PAGES.map((p) => ({
+    // Prefixed on mobile, where this row sits among Season pages and a bare "Players"
+    // or "Managers" would not say which section it belongs to.
+    label: p.href === "/history" ? "History" : `History: ${p.label}`,
+    href: p.href,
+  })),
 ];
 
 /**
@@ -149,16 +187,26 @@ export const SECTIONS: Section[] = [
 ];
 
 /**
- * Pages that only make sense while a season is being played. Playoff Odds is a
- * FORECAST — once the bracket is decided there is nothing left to forecast, and a
- * standing link to a page of coin-flip probabilities about a finished tournament invites
- * exactly the misreading that page's own banner has to argue against. The route stays
- * reachable (bookmarks, a link from Season Summary); it just leaves the menus.
+ * Pages that only make sense while a season is being played. All three answer a question
+ * about GAMES STILL TO COME, and once the last one is played the question is gone:
+ *
+ *   - **Playoff Odds** is a forecast, and there is nothing left to forecast. A standing
+ *     link to coin-flip probabilities about a finished tournament invites exactly the
+ *     misreading that page's own banner has to argue against.
+ *   - **Streamers** ranks pickups by what they add over the rest of the week. With no
+ *     games left every candidate adds exactly zero, so the page ranks nothing.
+ *   - **Bench** decides who to start. There is nothing to start.
+ *
+ * These are not broken in the offseason — they are correct and empty, which is worse,
+ * because an empty page reads as a bug rather than as an answer.
+ *
+ * The routes stay reachable (bookmarks, a direct link); they just leave the menus, and
+ * they come back on their own the moment `seasonOver` flips.
  *
  * The Streamlit app conditions its nav the same way in the other direction —
  * `render_top_nav` drops "Season Summary" from FLAT_NAV until the season is over.
  */
-export const IN_SEASON_ONLY = ["/playoffs"];
+export const IN_SEASON_ONLY = ["/playoffs", "/streamers", "/bench"];
 
 /**
  * Pages hidden from every menu, at every point in the season. Owner's call, and the only

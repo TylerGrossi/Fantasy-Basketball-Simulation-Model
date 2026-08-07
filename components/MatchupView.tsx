@@ -10,41 +10,28 @@ import {
   sideMoments,
 } from "@/lib/league";
 import { matchupOutcome, projectionPercentile } from "@/lib/probability";
+import { gradeForecast, type Forecast } from "@/lib/predictions";
 import { useLiveTotals } from "@/lib/useLiveTotals";
 import LiveBadge from "./LiveBadge";
 import WinProbabilityGauge from "./WinProbabilityGauge";
 import CategoryAnalysis from "./CategoryAnalysis";
 import ScoreDistribution from "./ScoreDistribution";
 
-/** One team's season, for the completed-matchup "tale of the tape". */
-export interface TapeSide {
-  name: string;
-  record: string;
-  winPct: number;
-  allPlayPct: number;
-  luck: number;
-  powerRank: number | null;
-  finish: number;
-  /** Results of the five matchups BEFORE this one, oldest first. */
-  form: string[];
-}
-
-export interface Tape {
-  you: TapeSide;
-  opp: TapeSide;
-}
-
 interface Props {
   league: LeagueData;
   matchup: Matchup;
   isHome: boolean;
   teamId: number;
-  /** Season context for the recap. Built server-side; null if unavailable. */
-  tape?: Tape | null;
   /** false = freeze on the snapshot, never fetch (?demo=1). */
   live?: boolean;
   /** Numbers are synthetic (mid-week preview) — disclosed in the badge. */
   simulated?: boolean;
+  /**
+   * What the model said about this week BEFORE it was played, if it was logged. Null for
+   * every week that predates the forecast log — which is all of them until a season runs
+   * with the recorder in place. See lib/predictions.ts.
+   */
+  forecast?: Forecast | null;
   youName: string;
   oppName: string;
 }
@@ -64,7 +51,7 @@ export default function MatchupView({
   simulated = false,
   youName,
   oppName,
-  tape = null,
+  forecast = null,
 }: Props) {
   const you = isHome ? matchup.home : matchup.away;
   const opp = isHome ? matchup.away : matchup.home;
@@ -109,7 +96,7 @@ export default function MatchupView({
         oppName={oppName}
         youVec={live.you}
         oppVec={live.opp}
-        tape={tape}
+        forecast={forecast}
         badge={
           <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
         }
@@ -181,16 +168,17 @@ function Recap({
   oppName,
   youVec,
   oppVec,
-  tape,
   badge,
+  forecast,
 }: {
   league: LeagueData;
   youName: string;
   oppName: string;
   youVec: number[];
   oppVec: number[];
-  tape: Tape | null;
   badge: ReactNode;
+  /** The pre-week forecast, if one was logged. Null for weeks that predate the log. */
+  forecast: Forecast | null;
 }) {
   const rows = scoreboardRows(league, youVec, oppVec);
   const rec = categoryRecord(rows);
@@ -241,7 +229,15 @@ function Recap({
         />
       </div>
 
-      {tape && <TaleOfTheTape tape={tape} />}
+      {forecast && (
+        <PreGameForecast
+          forecast={forecast}
+          won={won}
+          tied={tied}
+          rec={rec}
+          nCats={league.categories.length}
+        />
+      )}
 
       <h2>Final totals</h2>
       <div className="table-scroll">
@@ -281,113 +277,6 @@ function Recap({
         </table>
       </div>
     </>
-  );
-}
-
-/**
- * The two seasons side by side, so the result has context: was this the better team
- * winning, or an upset? Every row is a season-long fact, which is why it belongs on the
- * finished view and not the live one — mid-week these numbers are still moving.
- *
- * The better side of each row is emphasised, using each row's own sense of "better":
- * lower is better for the rank, and luck is closest-to-zero rather than highest, since
- * a big positive luck figure means a kind schedule, not a good team.
- */
-function TaleOfTheTape({ tape }: { tape: Tape }) {
-  const { you, opp } = tape;
-  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
-  const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
-
-  const rows: Array<{ label: string; a: string; b: string; win: -1 | 0 | 1 }> = [
-    { label: "Record", a: you.record, b: opp.record, win: cmp(you.winPct, opp.winPct) },
-    { label: "Win %", a: pct(you.winPct), b: pct(opp.winPct), win: cmp(you.winPct, opp.winPct) },
-    {
-      label: "All-play %",
-      a: pct(you.allPlayPct),
-      b: pct(opp.allPlayPct),
-      win: cmp(you.allPlayPct, opp.allPlayPct),
-    },
-    {
-      label: "Power rank",
-      a: you.powerRank ? `#${you.powerRank}` : "—",
-      b: opp.powerRank ? `#${opp.powerRank}` : "—",
-      // Lower is better.
-      win:
-        you.powerRank && opp.powerRank ? cmp(opp.powerRank, you.powerRank) : 0,
-    },
-    {
-      label: "Luck",
-      a: signed(you.luck),
-      b: signed(opp.luck),
-      // Neither sign is "good" — the less schedule-dependent record is.
-      win: cmp(Math.abs(opp.luck), Math.abs(you.luck)),
-    },
-    {
-      label: "Season finish",
-      a: ordinal(you.finish),
-      b: ordinal(opp.finish),
-      win: cmp(opp.finish, you.finish),
-    },
-  ];
-
-  return (
-    <>
-      <h2>Tale of the tape</h2>
-      <div className="table-scroll">
-        <table className="sheet tape">
-          <thead>
-            <tr>
-              <th />
-              <th className="num">{you.name}</th>
-              <th className="num">{opp.name}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label}>
-                <td className="tape-label">{r.label}</td>
-                <td className={`num ${r.win === 1 ? "sb-win" : "sb-lose"}`}>{r.a}</td>
-                <td className={`num ${r.win === -1 ? "sb-win" : "sb-lose"}`}>{r.b}</td>
-              </tr>
-            ))}
-            <tr>
-              <td className="tape-label">Form into the week</td>
-              <td className="num">
-                <Form results={you.form} />
-              </td>
-              <td className="num">
-                <Form results={opp.form} />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
-/** -1 = second value better, 1 = first better, 0 = level. Higher wins. */
-function cmp(a: number, b: number): -1 | 0 | 1 {
-  return a > b ? 1 : a < b ? -1 : 0;
-}
-
-function ordinal(n: number): string {
-  if (!n) return "—";
-  const r = n % 100;
-  if (r >= 11 && r <= 13) return `${n}th`;
-  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
-}
-
-function Form({ results }: { results: string[] }) {
-  if (!results.length) return <span className="tape-none">—</span>;
-  return (
-    <span className="tape-form">
-      {results.map((r, i) => (
-        <span key={i} className={`tape-chip ${r === "W" ? "w" : r === "L" ? "l" : "t"}`}>
-          {r}
-        </span>
-      ))}
-    </span>
   );
 }
 
@@ -517,5 +406,106 @@ function ProjectionTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * The PRE-GAME forecast, shown on the finished matchup: the same gauge and score
+ * distribution the live view leads with, drawn from the moments logged before the week
+ * started — then the result placed next to them.
+ *
+ * The point is the COMPARISON. Alone, a finished result tells you what happened and a
+ * forecast tells you what was expected; together they tell you whether the model
+ * understood the matchup, which is the only way anyone should decide how much to trust it
+ * next week. So the distribution keeps its full shape rather than collapsing to a single
+ * number — the actual result landing in a fat part of the curve means something quite
+ * different from it landing in the tail, and that is invisible in "70%".
+ *
+ * A SINGLE WEEK CANNOT MAKE A MODEL RIGHT OR WRONG. A 70% forecast that loses is not an
+ * error, it is the 30% happening, and a page that stamped "WRONG" on it would teach the
+ * reader to misread probability. The verdict is therefore stated quietly and the caption
+ * says plainly that the number worth trusting is the hit rate across a season.
+ */
+function PreGameForecast({
+  forecast,
+  won,
+  tied,
+  rec,
+  nCats,
+}: {
+  forecast: Forecast;
+  won: boolean;
+  tied: boolean;
+  rec: { win: number; loss: number; tie: number };
+  nCats: number;
+}) {
+  const { favoured, right } = gradeForecast(forecast, won, tied);
+  // Expected minus actual, in categories — the SIZE of the miss, which says far more than
+  // whether the coin landed the favoured way.
+  const missed = rec.win - forecast.expected;
+
+  return (
+    <section className="fc">
+      <h2 className="fc-h">Pre-game win probability</h2>
+
+      <div className="two-up">
+        <div>
+          <h3 className="fc-sub-h">Win probability</h3>
+          <WinProbabilityGauge percent={forecast.win * 100} />
+        </div>
+        <div>
+          <h3 className="fc-sub-h">Score distribution</h3>
+          <ScoreDistribution distribution={forecast.distribution} total={nCats} />
+        </div>
+      </div>
+
+      <div className="fc-row">
+        <div className="fc-cell">
+          <span className="eyebrow">Forecast</span>
+          <span className="fc-v mono">{(forecast.win * 100).toFixed(0)}%</span>
+          <span className="fc-sub mono">to win · {forecast.expected.toFixed(1)} cats</span>
+        </div>
+        <div className="fc-cell">
+          <span className="eyebrow">Actual</span>
+          <span className="fc-v mono">{tied ? "Tied" : won ? "Won" : "Lost"}</span>
+          <span className="fc-sub mono">
+            {rec.win}-{rec.loss}-{rec.tie}
+          </span>
+        </div>
+        <div className="fc-cell">
+          <span className="eyebrow">Off by</span>
+          <span className="fc-v mono">
+            {missed >= 0 ? "+" : ""}
+            {missed.toFixed(1)}
+          </span>
+          <span className="fc-sub mono">categories vs expected</span>
+        </div>
+        <div className="fc-cell">
+          <span className="eyebrow">Called it</span>
+          <span
+            className="fc-v"
+            style={{
+              color:
+                right == null ? "var(--ink-3)" : right ? "var(--good)" : "var(--bad)",
+            }}
+          >
+            {right == null ? "—" : right ? "Yes" : "No"}
+          </span>
+          <span className="fc-sub mono">
+            {favoured === "even"
+              ? "called it a coin flip"
+              : favoured === "you"
+                ? "favoured you"
+                : "favoured them"}
+          </span>
+        </div>
+      </div>
+
+      <p className="caption fc-note">
+        Logged before a game of this week was played, and never recalculated since. One
+        week decides nothing either way — a 70% forecast that loses is the 30% happening,
+        not a mistake. What is worth reading is the hit rate across a whole season.
+      </p>
+    </section>
   );
 }

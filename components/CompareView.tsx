@@ -123,10 +123,10 @@ function Comparison({ a, b }: { a: PoolPlayer; b: PoolPlayer }) {
 
       <div className="pv-cmp-logs">
         <div className="pv-cmp-log">
-          <GameLog key={a.playerId ?? a.name} playerId={a.playerId} />
+          <GameLog key={a.playerId ?? a.name} playerId={a.playerId} compact />
         </div>
         <div className="pv-cmp-log">
-          <GameLog key={b.playerId ?? b.name} playerId={b.playerId} />
+          <GameLog key={b.playerId ?? b.name} playerId={b.playerId} compact />
         </div>
       </div>
     </div>

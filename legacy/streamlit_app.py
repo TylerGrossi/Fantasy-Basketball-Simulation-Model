@@ -1160,7 +1160,7 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     # nothing in this app uses them.
     if not last30_df.empty:
         l30 = last30_df.drop_duplicates("Player", keep="first").set_index("Player")
-        for c in _AGG_KEYS + ["DD", "FG%", "FT%", "3P%", "GP"]:
+        for c in _AGG_KEYS + ["DD", "TW", "FG%", "FT%", "3P%", "GP"]:
             if c in l30.columns:
                 season_df[f"L30_{c}"] = season_df["Player"].map(l30[c])
     # Same again for the last-15 window. `Recent15` already collapses it to one z-score;
@@ -1168,7 +1168,7 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     # averages block needs to show a 15D line rather than just a 15D number.
     if not last15_df.empty:
         l15 = last15_df.drop_duplicates("Player", keep="first").set_index("Player")
-        for c in _AGG_KEYS + ["DD", "FG%", "FT%", "3P%", "GP"]:
+        for c in _AGG_KEYS + ["DD", "TW", "FG%", "FT%", "3P%", "GP"]:
             if c in l15.columns:
                 season_df[f"L15_{c}"] = season_df["Player"].map(l15[c])
 
@@ -1186,7 +1186,8 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
 
     keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId",
              "LineupSlot", "AcquisitionType", "Value",
-             "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD", "GP"] + _AGG_KEYS
+             "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD", "TW",
+             "GP"] + _AGG_KEYS
             + [c for c in season_df.columns
                if c.startswith("L30_") or c.startswith("L15_")])
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))

@@ -603,10 +603,21 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
         gp = safe_num(total_block.get("GP", avg_block.get("GP", 0)))
         if gp <= 0:
             continue
-        if avg_block:
-            per_game = {k: safe_num(v) for k, v in avg_block.items()}
-        else:
+        # TOTALS OVER GP, not ESPN's `avg` block.
+        #
+        # The avg block is not trustworthy on the short splits: for a player with a single
+        # game in the window ESPN returns real totals (GP 1, MIN 32, PTS 29) alongside an
+        # avg block of all zeros. Preferring it turned 29 points in a game into a line of
+        # noughts for 29 players on last-30 and 44 on last-15, every one of them landing at
+        # the same -9.4 "value" — the value of producing nothing.
+        #
+        # Totals divided by games is the same arithmetic ESPN's avg block claims to do, and
+        # it agrees with it wherever the avg block is populated (Jokic: 1799/65 = 27.68,
+        # exactly the avg block's figure).
+        if total_block:
             per_game = {k: (safe_num(v) / gp) for k, v in total_block.items() if k != "GP"}
+        else:
+            per_game = {k: safe_num(v) for k, v in avg_block.items()}
         fgm = per_game.get("FGM", 0)
         fga = per_game.get("FGA", 0)
         ftm = per_game.get("FTM", 0)

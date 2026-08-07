@@ -27,7 +27,7 @@ export default function LiveBadge({
 
   const label =
     state === "frozen"
-      ? "Simulated mid-week state — built from real rosters and averages"
+      ? "Simulated week — built from real rosters and averages, not live"
       : state === "live"
         ? `Live from ESPN${fetchedAt ? ` · ${fetchedAt}` : ""}`
         : state === "error"

@@ -228,8 +228,11 @@ def config_blend():
     return 0.7  # matches the app's blend_weight default
 
 
+# `TW` is TEAM WINS — a scored category in this league, but deliberately NOT part of the
+# 9-cat `value`, which stays the nine standard categories the whole app ranks by. It rides
+# along so the Player Card can show it; nothing computes with it.
 PLAYER_POOL_STATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO",
-                     "FGM", "FGA", "FTM", "FTA", "3PA", "DD"]
+                     "FGM", "FGA", "FTM", "FTA", "3PA", "DD", "TW"]
 
 # ESPN's public site API, same host the Player Card's bio already reads client-side.
 _NBA_TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
@@ -419,6 +422,10 @@ def build_player_pool(app):
     history = fetch_player_history(hist_ids, config.ESPN_SEASON_YEAR)
     print(f"  career history: {len(history)} players ({time.perf_counter() - t_hist:.1f}s)",
           flush=True)
+    # ESPN's own rankings for NEXT season — the outside opinion the draft board is read
+    # against. Empty until ESPN rolls the new season over.
+    draft_ranks = fetch_draft_ranks(config.ESPN_SEASON_YEAR + 1)
+    print(f"  draft ranks: {len(draft_ranks)} players", flush=True)
     out = []
     for p in pool:
         # EligibleSlots comes back as a plain list from build_stat_df, except when the
@@ -470,6 +477,10 @@ def build_player_pool(app):
         hrows = history.get(row["playerId"])
         if hrows:
             row["history"] = hrows
+
+        # ESPN's published rank + ADP for next season. Absent for a deep player ESPN has
+        # not ranked; the draft board shows a dash rather than inventing a number.
+        row.update(draft_ranks.get(row["playerId"]) or {})
 
         # The recent windows as their own per-game categories, alongside the season line.
         # `recent`/`recent15` collapse each window to one z-score; these are the raw
@@ -738,6 +749,170 @@ def fetch_roster_slots(league):
     out = []
     for slot_id, label in SLOT_LABELS:
         out.extend([label] * int(counts.get(str(slot_id), 0) or 0))
+    return out
+
+
+def record_preweek_predictions(payload, check_only=False):
+    """
+    Log this week's PRE-WEEK forecast, once, before any of it has been played.
+
+    WHY THIS FILE IS DIFFERENT FROM EVERY OTHER OUTPUT. `league.json` is a snapshot: it is
+    regenerated from scratch on every run and describes only the present. A forecast is the
+    opposite — its whole value is that it was written down BEFORE the thing it forecasts,
+    and a number that gets recomputed after the fact is not a forecast at all. So this
+    accumulates: it is read, appended to, and written back, and **a period that already has
+    an entry is never touched again**. That rule is the entire feature. Everything else here
+    exists to protect it.
+
+    WHAT IT RECORDS. The moments (mu, var per category per side) rather than a win
+    probability, so the probability is still computed by the ONE engine in
+    `lib/probability.ts`. Writing a percentage here would mean a second implementation of
+    the maths, in a second language, whose disagreement with the first nobody would notice.
+
+    WHEN IT REFUSES. Only a genuinely untouched week is recorded:
+
+      - the season must be in progress,
+      - the period must have no entry yet,
+      - **nothing may be banked** — if a single game has been played the week has started
+        and this would be a mid-week reading wearing a pre-week label,
+      - there must be games left to forecast.
+
+    A skip is logged with its reason rather than passed over silently, because "no
+    prediction for week 7" is otherwise indistinguishable from a bug.
+    """
+    path = OUT_DIR / "predictions.json"
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        existing = {"schemaVersion": 1, "periods": {}}
+    periods = existing.setdefault("periods", {})
+
+    period = str(payload.get("period"))
+    if payload.get("seasonOver"):
+        print("  pre-week forecast: skipped — season is over")
+        return existing
+    if period in periods:
+        print(f"  pre-week forecast: already recorded for period {period} — left untouched")
+        return existing
+
+    matchups = payload.get("matchups") or []
+    if not matchups:
+        print("  pre-week forecast: skipped — no matchups in this export")
+        return existing
+
+    banked = 0.0
+    games_left = 0
+    for m in matchups:
+        for sidename in ("home", "away"):
+            side = m.get(sidename) or {}
+            banked += sum(abs(float(v)) for v in (side.get("current") or []))
+            games_left += sum(int(p.get("gamesLeft", 0) or 0)
+                              for p in (side.get("players") or []))
+    if banked > 0:
+        print(f"  pre-week forecast: skipped — period {period} has already started "
+              f"({banked:.0f} banked). A mid-week reading is not a forecast.")
+        return existing
+    if games_left <= 0:
+        print(f"  pre-week forecast: skipped — period {period} has no games left")
+        return existing
+
+    periods[period] = {
+        "recordedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "games": [
+            {
+                "homeId": m["homeId"],
+                "awayId": m["awayId"],
+                "homeMu": m["home"]["projMu"], "homeVar": m["home"]["projVar"],
+                "awayMu": m["away"]["projMu"], "awayVar": m["away"]["projVar"],
+            }
+            for m in matchups
+        ],
+    }
+    existing["stats"] = payload.get("stats")
+    existing["categories"] = payload.get("categories")
+    existing["lowerIsBetter"] = payload.get("lowerIsBetter")
+
+    if check_only:
+        print(f"  pre-week forecast: WOULD record period {period} "
+              f"({len(matchups)} matchups) — --check, nothing written")
+        return existing
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(existing, separators=(",", ":")), encoding="utf-8")
+    print(f"  pre-week forecast: RECORDED period {period} ({len(matchups)} matchups)")
+    return existing
+
+
+def fetch_draft_ranks(season_year):
+    """
+    ESPN's own published rankings for the season being DRAFTED FOR, plus live ADP.
+
+    `{playerId: {"espnRank": int, "espnStdRank": int, "adp": float}}`.
+
+    This is the outside opinion the draft board is measured against — the one thing the
+    model had none of. Three numbers, and the difference between them matters:
+
+      - **espnRank is the ROTO rank**, and it is the one this league should be read
+        against: category scoring, not points. The gap between the two rankings is the
+        whole reason to prefer it — Giannis is STANDARD 3 and ROTO 15, because a category
+        format prices in the 65% free throws and the missing threes that a points format
+        does not care about.
+      - **espnStdRank** is the points-league rank, kept only so the two can be compared.
+      - **adp** is what drafters actually DO, which is a different signal from what any
+        ranker says they should do.
+
+    Fetched from `season_year` — i.e. the year AFTER the exported season. ESPN rolls the
+    next fantasy season over during the offseason, so this only exists once they have; it
+    returns `{}` before then and every consumer treats the columns as optional. `published`
+    is false on these ranks all through the preseason and they are still populated and
+    sensible, so it is deliberately not checked.
+    """
+    from espn_api.basketball import League  # noqa: PLC0415
+
+    try:
+        nxt = League(
+            league_id=config.ESPN_LEAGUE_ID, year=season_year,
+            espn_s2=config.ESPN_S2, swid=config.ESPN_SWID,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! draft ranks for {season_year} unavailable: {exc}")
+        return {}
+
+    try:
+        filt = {"players": {
+            "limit": 600,
+            "sortDraftRanks": {"sortPriority": 1, "sortAsc": True, "value": "STANDARD"},
+        }}
+        raw = nxt.espn_request.league_get(
+            params={"view": "kona_player_info"},
+            headers={"x-fantasy-filter": json.dumps(filt)},
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! draft rank fetch failed: {exc}")
+        return {}
+
+    out = {}
+    for entry in raw.get("players") or []:
+        p = entry.get("player") or {}
+        try:
+            pid = int(p.get("id"))
+        except (TypeError, ValueError):
+            continue
+        ranks = p.get("draftRanksByRankType") or {}
+        row = {}
+        roto = (ranks.get("ROTO") or {}).get("rank")
+        std = (ranks.get("STANDARD") or {}).get("rank")
+        adp = (p.get("ownership") or {}).get("averageDraftPosition")
+        # Only ~two-thirds of the 600 carry a ROTO rank; a missing one is omitted rather
+        # than zero-filled, because 0 would sort to the top of the board.
+        if roto:
+            row["espnRank"] = int(roto)
+        if std:
+            row["espnStdRank"] = int(std)
+        if adp and float(adp) > 0:
+            row["adp"] = _round(adp, 2)
+        if row:
+            out[pid] = row
     return out
 
 
@@ -1254,6 +1429,11 @@ def main():
 
     blob = json.dumps(payload, separators=(",", ":"))
     print(f"\nvalidated OK in {dt:.1f}s  ({len(blob) / 1024:.0f} KB)")
+
+    # The forecast log, BEFORE the --check early return: under --check it reports what it
+    # would do without writing, which is the only way to see the decision on a dry run.
+    record_preweek_predictions(payload, check_only=args.check)
+
     if args.check:
         print("--check: nothing written")
         return 0

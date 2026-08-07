@@ -131,7 +131,8 @@ A3 and A4 belong on **`/schedule`** (which already loads `periodResults` and imp
 ## A. Season history and recap
 
 `periodResults` carries every team's final totals for all 22 scoring periods, and
-`/history` now reads it. It supports this entire section with no pipeline work.
+`/schedule` already reads it via `lib/history.ts`. It supports this entire section with
+no pipeline work. (There is no `/history` route — see the correction above.)
 
 **Known shape trap, learned building A1:** a playoff round spans TWO scoring periods and
 the export carries a row for each — this league's Round 2 appears as period 21 AND 22
@@ -332,7 +333,7 @@ the work of removing them. It is a rewrite of the data layer, not a feature.
 
 **The big one — everything else is easy next to it.** Today
 [scripts/build_data.py](../scripts/build_data.py) runs on a schedule with the credentials
-in [config.py](../config.py) and writes ONE static `public/data/league.json`; every page
+in [config.py](../legacy/config.py) and writes ONE static `public/data/league.json`; every page
 reads that file. There is no code path that fetches a league the build didn't know about.
 
 Multi-tenant means fetching and computing per league, at request time, with a cache —

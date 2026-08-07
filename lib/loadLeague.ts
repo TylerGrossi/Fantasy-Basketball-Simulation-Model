@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { LeagueData, Matchup, Team } from "./league";
+import type { PreWeekLog } from "./predictions";
+import type { CareerLog } from "./career";
 import { resolveTeam } from "./team";
 
 /**
@@ -53,6 +55,35 @@ export async function loadBoxScores(): Promise<BoxScores | null> {
   try {
     const file = path.join(process.cwd(), "public", "data", "boxscores.json");
     return JSON.parse(await readFile(file, "utf8")) as BoxScores;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The pre-week forecast log. Its own file for the same reason box scores are: it is
+ * APPEND-ONLY and survives every rebuild, while league.json is regenerated from scratch
+ * each run. Returns null when it does not exist yet, which is the normal state until a
+ * season has actually run with the recorder in place — see lib/predictions.ts.
+ */
+export async function loadPredictions(): Promise<PreWeekLog | null> {
+  try {
+    const file = path.join(process.cwd(), "public", "data", "predictions.json");
+    return JSON.parse(await readFile(file, "utf8")) as PreWeekLog;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Career history across every league and season. Its own file because it is built on
+ * demand by scripts/build_history.py rather than by the hourly export — finished seasons
+ * do not change. Null until that script has been run.
+ */
+export async function loadCareer(): Promise<CareerLog | null> {
+  try {
+    const file = path.join(process.cwd(), "public", "data", "career.json");
+    return JSON.parse(await readFile(file, "utf8")) as CareerLog;
   } catch {
     return null;
   }

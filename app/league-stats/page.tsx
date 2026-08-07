@@ -138,7 +138,7 @@ export default async function Page() {
     { key: "team", label: "Team Name" },
     { key: "loss", label: "Loss", num: true },
     { key: "trade", label: "Trade", num: true },
-    { key: "acq", label: "Acq", num: true },
+    { key: "acq", label: "Acquisitions", num: true },
     { key: "drop", label: "Drop", num: true },
     { key: "activate", label: "Activate", num: true },
     { key: "ir", label: "IR", num: true },
@@ -176,12 +176,9 @@ export default async function Page() {
       {hasTxnCounter && (
         <>
           <h2>Transaction Counter</h2>
-          <SortableTable
-            cols={txnCols}
-            rows={txnRows}
-            defaultKey="team"
-            defaultDesc={false}
-          />
+          {/* Opens on acquisitions, descending: the counter is read to see who worked
+              the wire hardest, and alphabetical order answered nothing. */}
+          <SortableTable cols={txnCols} rows={txnRows} defaultKey="acq" defaultDesc />
         </>
       )}
     </>

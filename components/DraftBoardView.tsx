@@ -25,7 +25,7 @@ import {
  */
 
 type Basis = "League" | "9-cat";
-type RankBy = "total" | "perGame";
+type RankBy = "total" | "perGame" | "blend";
 
 export default function DraftBoardView({
   lines,
@@ -139,6 +139,7 @@ export default function DraftBoardView({
           >
             <option value="total">Season value</option>
             <option value="perGame">Per game</option>
+            <option value="blend">Blend w/ ESPN</option>
           </select>
         </div>
         <div className="ms dg-f-gp">
@@ -189,10 +190,26 @@ export default function DraftBoardView({
         <h2 className="dg-method-h">How these numbers were made</h2>
         <p>
           These are <strong>projections for {nextSeason}</strong>, not last season&rsquo;s
-          totals re-sorted. Nobody publishes next-season numbers this early — ESPN&rsquo;s
-          own projections do not appear until the preseason — so this is a model built
-          from the league export, and it should be read as an estimate with a method
-          rather than as a fact.
+          totals re-sorted — a model built from the league export, to be read as an
+          estimate with a method rather than as a fact.
+        </p>
+        <p>
+          <strong>The ESPN column</strong> is ESPN&rsquo;s own published rank for{" "}
+          {nextSeason}, and it is their <em>roto</em> rank, not their standard one — this
+          league scores categories, and the two differ enormously for the players that
+          matter (Giannis is 3rd standard and 15th roto, because a points format does not
+          care about 65% free throws). An arrow marks a disagreement of 20 slots or more:
+          blue where this board is higher, clay where it is lower.
+        </p>
+        <p>
+          Those disagreements are <strong>not</strong> mostly a scoring-format artefact —
+          that was checked, and the median gap against ESPN&rsquo;s top 100 is 22 slots
+          under this league&rsquo;s 14 categories and 22 under 9-cat, i.e. unchanged. A
+          large part of what remains is something this model structurally cannot see: ESPN
+          knows about offseason trades, signings and depth charts, and this model stops at
+          the last box score of the season. That is why <em>Blend w/ ESPN</em> exists as a
+          ranking — it averages the two ranks and lets the outside opinion carry the half
+          of the problem the box scores cannot reach.
         </p>
         <p>
           The central idea: a per-game line is three things multiplied together —{" "}
@@ -275,7 +292,10 @@ export default function DraftBoardView({
 }
 
 function metric(r: DraftRow, rankBy: RankBy): number {
-  return rankBy === "total" ? r.total : r.perGame;
+  // "blend" ranks by an averaged ORDINAL, which has no z-value to draw a bar from — so
+  // the bar keeps showing season value. The row's order comes from the blend; the number
+  // beside it is still this board's own valuation, which is the honest pairing.
+  return rankBy === "perGame" ? r.perGame : r.total;
 }
 
 function BoardRow({
@@ -322,6 +342,7 @@ function BoardRow({
           <span className="pv-name">{r.name}</span>
           {code && <span className={`pv-badge ${sev}`}>{code}</span>}
           <span className="pv-meta dg-slots">{r.eligibleSlots.join("/") || r.position}</span>
+          <EspnGap modelRank={r.rank} espnRank={r.espnRank} adp={r.adp} />
           <span className="dg-gp" title="Projected games played next season">
             {r.projGp} GP
           </span>
@@ -485,6 +506,57 @@ function CategoryBars({ z }: { z: Record<string, number> }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * ESPN's own rank for this player, and how far this board disagrees with it.
+ *
+ * The rank shown is ESPN's **ROTO** rank, not their STANDARD one — this league scores
+ * categories, and the two rankings differ enormously for exactly the players that matter
+ * (Giannis is STANDARD 3 and ROTO 15, because a points format does not care about 65% free
+ * throws). Ranking against the wrong one would make the comparison look worse than it is.
+ *
+ * The gap is signed toward the reader: **negative means this board is HIGHER on the player
+ * than ESPN**. That direction is the useful one — a big negative is either an edge you
+ * have found or a bug you have not, and the board is currently honest about which is more
+ * likely (see the notes in lib/projection.ts). Small gaps are not coloured at all, because
+ * agreeing to within a few slots is not a finding.
+ */
+function EspnGap({
+  modelRank,
+  espnRank,
+  adp,
+}: {
+  modelRank: number;
+  espnRank?: number;
+  adp?: number;
+}) {
+  if (!espnRank) {
+    return (
+      <span className="dg-espn dg-espn-none" title="ESPN has not ranked this player">
+        —
+      </span>
+    );
+  }
+  const gap = modelRank - espnRank;
+  const big = Math.abs(gap) >= 20;
+  return (
+    <span
+      className={`dg-espn${big ? (gap < 0 ? " dg-espn-high" : " dg-espn-low") : ""}`}
+      title={
+        `ESPN roto rank ${espnRank}${adp ? ` · ADP ${adp.toFixed(1)}` : ""}. ` +
+        `This board has them ${modelRank}` +
+        (gap === 0
+          ? " — agreed."
+          : gap < 0
+            ? ` — ${-gap} slots HIGHER than ESPN.`
+            : ` — ${gap} slots LOWER than ESPN.`)
+      }
+    >
+      {espnRank}
+      {big && <span className="dg-espn-gap">{gap < 0 ? "▲" : "▼"}</span>}
+    </span>
   );
 }
 

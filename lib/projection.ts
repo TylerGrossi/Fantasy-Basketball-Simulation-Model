@@ -121,6 +121,14 @@ export interface ProjectedLine {
   /** Short phrases naming what moved this projection off the raw season line. */
   drivers: string[];
   confidence: Confidence;
+  /**
+   * ESPN's own next-season ranking and ADP, carried through untouched — the model does
+   * NOT consume them. They are a benchmark shown beside the board's own ranking, and the
+   * gap between the two is the interesting column: it is either an edge or a bug, and
+   * right now it is mostly a bug (see the UNFINISHED note at the top of this file).
+   */
+  espnRank?: number;
+  adp?: number;
 }
 
 export type Confidence = "high" | "med" | "low";
@@ -726,6 +734,8 @@ export function projectPool(pool: PoolPlayer[]): ProjectedLine[] {
       tpPct: p.tpPct,
       drivers: drivers.slice(0, 3),
       confidence,
+      espnRank: p.espnRank,
+      adp: p.adp,
     };
   });
 }
@@ -763,8 +773,18 @@ export interface ScoreOptions {
   lowerIsBetter?: string[];
   /** How many players the z-scale is standardised against. */
   poolSize?: number;
-  /** Rank by durability-weighted value (the default) or by per-game value. */
-  rankBy?: "total" | "perGame";
+  /**
+   * Durability-weighted value (default), per-game value, or a **blend with ESPN's own
+   * rank**.
+   *
+   * `blend` exists because ESPN knows things this model cannot. Its ranker sees offseason
+   * trades, signings and depth charts; this model sees box scores and stops at the last
+   * game of the season. That is not a bug to be fixed — no amount of tuning recovers "he
+   * was traded and will start now" from a box score — so the honest response is to let
+   * the two vote. Measured against ESPN's top 100 the model's median disagreement is 22
+   * slots, and the outliers are dominated by exactly those role changes.
+   */
+  rankBy?: "total" | "perGame" | "blend";
 }
 
 /**
@@ -875,7 +895,34 @@ export function scoreProjections(
     };
   });
 
-  const metric = (r: DraftRow) => (rankBy === "total" ? r.total : r.perGame);
+  if (rankBy !== "blend") {
+    const metric = (r: DraftRow) => (rankBy === "total" ? r.total : r.perGame);
+    rows.sort((a, b) => metric(b) - metric(a));
+    rows.forEach((r, i) => (r.rank = i + 1));
+    assignTiers(rows, metric);
+    return rows;
+  }
+
+  /*
+   * Blend: average the two RANKS, not the two scores.
+   *
+   * Ranks are the only common currency here — ESPN publishes a position, not a value, and
+   * there is no defensible way to put its ordinal on this board's z-scale. Averaging
+   * ordinals loses the size of the gaps, which is why `total` remains the default and this
+   * is an option rather than the new behaviour.
+   *
+   * A player ESPN has not ranked keeps the model's own rank rather than being pushed to
+   * the bottom: "unranked" here means outside ESPN's top 600, which is a statement about
+   * ESPN's list length, not a verdict on the player.
+   */
+  const byModel = [...rows].sort((a, b) => b.total - a.total);
+  const modelRank = new Map(byModel.map((r, i) => [r.name, i + 1]));
+  const score = (r: DraftRow) => {
+    const mine = modelRank.get(r.name) ?? rows.length;
+    return r.espnRank ? (mine + r.espnRank) / 2 : mine;
+  };
+  // Negated so the shared `assignTiers` (which expects bigger = better) still works.
+  const metric = (r: DraftRow) => -score(r);
   rows.sort((a, b) => metric(b) - metric(a));
   rows.forEach((r, i) => (r.rank = i + 1));
   assignTiers(rows, metric);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { fetchGameLog, isAllStar, isRegularSeason } from "@/lib/gamelog";
 
 /**
  * "Injuries & missed games" — what a player's availability actually cost, fetched from
@@ -47,7 +48,6 @@ const CACHE = new Map<string, Report>();
 
 const CORE = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba";
 const SITE = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba";
-const WEB = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba";
 
 async function json<T>(url: string): Promise<T> {
   const res = await fetch(url.replace(/^http:/, "https:"));
@@ -89,49 +89,90 @@ async function currentInjury(playerId: number, season: number): Promise<Injury |
   }
 }
 
+/** One unbroken run of games the player spent at a single club. */
+interface Stay {
+  teamId: string;
+  /** ISO dates. Half-open: `from` inclusive, `to` exclusive. */
+  from: string;
+  to: string;
+}
+
+/**
+ * The clubs a player passed through, as date windows, from his own appearances.
+ *
+ * A traded player is on the hook only for the games of the team he was AT that night.
+ * Merging both clubs' schedules by event id — the previous approach — deduplicates
+ * nothing except the one game the two teams played each other, so a mid-season trade
+ * reported 162 team games and ~114 "missed", which is both wrong and alarming.
+ *
+ * The boundary is his first appearance for the new club: everything before it is charged
+ * to the old one. That misplaces only the handful of games between a trade and his debut,
+ * and it errs the right way — those genuinely were games he was unavailable for someone.
+ *
+ * Consecutive runs are grouped rather than assuming one move, so a player who goes A → B →
+ * A (a 10-day deal, a buyout return) still gets three correct windows.
+ */
+function staysFrom(appearances: Array<{ date: string; teamId: string }>): Stay[] {
+  const sorted = [...appearances].sort((a, b) => a.date.localeCompare(b.date));
+  const stays: Stay[] = [];
+  for (const a of sorted) {
+    const last = stays[stays.length - 1];
+    if (last && last.teamId === a.teamId) last.to = a.date;
+    else stays.push({ teamId: a.teamId, from: a.date, to: a.date });
+  }
+  if (!stays.length) return stays;
+  // Widen to cover the whole season: the first club owns everything before his debut (he
+  // may have been hurt in October), the last owns everything after his final game, and
+  // each handover falls on the new club's first appearance.
+  for (let i = 1; i < stays.length; i++) stays[i - 1].to = stays[i].from;
+  stays[0].from = "";
+  stays[stays.length - 1].to = "￿";
+  return stays;
+}
+
 /**
  * Games played vs games his team played, grouped into stints.
  *
- * Schedules are pulled for every team he appeared for, and merged BY EVENT ID — a player
- * traded mid-season otherwise gets both clubs' full schedules counted against him, and a
- * game between his old and new team would count twice.
+ * "His team" is resolved per game — see `staysFrom`.
  */
 async function missedGames(
   playerId: number,
   season: number
 ): Promise<{ played: number; total: number; stints: Stint[] }> {
-  const log = await json<{
-    events?: Record<string, { team?: { id?: string; isAllStar?: boolean } }>;
-    seasonTypes?: Array<{
-      displayName?: string;
-      categories?: Array<{ events?: Array<{ eventId: string }> }>;
-    }>;
-  }>(`${WEB}/athletes/${playerId}/gamelog`);
+  // Shared with the game-log table and the rolling-value chart — one request, not three.
+  const log = await fetchGameLog(playerId);
 
   const meta = log.events ?? {};
   const played = new Set<string>();
-  const teamIds = new Set<string>();
+  const appearances: Array<{ date: string; teamId: string }> = [];
   for (const st of log.seasonTypes ?? []) {
-    // Preseason and postseason are not the fantasy season; the regular season is.
-    if (!/Regular Season/i.test(st.displayName ?? "")) continue;
+    // Preseason, play-in and postseason are not the fantasy season; the regular season is.
+    // `isRegularSeason` also rejects ESPN's "Play In Regular Season", which the old
+    // substring test here let through.
+    if (!isRegularSeason(st.displayName ?? "")) continue;
     for (const cat of st.categories ?? []) {
       for (const ev of cat.events ?? []) {
-        const team = meta[ev.eventId]?.team;
+        const m = meta[ev.eventId];
         // ESPN files the ALL-STAR GAME under the regular season, with "WORLD" as the
         // player's team. Left in, it both inflates games played and pulls in a fake
         // team's schedule — which is how a Feb 15 "WORLD @ STRIPES" turned up as a
         // missed Denver game.
-        if (team?.isAllStar) continue;
+        if (isAllStar(log, ev.eventId)) continue;
         played.add(ev.eventId);
-        if (team?.id) teamIds.add(team.id);
+        if (m?.team?.id && m.gameDate) {
+          appearances.push({ date: m.gameDate, teamId: m.team.id });
+        }
       }
     }
   }
-  if (!teamIds.size) return { played: played.size, total: 0, stints: [] };
 
+  const stays = staysFrom(appearances);
+  if (!stays.length) return { played: played.size, total: 0, stints: [] };
+
+  const teamIds = [...new Set(stays.map((s) => s.teamId))];
   const games = new Map<string, { date: string; name: string }>();
   await Promise.all(
-    [...teamIds].map(async (teamId) => {
+    teamIds.map(async (teamId) => {
       const sched = await json<{
         events?: Array<{
           id: string;
@@ -140,11 +181,14 @@ async function missedGames(
           competitions?: Array<{ status?: { type?: { completed?: boolean } } }>;
         }>;
       }>(`${SITE}/teams/${teamId}/schedule?season=${season}&seasontype=2`);
+      const windows = stays.filter((s) => s.teamId === teamId);
       for (const e of sched.events ?? []) {
         // COMPLETED games only. A game not yet played cannot have been missed, and the
         // feed also keeps the original date of a POSTPONED game alongside its makeup —
         // which is why every team's schedule reads 83 games instead of 82.
         if (!e.competitions?.[0]?.status?.type?.completed) continue;
+        // Only while he was actually at this club.
+        if (!windows.some((w) => e.date >= w.from && e.date < w.to)) continue;
         games.set(e.id, { date: e.date, name: e.shortName ?? "" });
       }
     })
@@ -187,46 +231,74 @@ export default function InjuryLog({
   season: number;
 }) {
   const key = `${playerId}-${season}`;
-  const cached = playerId ? CACHE.get(key) : undefined;
-  const [state, setState] = useState<"idle" | "loading" | "done" | "error">(
-    cached ? "done" : "idle"
-  );
-  const [report, setReport] = useState<Report | null>(cached ?? null);
+  const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [report, setReport] = useState<Report | null>(null);
+
+  /*
+   * Loads on mount rather than on open — the section is always visible now, so there is
+   * no "open" to hang it off. Still one request per player per session: the cache is keyed
+   * by player and season, and the game log underneath is shared with the other two
+   * sections through `lib/gamelog`.
+   */
+  useEffect(() => {
+    if (!playerId) {
+      setReport(null);
+      setState("idle");
+      return;
+    }
+    const hit = CACHE.get(key);
+    if (hit) {
+      setReport(hit);
+      setState("done");
+      return;
+    }
+    let live = true;
+    setState("loading");
+    setReport(null);
+    // The diagnosis and the absences come from different APIs; one failing should not take
+    // out the other, so they settle independently.
+    Promise.all([
+      currentInjury(playerId, season),
+      missedGames(playerId, season).catch(() => ({
+        played: 0,
+        total: 0,
+        stints: [] as Stint[],
+      })),
+    ])
+      .then(([injury, missed]) => {
+        const next: Report = { ...missed, injury };
+        CACHE.set(key, next);
+        // The card may have moved to another player while this was in flight.
+        if (!live) return;
+        setReport(next);
+        setState("done");
+      })
+      .catch(() => {
+        if (live) setState("error");
+      });
+    return () => {
+      live = false;
+    };
+  }, [playerId, season, key]);
 
   if (!playerId) return null;
-
-  const load = async () => {
-    if (state !== "idle") return;
-    setState("loading");
-    try {
-      // The diagnosis and the absences come from different APIs; one failing should not
-      // take out the other, so they settle independently.
-      const [injury, missed] = await Promise.all([
-        currentInjury(playerId, season),
-        missedGames(playerId, season).catch(() => ({
-          played: 0,
-          total: 0,
-          stints: [] as Stint[],
-        })),
-      ]);
-      const next: Report = { ...missed, injury };
-      CACHE.set(key, next);
-      setReport(next);
-      setState("done");
-    } catch {
-      setState("error");
-    }
-  };
 
   const missedTotal = report?.stints.reduce((a, s) => a + s.games, 0) ?? 0;
 
   return (
-    <details className="pv-gl" onToggle={(e) => e.currentTarget.open && load()}>
-      <summary className="pv-gl-sum">Injuries &amp; missed games</summary>
-      <div className="pv-gl-body">
-        {state === "loading" && <span className="caption">Loading…</span>}
+    <section className="pd-sheet">
+      <div className="pd-sheet-h">
+        <h2>Availability</h2>
+        {report && report.total > 0 && (
+          <span className="pd-sheet-n">
+            {report.played} of {report.total} team games
+          </span>
+        )}
+      </div>
+      <div>
+        {state === "loading" && <p className="pd-sheet-note">Loading…</p>}
         {state === "error" && (
-          <span className="caption">Injury data unavailable right now.</span>
+          <p className="pd-sheet-note">Injury data unavailable right now.</p>
         )}
         {state === "done" && report && (
           <>
@@ -262,7 +334,7 @@ export default function InjuryLog({
                   {report.stints.length === 1 ? "absence" : "absences"}
                 </div>
                 {report.stints.length > 0 && (
-                  <table className="pv-gl-tbl inj-tbl">
+                  <table className="sheet sheet-tight inj-tbl">
                     <thead>
                       <tr>
                         <th>Out</th>
@@ -301,6 +373,6 @@ export default function InjuryLog({
           </>
         )}
       </div>
-    </details>
+    </section>
   );
 }

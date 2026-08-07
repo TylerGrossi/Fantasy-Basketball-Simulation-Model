@@ -217,6 +217,21 @@ export interface PoolPlayer {
    * single-season path.
    */
   history?: SeasonLine[];
+  /**
+   * ESPN's own published rankings for the season being drafted FOR, plus live ADP — the
+   * outside opinion the draft board is measured against.
+   *
+   * `espnRank` is the **ROTO** rank, which is the one that matches this league's category
+   * scoring; `espnStdRank` is the points-league rank, carried only so the two can be
+   * compared (Giannis is STANDARD 3 and ROTO 15 — the gap IS the format). `adp` is what
+   * drafters actually do, which is a different signal from what a ranker says.
+   *
+   * All optional: ESPN ranks about 260 of the ~290 pool and publishes these only once the
+   * next fantasy season has rolled over.
+   */
+  espnRank?: number;
+  espnStdRank?: number;
+  adp?: number;
 }
 
 /** One past season's per-game line. `min` is minutes per game. */
