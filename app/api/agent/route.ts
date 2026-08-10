@@ -1,6 +1,6 @@
 import { createToolRunner, systemInstruction, TOOL_DECLARATIONS } from "@/lib/agentTools";
 import { runAgent, apiKey, usageSnapshot, webSearch, type Content } from "@/lib/gemini";
-import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { loadConsistency, loadLeague, myTeam } from "@/lib/loadLeague";
 
 /**
  * The Agent's server half: one chat turn, streamed back as SSE.
@@ -65,7 +65,9 @@ export async function POST(req: Request) {
 
   const league = await loadLeague();
   const me = await myTeam(league);
-  const runTool = createToolRunner(league, me.name, webSearch);
+  // 25 KB, read once per turn, and only player_game_detail touches it — see loadLeague.
+  const consistency = await loadConsistency();
+  const runTool = createToolRunner(league, me.name, webSearch, consistency);
 
   const history: Content[] = messages.map((m) => ({
     role: m.role === "user" ? "user" : "model",

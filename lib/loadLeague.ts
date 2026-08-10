@@ -3,6 +3,7 @@ import path from "node:path";
 import type { LeagueData, Matchup, Team } from "./league";
 import type { PreWeekLog } from "./predictions";
 import type { CareerLog } from "./career";
+import type { ConsistencyPool } from "./espnLive";
 import { resolveTeam } from "./team";
 
 /**
@@ -84,6 +85,22 @@ export async function loadCareer(): Promise<CareerLog | null> {
   try {
     const file = path.join(process.cwd(), "public", "data", "career.json");
     return JSON.parse(await readFile(file, "utf8")) as CareerLog;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The league-wide game-to-game spread baseline, from scripts/build_consistency.mjs.
+ *
+ * Its own file for the same reason career.json is: built by a separate script off ~290
+ * ESPN game logs, and fixed now the season is over. Only the Agent reads it, and only to
+ * turn a bare "± 7.1" into a percentile. Null until that script has been run.
+ */
+export async function loadConsistency(): Promise<ConsistencyPool | null> {
+  try {
+    const file = path.join(process.cwd(), "public", "data", "consistency.json");
+    return JSON.parse(await readFile(file, "utf8")) as ConsistencyPool;
   } catch {
     return null;
   }

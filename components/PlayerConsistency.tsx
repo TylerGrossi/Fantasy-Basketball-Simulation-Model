@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { PoolPlayer } from "@/lib/league";
-import { mean, stdev, usePlayerGames, type PlayerGame } from "@/lib/playerGames";
+import { consistency, usePlayerGames, type PlayerGame } from "@/lib/playerGames";
 
 /**
  * How RELIABLE a player was, and his best and worst nights.
@@ -31,25 +31,19 @@ export default function PlayerConsistency({
 }) {
   const { games, loading } = usePlayerGames(playerId, pool);
 
-  const stats = useMemo(() => {
-    if (games.length < 2) return null;
-    const vals = games.map((g) => g.value);
-    const avg = mean(vals);
-    const sorted = [...vals].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    /*
-     * Share of nights at or above his OWN average, not the league's.
-     *
-     * A player can beat his average in most games and still have a middling season — that
-     * is exactly the signature of a steady floor with a few disasters, and it is the shape
-     * this number exists to expose. Against the league it would just restate his value.
-     */
-    const aboveOwn = vals.filter((v) => v >= avg).length / vals.length;
-    // League-average nights. Zero is the pool mean by construction, so this needs no
-    // arbitrary threshold: it is simply "how often was he a useful player that night".
-    const abovePool = vals.filter((v) => v > 0).length / vals.length;
-    return { avg, median, sd: stdev(vals), aboveOwn, abovePool, n: vals.length };
-  }, [games]);
+  /*
+   * The maths lives in lib/espnLive.ts, not here.
+   *
+   * The Agent quotes these same four numbers, and a panel that computed its own copy
+   * would eventually disagree with what the assistant says about the same player —
+   * which is worse than either one being slightly off.
+   *
+   * "Above own avg" is deliberately measured against HIS average, not the league's: a
+   * player can beat his own average most nights and still have a middling season, which
+   * is exactly the signature of a steady floor with a few disasters. Against the league
+   * it would just restate his value.
+   */
+  const stats = useMemo(() => consistency(games), [games]);
 
   const ranked = useMemo(() => [...games].sort((a, b) => b.value - a.value), [games]);
 

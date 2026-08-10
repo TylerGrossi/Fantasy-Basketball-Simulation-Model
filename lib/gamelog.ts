@@ -20,28 +20,13 @@ import { useEffect, useState } from "react";
  * serve all three and would end up serving none of them well.
  */
 
-export interface EspnGameEvent {
-  eventId: string;
-  stats?: string[];
-}
-
-export interface EspnGameLog {
-  labels?: string[];
-  events?: Record<
-    string,
-    {
-      gameDate?: string;
-      atVs?: string;
-      opponent?: { abbreviation?: string };
-      team?: { id?: string; isAllStar?: boolean };
-      gameResult?: string;
-    }
-  >;
-  seasonTypes?: Array<{
-    displayName?: string;
-    categories?: Array<{ events?: EspnGameEvent[] }>;
-  }>;
-}
+// The payload SHAPE and the two predicates moved to lib/gamelogTypes.ts so server-side
+// code can use them — a `"use client"` module cannot be called from the server, which is
+// what kept the Agent from ever seeing a game log. Re-exported so client imports here are
+// unchanged.
+export type { EspnGameEvent, EspnGameLog } from "./gamelogTypes";
+export { isAllStar, isRegularSeason } from "./gamelogTypes";
+import type { EspnGameLog } from "./gamelogTypes";
 
 const URL_FOR = (playerId: number) =>
   `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/${playerId}/gamelog`;
@@ -109,16 +94,3 @@ export function useGameLog(playerId: number | null): {
  * ESPN files the ALL-STAR GAME under the regular season, with "WORLD" as the player's
  * team. It is not a real game for any purpose here.
  */
-export function isAllStar(log: EspnGameLog, eventId: string): boolean {
-  return !!log.events?.[eventId]?.team?.isAllStar;
-}
-
-/**
- * A real regular-season block.
- *
- * `Play In Regular Season` is ESPN's own label for the play-in and contains "Regular
- * Season", so it has to be excluded by name rather than by a substring match.
- */
-export function isRegularSeason(displayName: string): boolean {
-  return /regular season/i.test(displayName) && !/play.?in/i.test(displayName);
-}

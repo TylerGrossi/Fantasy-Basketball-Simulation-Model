@@ -15,7 +15,24 @@
  *    prose beats JSON here: it costs fewer tokens and the model quotes it more faithfully.
  */
 
-import type { LeagueData, PoolPlayer, StandingRow } from "./league";
+import type { LeagueData, PoolPlayer, StandingRow, ScoreboardRow } from "./league";
+// The same helpers /scoreboard and /matchup use, so the agent's numbers are the page's
+// numbers rather than a second implementation that can drift from it.
+import {
+  categoryRecord,
+  periodLabel,
+  scoreboardRows,
+  winProbability,
+} from "./league";
+// Live ESPN data — the Player Card's splits panels, reachable from the server.
+import {
+  averageLine,
+  consistency,
+  fetchPlayerGames,
+  fetchTeamDefense,
+  spreadRank,
+  type ConsistencyPool,
+} from "./espnLive";
 import { playerStatus } from "./playerPool";
 import { APP_TOUR } from "./appTour";
 
@@ -40,18 +57,89 @@ const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
 const ownerLabel = (owner: string) => (owner === "FA" ? "Free Agent" : owner);
 
 /** One-line per-game summary — the `_player_line` format the Python assistant used. */
-function playerLine(p: PoolPlayer): string {
+/** A per-game line from one of the recent-window blobs, in the card's own order. */
+function windowLine(w: Partial<Record<string, number>> | undefined): string | null {
+  if (!w || !w.gp) return null;
+  const n = (k: string) => Number(w[k] ?? 0).toFixed(1);
   return (
-    `${p.name} (${p.nbaTeam || "?"}, ${p.position || "?"}) - ` +
-    `owner: ${ownerLabel(p.owner)}; ` +
-    `value ${signed(p.value)}, 15-day trend ${signed(p.trend15)}, ` +
-    `30-day trend ${signed(p.trend)}; ` +
-    `${p.PTS.toFixed(1)} PTS, ${p.REB.toFixed(1)} REB, ${p.AST.toFixed(1)} AST, ` +
-    `${p.STL.toFixed(1)} STL, ${p.BLK.toFixed(1)} BLK, ${p["3PM"].toFixed(1)} 3PM, ` +
-    `${p.TO.toFixed(1)} TO, ${p.DD.toFixed(1)} DD/g; ` +
-    `FG ${pct(p.fgPct)}, FT ${pct(p.ftPct)}, 3P ${pct(p.tpPct)}; ` +
-    `status: ${p.status || "active"}`
+    `${w.gp}gp ${n("PTS")}p ${n("REB")}r ${n("AST")}a ` +
+    `${n("STL")}s ${n("BLK")}b ${n("3PM")}3 ${n("TO")}to`
   );
+}
+
+/**
+ * ONE player, with everything the export knows about him.
+ *
+ * Deliberately the same facts the Player Card shows, because the agent is asked the
+ * questions that page answers and was previously working from a third of them — it had
+ * the season line and the two trend deltas, and none of the sample size, the recent
+ * WINDOWS, the ESPN ranks, the career history, or how the player was acquired. It would
+ * say "he is trending up" without being able to say off how many games.
+ *
+ * NOT here: the card's splits (home/away, rest, by month), the opponent-defence buckets
+ * and the game log. Those are not in league.json at all — they come live from ESPN, and
+ * the `player_game_detail` tool fetches them on demand. They are kept out of this line
+ * deliberately, because it is returned for every player in a list and a network call per
+ * row would be ruinous.
+ */
+function playerLine(p: PoolPlayer): string {
+  const bits: string[] = [
+    `${p.name} (${p.nbaTeam || "?"}, ${p.position || "?"}${
+      p.eligibleSlots?.length ? `; eligible ${p.eligibleSlots.join("/")}` : ""
+    }) - owner: ${ownerLabel(p.owner)}`,
+  ];
+
+  // Age and experience: the card's bio row, and what separates a breakout from a decline.
+  const who = [
+    p.age != null ? `age ${p.age}` : null,
+    p.exp != null ? `${p.exp} yr${p.exp === 1 ? "" : "s"} exp` : null,
+    p.lineupSlot ? `slot ${p.lineupSlot}` : null,
+    p.acquisitionType ? `acquired via ${p.acquisitionType}` : null,
+  ].filter(Boolean);
+  if (who.length) bits.push(who.join(", "));
+
+  // Value in all three windows, each with its trend — the card's three basis tiles.
+  bits.push(
+    `value ${signed(p.value)} (season), ${signed(p.recent)} (30d, trend ${signed(p.trend)}), ` +
+      `${signed(p.recent15)} (15d, trend ${signed(p.trend15)})`
+  );
+
+  bits.push(
+    `${p.gp ?? "?"} games: ${p.PTS.toFixed(1)} PTS, ${p.REB.toFixed(1)} REB, ` +
+      `${p.AST.toFixed(1)} AST, ${p.STL.toFixed(1)} STL, ${p.BLK.toFixed(1)} BLK, ` +
+      `${p["3PM"].toFixed(1)} 3PM, ${p.TO.toFixed(1)} TO, ${p.DD.toFixed(1)} DD/g`
+  );
+  bits.push(`FG ${pct(p.fgPct)}, FT ${pct(p.ftPct)}, 3P ${pct(p.tpPct)}`);
+
+  const l30 = windowLine(p.last30);
+  const l15 = windowLine(p.last15);
+  if (l30) bits.push(`last 30 days: ${l30}`);
+  if (l15) bits.push(`last 15 days: ${l15}`);
+
+  // ESPN's own opinion, which the draft board is measured against.
+  const espn = [
+    p.espnRank != null ? `ESPN roto rank ${p.espnRank}` : null,
+    p.espnStdRank != null ? `standard rank ${p.espnStdRank}` : null,
+    p.adp != null ? `ADP ${p.adp}` : null,
+  ].filter(Boolean);
+  if (espn.length) bits.push(espn.join(", "));
+
+  if (p.history?.length) {
+    bits.push(
+      "career: " +
+        p.history
+          .map(
+            (h) =>
+              `${h.season - 1}-${String(h.season % 100).padStart(2, "0")} ` +
+              `${h.gp}gp ${h.min?.toFixed(1) ?? "?"}min ${Number(h.PTS ?? 0).toFixed(1)}p ` +
+              `${Number(h.REB ?? 0).toFixed(1)}r ${Number(h.AST ?? 0).toFixed(1)}a`
+          )
+          .join("; ")
+    );
+  }
+
+  bits.push(`status: ${p.status || "active"}`);
+  return bits.join("; ");
 }
 
 /**
@@ -314,6 +402,71 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
     parameters: { type: "object", properties: {} },
   },
   {
+    name: "current_matchup",
+    description:
+      "This week's head-to-head for a team: the category-by-category score, who is winning each category, and the model's win probability. Use for 'am I winning', 'how does my matchup look', or scouting an opponent's week.",
+    parameters: {
+      type: "object",
+      properties: {
+        team: {
+          type: "string",
+          description: "The fantasy team name. Leave blank for the user's own team.",
+        },
+      },
+    },
+  },
+  {
+    name: "team_schedule",
+    description:
+      "A team's week-by-week results for the season: opponent, manager, win/loss, and the category score of each week. Use for 'how did I do in week 12', streaks, or who beat whom.",
+    parameters: {
+      type: "object",
+      properties: {
+        team: {
+          type: "string",
+          description: "The fantasy team name. Leave blank for the user's own team.",
+        },
+      },
+    },
+  },
+  {
+    name: "recent_moves",
+    description:
+      "The league transaction feed: adds, drops, waiver claims and trades, newest first. Use for 'who picked up X', 'what has team Y done lately', or roster churn.",
+    parameters: {
+      type: "object",
+      properties: {
+        team: {
+          type: "string",
+          description: "Only this team's moves. Blank for the whole league.",
+        },
+        player: { type: "string", description: "Only moves involving this player." },
+        limit: { type: "number", description: "How many moves to return (default 25)." },
+      },
+    },
+  },
+  {
+    name: "playoff_odds",
+    description:
+      "Championship and advancement probabilities from the simulated bracket, per team. Only meaningful while a season is running; once the bracket is decided it reports the actual finalists instead.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    name: "player_game_detail",
+    description:
+      "One player's GAME-BY-GAME detail, live from ESPN: his last games, monthly splits, home/away and rest splits, how he did against strong versus weak defences, and his CONSISTENCY — median night, game-to-game spread, how often he beat his own average, and where that spread ranks in the league. Use for 'how consistent is he', 'can I rely on him', 'is he trending up', 'does he show up against good teams', 'how is he on back-to-backs', 'what has he done lately', or any question the season averages cannot answer. Slower than the other tools because it fetches live — call it only when the question is actually about form, splits, consistency or recent games.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: 'The player\'s name, full or partial (e.g. "Jokic").',
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
     name: "web_search",
     description:
       "Search the live web (Google) for real-world basketball information the league data can't answer: current NBA news, injuries, trades, the offseason, standings, awards, schedules, or general basketball facts. Use this whenever the question is about the real NBA rather than this fantasy league's own player pool.",
@@ -342,7 +495,13 @@ export type ToolArgs = Record<string, unknown>;
 export function createToolRunner(
   league: LeagueData,
   myTeamName: string,
-  webSearch: (query: string) => Promise<string>
+  webSearch: (query: string) => Promise<string>,
+  /*
+   * The league-wide spread baseline, or null when scripts/build_consistency.mjs has never
+   * been run. Optional on purpose: a missing file costs the percentile sentence and
+   * nothing else, so a fresh clone still gets a working agent.
+   */
+  consistencyPool: ConsistencyPool | null = null
 ) {
   const pool = league.seasonData.playerPool ?? [];
   const standings = league.seasonData.standings ?? [];
@@ -527,6 +686,281 @@ export function createToolRunner(
         );
       }
 
+      case "player_game_detail": {
+        const p = fuzzyPlayer(pool, str("name"));
+        if (!p) return `No player matching "${str("name")}" was found in this league.`;
+        if (!p.playerId) return `${p.name} has no ESPN id in the export, so no game log.`;
+
+        /*
+         * LIVE, not exported. These are the Player Card's splits panels, which the browser
+         * fetches per player; the export has never carried them. Fetching one player's log
+         * on demand keeps the answer current and costs one request, where putting ~290
+         * logs in the build would bloat every page's payload for detail rarely asked about.
+         *
+         * Both fetches degrade to a plain sentence rather than an error: the agent saying
+         * "I could not reach ESPN" is a fine answer, an exception is not.
+         */
+        const games = await fetchPlayerGames(p.playerId, pool);
+        if (!games?.length) {
+          return `No regular-season game log available for ${p.name} right now (ESPN did not return one).`;
+        }
+
+        // StatLine's fields are optional, so read them through Number() rather than
+        // asserting — a line missing a stat should print 0.0, not throw.
+        const fmt = (l: ReturnType<typeof averageLine>) => {
+          const n = (k: keyof typeof l) => Number(l[k] ?? 0).toFixed(1);
+          return `${n("PTS")}p ${n("REB")}r ${n("AST")}a ${n("STL")}s ${n("BLK")}b ${n("TO")}to`;
+        };
+        const bucket = (label: string, gs: typeof games) =>
+          gs.length ? `${label}: ${gs.length}gp ${fmt(averageLine(gs))}` : null;
+
+        const out: string[] = [`${p.name} — ${games.length} regular-season games on record.`];
+
+        /*
+         * The Player Card's Consistency panel, verbatim, plus the one thing the card
+         * cannot show: where that spread sits in the league.
+         *
+         * "± 7.1" means nothing on its own — a reader has no idea whether that is steady
+         * or wild. The card gets away with it because a human compares a few players by
+         * eye. An answer in prose has to say so outright, which is what the baseline in
+         * consistency.json is for.
+         */
+        const con = consistency(games);
+        if (con) {
+          const rank =
+            consistencyPool && p.playerId
+              ? spreadRank(p.playerId, p.value, consistencyPool, pool)
+              : null;
+          const line =
+            `Consistency (per-game 9-cat value) — median night ${signed(con.median)}, ` +
+            `average ${signed(con.avg)}, spread ±${con.sd.toFixed(1)} game to game; ` +
+            `${Math.round(con.aboveOwn * 100)}% of games at or above his own average, ` +
+            `${Math.round(con.abovePool * 100)}% above the pool average (startable nights).`;
+          out.push(
+            rank
+              ? line +
+                  ` Spread in context: steadier than ${rank.steadierThan.toFixed(0)}% of the ` +
+                  `${rank.pool} qualified players league-wide, and ${rank.peerSteadierThan.toFixed(0)}% ` +
+                  `of the ${rank.peerPool} closest to him in season value. Quote the SECOND ` +
+                  `number when judging whether he is reliable: spread rises with quality, so ` +
+                  `the league-wide figure flatters low-usage players and penalises stars.`
+              : line
+          );
+        }
+
+        // Last ten, newest first: the question "what has he done lately" in raw form.
+        out.push(
+          "Last 10: " +
+            [...games]
+              .slice(-10)
+              .reverse()
+              .map((g) => {
+                const d = new Date(g.date);
+                return (
+                  `${d.getMonth() + 1}/${d.getDate()} ${g.home ? "vs" : "@"}${g.opp} ` +
+                  `${g.min.toFixed(0)}min ${fmt(g.line)}`
+                );
+              })
+              .join(" | ")
+        );
+
+        const byMonth = new Map<string, typeof games>();
+        for (const g of games) {
+          const list = byMonth.get(g.month);
+          if (list) list.push(g);
+          else byMonth.set(g.month, [g]);
+        }
+        out.push(
+          "By month — " +
+            [...byMonth.entries()]
+              .sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([m, gs]) => `${m}: ${gs.length}gp ${fmt(averageLine(gs))}`)
+              .join("; ")
+        );
+
+        out.push(
+          "By situation — " +
+            [
+              bucket("home", games.filter((g) => g.home)),
+              bucket("away", games.filter((g) => !g.home)),
+              bucket("back-to-back", games.filter((g) => g.rest === 0)),
+              bucket("1 day rest", games.filter((g) => g.rest === 1)),
+              bucket("2+ days rest", games.filter((g) => (g.rest ?? 0) >= 2)),
+            ]
+              .filter(Boolean)
+              .join("; ")
+        );
+
+        // Opponent strength, in thirds — the resolution the underlying rating supports.
+        const defense = await fetchTeamDefense(league.season);
+        if (defense) {
+          const tier = (lo: number, hi: number) =>
+            games.filter((g) => {
+              const d = defense.get(g.opp);
+              return d ? d.rank >= lo && d.rank <= hi : false;
+            });
+          out.push(
+            "By opponent defence (points allowed, thirds) — " +
+              [
+                bucket("vs top 10 defences", tier(1, 10)),
+                bucket("vs middle 10", tier(11, 20)),
+                bucket("vs bottom 10", tier(21, 30)),
+              ]
+                .filter(Boolean)
+                .join("; ")
+          );
+        }
+
+        return out.join("\n");
+      }
+
+      case "current_matchup": {
+        const wanted = str("team") || myTeamName;
+        const matchedName = matchTeam(
+          league.teams.map((t) => t.name.trim()),
+          wanted
+        );
+        const team = league.teams.find((t) => t.name.trim() === matchedName);
+        if (!team) return `No team found matching "${wanted}".`;
+        const m = league.matchups.find(
+          (x) => x.homeId === team.id || x.awayId === team.id
+        );
+        if (!m) return `No matchup found for ${team.name} in period ${league.period}.`;
+        const isHome = m.homeId === team.id;
+        const you = isHome ? m.home : m.away;
+        const opp = isHome ? m.away : m.home;
+        const oppTeam = league.teams.find((t) => t.id === (isHome ? m.awayId : m.homeId));
+        const rows = scoreboardRows(league, you.current, opp.current);
+        const rec = categoryRecord(rows);
+        /*
+         * The same caveat the /matchup page carries: once every game is played the
+         * probability is not a forecast, it is a restatement of the result. Handing the
+         * model "97% to win" about a finished week is how it ends up predicting the past.
+         */
+        const live = you.projVar.some((v) => v > 0) || opp.projVar.some((v) => v > 0);
+        const odds = winProbability(league, you, opp, you.current, opp.current);
+        return [
+          `${team.name} vs ${oppTeam?.name ?? "opponent"} — ${periodLabel(league)}`,
+          `Category score ${rec.win}-${rec.loss}${rec.tie ? `-${rec.tie}` : ""} (${team.name} first).`,
+          live
+            ? `Win probability ${(odds.win * 100).toFixed(1)}%, with games still to play.`
+            : "Every game is played, so this is the FINAL result, not a projection.",
+          "By category: " +
+            rows
+              .map(
+                (r: ScoreboardRow) =>
+                  `${r.cat} ${r.youStr} vs ${r.oppStr} (${
+                    r.youWins ? "win" : r.oppWins ? "loss" : "tie"
+                  })`
+              )
+              .join("; "),
+        ].join("\n");
+      }
+
+      case "team_schedule": {
+        const schedules = league.seasonData.schedules ?? {};
+        const wanted = str("team") || myTeamName;
+        const matchedName = matchTeam(
+          league.teams.map((t) => t.name.trim()),
+          wanted
+        );
+        const team = league.teams.find((t) => t.name.trim() === matchedName);
+        if (!team) return `No team found matching "${wanted}".`;
+        const rows = schedules[String(team.id)] ?? [];
+        if (!rows.length) return `No schedule recorded for ${team.name}.`;
+        return [
+          `${team.name} week by week:`,
+          ...rows.map(
+            (r) =>
+              `Week ${r.period}: ${r.result || "—"} ${r.score || ""} vs ${r.opponent.trim()}` +
+              (r.manager ? ` (${r.manager})` : "")
+          ),
+        ].join("\n");
+      }
+
+      case "recent_moves": {
+        const moves = league.seasonData.recentMoves ?? [];
+        if (!moves.length) return "No transaction history in this export.";
+        const teamQ = str("team");
+        const playerQ = str("player").toLowerCase();
+        const limit = Math.max(1, Math.min(100, Number(args.limit) || 25));
+        const matchedTeam = teamQ
+          ? matchTeam([...new Set(moves.map((mv) => mv.team))], teamQ)
+          : null;
+        const hits = moves.filter(
+          (mv) =>
+            (!matchedTeam || mv.team === matchedTeam) &&
+            (!playerQ || mv.player.toLowerCase().includes(playerQ))
+        );
+        if (!hits.length) {
+          return `No moves matched${matchedTeam ? ` for ${matchedTeam}` : ""}${
+            playerQ ? ` involving "${str("player")}"` : ""
+          }.`;
+        }
+        return [
+          `${hits.length} move${hits.length === 1 ? "" : "s"}` +
+            (hits.length > limit ? ` (showing the ${limit} most recent)` : "") +
+            ":",
+          ...hits
+            .slice(0, limit)
+            .map(
+              (mv) =>
+                `${(mv.date || "").slice(0, 10)} — ${mv.team}: ${mv.action} ${mv.player}` +
+                (mv.position ? ` (${mv.position})` : "")
+            ),
+        ].join("\n");
+      }
+
+      case "playoff_odds": {
+        const odds = league.seasonData.playoffOdds ?? [];
+        if (!odds.length) return "No playoff projection in this export.";
+        /*
+         * These three fields are ALREADY 0-100, unlike every other rate in the export
+         * (winPct, allPlayPct, powerPct are all 0-1). Multiplying by 100 the way the rest
+         * of this file does produced "champ 4916.2%, advance 10000.0%". The playoffs page
+         * prints them raw, which is the check: compare against app/playoffs/page.tsx.
+         */
+        const p100 = (v: number) => `${v.toFixed(1)}%`;
+        const finalists = league.seasonData.championshipFinalists ?? [];
+        if (league.seasonOver) {
+          /*
+           * A probability is not an outcome — the trap AGENTS.md names. Once the bracket
+           * is decided these numbers describe a tournament that has already happened, and
+           * the two finalists sit near 50/50, so handed over bare they make the model
+           * report a coin flip about a settled title. The result leads; the odds follow
+           * with their tense made explicit.
+           */
+          const names = finalists
+            .map((id) => league.teams.find((t) => t.id === id)?.name ?? `team ${id}`)
+            .join(" and ");
+          const champ = [...(league.seasonData.standings ?? [])].sort(
+            (a, b) => (a.finalStanding || a.standing) - (b.finalStanding || b.standing)
+          )[0];
+          return [
+            `The season is OVER. ${names || "Two teams"} reached the final and ` +
+              `${champ?.teamName ?? "the top seed"} won the championship.`,
+            "The figures below are what the simulation said BEFORE the bracket was played." +
+              " Do not present them as a forecast of a decided result.",
+            odds
+              .map(
+                (o) =>
+                  `${o.teamName}: champ ${p100(o.championshipProb)}, ` +
+                  `advance ${p100(o.advanceProb)}`
+              )
+              .join("; "),
+          ].join("\n");
+        }
+        return [
+          "Playoff projection:",
+          ...odds.map(
+            (o) =>
+              `${o.teamName}: playoffs ${p100(o.playoffProb)}, ` +
+              `advance ${p100(o.advanceProb)}, ` +
+              `championship ${p100(o.championshipProb)}`
+          ),
+        ].join("\n");
+      }
+
       case "power_rankings": {
         const teams = league.seasonData.powerRankings?.teams ?? [];
         if (!teams.length) return "Power-ranking data is unavailable right now.";
@@ -590,11 +1024,24 @@ export function systemInstruction(teamName: string, seasonOver: boolean, season:
     "basketball question, and never say you can 'only' help with the fantasy league - if " +
     "you're unsure, use web_search and then answer.\n\n" +
     "You have two sources of truth on top of your own basketball knowledge:\n" +
-    "1. LEAGUE DATA tools (lookup_player, find_players, league_rosters, list_players, " +
-    "compare_players, team_category_ranks, team_roster, list_teams, power_rankings) - use " +
-    "these for anything about THIS fantasy league's players, rosters, values, or " +
-    "standings. ALWAYS call them for real league numbers; never invent a value, stat, or " +
-    "roster.\n" +
+    "1. LEAGUE DATA tools - use these for anything about THIS fantasy league's players, " +
+    "rosters, values, matchups, schedule, transactions or standings. ALWAYS call them for " +
+    "real league numbers; never invent a value, stat, result or roster:\n" +
+    "   - players: lookup_player, find_players, list_players, compare_players, " +
+    "player_game_detail\n" +
+    "   - teams: team_roster, league_rosters, team_category_ranks, list_teams\n" +
+    "   - the season: power_rankings, current_matchup, team_schedule, recent_moves, " +
+    "playoff_odds\n" +
+    "player_game_detail is the ONLY tool that sees a player's individual GAMES - his last " +
+    "ten lines, his month-by-month splits, home/away, rest and back-to-backs, how he does " +
+    "against good, average and bad defences, and his consistency (median night, " +
+    "game-to-game spread, and where that spread ranks league-wide and among players of " +
+    "similar value). Use it whenever the question is about form, consistency, reliability, " +
+    "a hot or cold streak, rest, matchups, or what he has done lately; the other tools " +
+    "only have season and rolling-window averages, which cannot tell a steady player from " +
+    "a volatile one. CONSISTENCY IS A SPREAD QUESTION - answer it with the spread and its " +
+    "percentile, not by listing monthly averages. It fetches live from ESPN, so call it " +
+    "for one or two players at a time, never for a whole list.\n" +
     "NAME NAMES. If the user asks who to trade for, who to target, who to pick up or who " +
     "to drop, the answer is a list of SPECIFIC PLAYERS - each with the team that owns " +
     "him and the numbers that make him a fit. Describing a 'target profile' or a 'type of " +
