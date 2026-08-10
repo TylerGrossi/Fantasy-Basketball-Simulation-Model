@@ -359,13 +359,6 @@ export default function InjuryLog({
                     </tbody>
                   </table>
                 )}
-                {/* Say what the numbers are, and are not. */}
-                <p className="inj-note">
-                  Absences are every regular-season game his team played that he did not
-                  appear in. ESPN publishes a diagnosis only for the <em>current</em>{" "}
-                  injury, so earlier stints are shown without a cause — rest and coach&rsquo;s
-                  decisions look the same as injuries from the outside.
-                </p>
               </>
             ) : (
               <p className="inj-note">No regular-season game log for this player.</p>

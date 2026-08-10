@@ -8,6 +8,7 @@ import { useLiveTotals } from "@/lib/useLiveTotals";
 import { useSettings } from "@/lib/useSettings";
 import LiveBadge from "./LiveBadge";
 import PlayerLink from "./PlayerLink";
+import FilterBar from "./FilterBar";
 
 interface Props {
   league: LeagueData;
@@ -81,7 +82,7 @@ export default function StreamersView({
         </p>
       ) : (
         <>
-          <div className="controls">
+          <FilterBar className="controls">
             <label className="check">
               <input
                 type="checkbox"
@@ -94,7 +95,7 @@ export default function StreamersView({
               Baseline: {baseline.expectedCats.toFixed(1)} expected cats ·{" "}
               {(baseline.win * 100).toFixed(0)}% win
             </span>
-          </div>
+          </FilterBar>
 
           <p className="caption">
             {results.length} candidates evaluated against every legal drop. Δ Cats is the

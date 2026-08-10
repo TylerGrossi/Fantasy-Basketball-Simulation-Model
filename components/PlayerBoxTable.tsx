@@ -4,9 +4,17 @@ import { useMemo, useState } from "react";
 import type { BoxLine } from "@/lib/loadLeague";
 import PlayerLink from "./PlayerLink";
 
-/** Columns for a player line, in ESPN's own box-score order: opponents, then the stat group. */
+/**
+ * Columns for a player line, in ESPN's own box-score order: opponents, then the stat group.
+ *
+ * MINUTES are deliberately absent. They are not a scored category in this league, so the
+ * column bought a reader nothing here while costing width on the one table that is already
+ * the widest thing in the app — and on a phone it was the first column pushed under the
+ * frozen name. The export still carries `BoxLine.min`, and the draft projection reads it
+ * (it is the only place minutes exist in the data); this table just doesn't show it.
+ */
 const BOX_COLS = [
-  "MIN", "FGM/FGA", "FG%", "FTM/FTA", "FT%", "3PM/3PA", "3P%",
+  "FGM/FGA", "FG%", "FTM/FTA", "FT%", "3PM/3PA", "3P%",
   "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW",
 ] as const;
 
@@ -49,7 +57,6 @@ export function PlayerBoxTable({
    */
   const sortVal = (l: BoxLine, key: SortKey): number | string => {
     if (key === "name") return l.name.toLowerCase();
-    if (key === "MIN") return l.min || 0;
     if (key === "FGM/FGA") return at(l, "FGM");
     if (key === "FTM/FTA") return at(l, "FTM");
     if (key === "3PM/3PA") return at(l, "3PM");
@@ -80,7 +87,6 @@ export function PlayerBoxTable({
   }, [lines, sort, stats]);
 
   const totals = lines.reduce<Record<string, number>>((acc, l) => {
-    acc.MIN = (acc.MIN ?? 0) + (l.min || 0);
     acc.GP = (acc.GP ?? 0) + (l.gp || 0);
     for (const s of stats) acc[s] = (acc[s] ?? 0) + at(l, s);
     return acc;
@@ -99,10 +105,6 @@ export function PlayerBoxTable({
   const cell = (src: Record<string, number> | BoxLine, col: BoxCol): string => {
     const get = (s: string) =>
       "v" in src || "gp" in src ? at(src as BoxLine, s) : (src as Record<string, number>)[s] ?? 0;
-    if (col === "MIN") {
-      const m = "min" in src ? (src as BoxLine).min : (src as Record<string, number>).MIN;
-      return m ? String(Math.round(m)) : "—";
-    }
     if (col === "FGM/FGA") return madeAttempt(src, "FGM", "FGA");
     if (col === "FTM/FTA") return madeAttempt(src, "FTM", "FTA");
     if (col === "3PM/3PA") return madeAttempt(src, "3PM", "3PA");

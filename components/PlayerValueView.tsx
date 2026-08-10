@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
 import GameLog from "./GameLog";
 import MultiSelect from "./MultiSelect";
+import FilterBar from "./FilterBar";
+import PlayerLink from "./PlayerLink";
+import StatusBadge from "./StatusBadge";
 import {
   gpFor,
   MIN_GP_OPTIONS,
@@ -88,7 +91,7 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
 
   return (
     <>
-      <div className="controls pv-filters">
+      <FilterBar className="controls pv-filters">
         {/* Widths come from .pv-f-* in globals.css so the six controls share one row —
             see the note there. Position/NBA Team/Value basis hold short values and are
             sized down; the two that hold long text take the leftover space. */}
@@ -163,7 +166,7 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
           />
           Show injured players
         </label>
-      </div>
+      </FilterBar>
 
       {rows.length === 0 ? (
         <p className="caption">No players match these filters.</p>
@@ -241,7 +244,7 @@ function PlayerRow({
         />
         <span className="pv-rank">{rank}</span>
         <span className="pv-name">{p.name}</span>
-        {code && <span className={`pv-badge ${sev}`}>{code}</span>}
+        {code && <StatusBadge status={p.status} />}
         {isFa && <span className="pv-fa">FA</span>}
         <span className="pv-meta">{p.position}</span>
         <span
@@ -262,14 +265,23 @@ function PlayerRow({
             <div className="pv-shot pv-shot-blank" />
           )}
           <div className="pv-chead">
-            <div className="pv-cname">{p.name}</div>
+            {/*
+              The link goes on the EXPANDED card's name, not the row above it. The row is
+              a <summary>: its whole job is to open this panel, and a link inside it would
+              take the tap that opens the row (and nest interactive content inside a
+              summary, which is not what that element is for). Once open, the name is the
+              natural way through to the full card.
+            */}
+            <div className="pv-cname">
+              <PlayerLink name={p.name} />
+            </div>
             <div className="pv-csub">
               <span className="pv-cmeta">
                 {[p.nbaTeam, p.position].filter(Boolean).join(" · ")}
               </span>
               {(code || isFa) && (
                 <span className="pv-badges">
-                  {code && <span className={`pv-badge ${sev}`}>{code}</span>}
+                  {code && <StatusBadge status={p.status} />}
                   {isFa && <span className="pv-fa">FA</span>}
                 </span>
               )}

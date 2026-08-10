@@ -53,8 +53,6 @@ export default async function Page() {
     v > 0 ? "var(--good)" : v < 0 ? "var(--bad)" : "var(--ink-2)";
   const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
-  // ESPN's "Moves" is the season acquisition count — how hard a manager worked the wire.
-  const hasMoves = standings.some((t) => t.acquisitions != null);
   // The fuller "Transaction Counter" widget ESPN also shows: acquisitions/drops/trades
   // plus the two roster-management counts (`moveToActive`/`moveToIR`) that Moves above
   // doesn't carry — needs the same optional-field check, for the same reason.
@@ -63,17 +61,24 @@ export default async function Page() {
   // Every data column is right-aligned monospace, records included — they are figures
   // too, and having two of the seven left-aligned made the row read as three ragged
   // groups. Only Team stays left; # keeps the treatment it had.
+  /*
+   * Six columns, down from eight.
+   *
+   * The ALL-PLAY RECORD is gone and its percentage stays: "1905-880-50" and ".681" are the
+   * same fact at two precisions, and the rate is the one anybody compares teams on — the
+   * raw record was three numbers wide for a value nobody reads digit by digit.
+   *
+   * MOVES is gone because the Transaction Counter below breaks the same figure into
+   * acquisitions, drops, trades and the two roster-management counts. A column that is a
+   * lower-resolution copy of a table on the same page earns nothing.
+   */
   const standingCols: SortCol[] = [
     { key: "rank", label: "#", num: true },
     { key: "team", label: "Team" },
     { key: "record", label: "Record", num: true },
     { key: "pct", label: "PCT", num: true },
-    { key: "allplay", label: "All-Play", num: true },
     { key: "appct", label: "AP PCT", num: true },
     { key: "luck", label: "Luck", num: true },
-    // Only when the export carries it — an older snapshot would otherwise show a column
-    // of zeros, which reads as "nobody made a move all season" rather than "no data".
-    ...(hasMoves ? [{ key: "moves", label: "Moves", num: true }] : []),
   ];
 
   const standingRows: SortRow[] = standings.map((t) => ({
@@ -85,20 +90,8 @@ export default async function Page() {
       // Records sort by the rate behind them, not the string.
       record: { sort: t.winPct, text: rec(t.wins, t.losses, t.ties) },
       pct: { sort: t.winPct, text: pct(t.winPct) },
-      allplay: {
-        sort: t.allPlayPct,
-        text: rec(t.allPlayWins, t.allPlayLosses, t.allPlayTies),
-      },
       appct: { sort: t.allPlayPct, text: pct(t.allPlayPct) },
       luck: { sort: t.luck, text: signed(t.luck), color: luckColor(t.luck) },
-      ...(hasMoves
-        ? {
-            moves: {
-              sort: t.acquisitions ?? 0,
-              text: (t.acquisitions ?? 0).toLocaleString("en-US"),
-            },
-          }
-        : {}),
     },
   }));
 
@@ -138,7 +131,9 @@ export default async function Page() {
     { key: "team", label: "Team Name" },
     { key: "loss", label: "Loss", num: true },
     { key: "trade", label: "Trade", num: true },
-    { key: "acq", label: "Acquisitions", num: true },
+    // "Acquisitions" is the widest header in the app and sets this column's width under
+    // `table-layout: fixed`. `shortLabel` is used at <=768px only; desktop keeps the word.
+    { key: "acq", label: "Acquisitions", shortLabel: "ACQ", num: true },
     { key: "drop", label: "Drop", num: true },
     { key: "activate", label: "Activate", num: true },
     { key: "ir", label: "IR", num: true },

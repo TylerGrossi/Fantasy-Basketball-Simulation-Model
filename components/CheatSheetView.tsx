@@ -12,6 +12,7 @@ import {
   type ValueBasis,
 } from "@/lib/playerPool";
 import PlayerLink from "./PlayerLink";
+import StatusBadge from "./StatusBadge";
 
 /**
  * Draft-style cheat sheet: one ranked column per lineup slot, in the shape FantasyPros
@@ -35,7 +36,31 @@ interface Props {
   myTeam: string;
 }
 
+/** The three COMPOSITE columns "All" shows — the slots a lineup actually has to fill. */
 const SLOTS = ["G", "F", "C"] as const;
+
+/**
+ * Everything the Position filter offers.
+ *
+ * "All" keeps the three-column board; picking a single position narrows to ONE ranked
+ * column of exactly that eligibility, which is how you answer "who is the best pure centre
+ * left" without reading past every forward. `eligible()` already understands all seven —
+ * G and F fan out to their base positions, the rest match directly — so this needed no new
+ * matching logic.
+ */
+const POSITIONS = ["All", "PG", "SG", "SF", "PF", "C", "G", "F"] as const;
+type Position = (typeof POSITIONS)[number];
+
+const POSITION_LABEL: Record<Position, string> = {
+  All: "All positions",
+  PG: "PG · Point guard",
+  SG: "SG · Shooting guard",
+  SF: "SF · Small forward",
+  PF: "PF · Power forward",
+  C: "C · Center",
+  G: "G · Any guard",
+  F: "F · Any forward",
+};
 
 /** Backcourt -> frontcourt, not alphabetical — matches how a depth chart reads. */
 const POSITION_ORDER = ["PG", "SG", "SF", "PF", "C"];
@@ -77,6 +102,14 @@ export default function CheatSheetView({ pool, teams, myTeam }: Props) {
   const [hideInjured, setHideInjured] = useState(false);
   const [basis, setBasis] = useState<ValueBasis>("Regular");
   const [minGp, setMinGp] = useState(10);
+  /*
+   * Which position the board shows. "All" is the three-column G/F/C board this page has
+   * always been; anything else narrows it to a single ranked column.
+   *
+   * It lives in the filter bar with the other controls rather than as a strip of its own —
+   * it is a filter, and having one filter somewhere else made the panel look incomplete.
+   */
+  const [position, setPosition] = useState<Position>("All");
   /** Mobile only — the bar becomes a collapsible drawer there (see .cs-bar-toggle). */
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -89,11 +122,13 @@ export default function CheatSheetView({ pool, teams, myTeam }: Props) {
   const columns = useMemo(() => {
     const col = VALUE_COL[basis];
     const ranked = [...pool].sort((a, b) => (b[col] ?? 0) - (a[col] ?? 0));
-    return SLOTS.map((slot) => ({
+    // "All" -> the three composite columns; a single position -> one column of its own.
+    const slots: readonly string[] = position === "All" ? SLOTS : [position];
+    return slots.map((slot) => ({
       slot,
       rows: ranked.filter((p) => eligible(p, slot)).map((p, i) => ({ p, rank: i + 1 })),
     }));
-  }, [pool, basis]);
+  }, [pool, basis, position]);
 
   const isMine = (p: PoolPlayer) => p.owner === mine;
   const isAgainst = (p: PoolPlayer) =>
@@ -171,6 +206,22 @@ export default function CheatSheetView({ pool, teams, myTeam }: Props) {
         </div>
 
         <div className="cs-ctl">
+          <span className="cs-ctl-l">Position</span>
+          <select
+            className="field field-select field-select-sm"
+            value={position}
+            onChange={(e) => setPosition(e.target.value as Position)}
+            aria-label="Position"
+          >
+            {POSITIONS.map((p) => (
+              <option key={p} value={p}>
+                {POSITION_LABEL[p]}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="cs-ctl">
           <span className="cs-ctl-l">Min GP</span>
           <select
             className="field field-select field-select-sm"
@@ -205,7 +256,7 @@ export default function CheatSheetView({ pool, teams, myTeam }: Props) {
         </label>
       </div>
 
-      <div className="cs-cols">
+      <div className="cs-cols" data-single={position === "All" ? undefined : "1"}>
         {columns.map((col) => {
           let rows = filter ? col.rows.filter(({ p }) => isMine(p) || isAgainst(p)) : col.rows;
           if (hideInjured) rows = rows.filter(({ p }) => playerStatus(p.status)[1] !== "out");
@@ -234,7 +285,7 @@ export default function CheatSheetView({ pool, teams, myTeam }: Props) {
                         <span className="cs-pos">{positions(p).join("/") || "—"}</span>
                         <span className="cs-team">{p.nbaTeam}</span>
                         <span className="cs-flag">
-                          {code ? <span className={`pv-badge ${sev}`}>{code}</span> : null}
+                          {code ? <StatusBadge status={p.status} /> : null}
                         </span>
                       </div>
                     );

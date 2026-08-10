@@ -1,8 +1,8 @@
 import SortableTable, { type SortCol, type SortRow } from "./SortableTable";
+import CareerPlayersTable, { type CareerPlayerRow } from "./CareerPlayersTable";
 import {
+  RATE_MIN_GP,
   hallOfFame,
-  careerTotals,
-  gameLog,
   headToHead,
   managerTable,
   myOwnerName,
@@ -42,75 +42,11 @@ function ordinal(n: number): string {
   return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Seasons — the landing page                                                  */
-/* -------------------------------------------------------------------------- */
-
-export function CareerStrip({ log }: { log: CareerLog }) {
-  const t = careerTotals(log);
-  const [w, l, ti] = t.record;
-  /*
-   * Five tiles, no sub-line.
-   *
-   * The win rate was the record tile's caption, which buried the one number most likely
-   * to be looked up on a page of career totals. Promoting it to its own tile is also what
-   * made the sub-row removable: of the four captions, it was the only one carrying a
-   * figure rather than restating its label ("2017-26" under Seasons, "finished 1st" under
-   * Titles), and a row of tiles reads faster when every tile is one number.
-   *
-   * "Category" is in the label rather than under it because the record beside it is in
-   * categories too — 814-496-25 is categories won across six seasons, not matchups, and
-   * an unqualified "Win %" next to it would invite reading both as a matchup record.
-   *
-   * No tile colours its value. Green is the app's "this is good" signal and it was firing
-   * on two of five here — a career win rate and a title count are the subject of the page,
-   * not a warning, and colouring some tiles and not others made the plain ones read as
-   * though something were wrong with them.
-   */
-  return (
-    <div className="metrics metrics-5">
-      <Tile label="Seasons" value={String(t.seasons)} />
-      <Tile label="All-time record" value={`${w}-${l}${ti ? `-${ti}` : ""}`} />
-      <Tile label="Category win %" value={pct(t.winPct)} />
-      <Tile label="Titles" value={String(t.titles)} />
-      <Tile label="Players rostered" value={String(t.distinctPlayers)} />
-    </div>
-  );
-}
-
-export function SeasonsTable({ log }: { log: CareerLog }) {
-  const cols: SortCol[] = [
-    { key: "season", label: "Season" },
-    { key: "team", label: "Team" },
-    { key: "league", label: "League" },
-    { key: "record", label: "Record", num: true },
-    { key: "winPct", label: "Win %", num: true },
-    { key: "finish", label: "Finish", num: true },
-    { key: "players", label: "Players used", num: true },
-  ];
-  const rows: SortRow[] = log.seasons.map((s) => {
-    const [w, l, t] = s.record;
-    const decided = w + l;
-    const wp = decided > 0 ? w / decided : 0;
-    return {
-      id: `${s.leagueId}-${s.season}`,
-      cells: {
-        season: { sort: s.season, text: seasonLabel(s.season) },
-        team: { sort: s.teamName, text: s.teamName },
-        league: { sort: s.leagueName || "", text: s.leagueName || "—" },
-        record: { sort: wp, text: `${w}-${l}${t ? `-${t}` : ""}` },
-        winPct: { sort: wp, text: pct(wp) },
-        finish: {
-          sort: s.finalStanding || s.standing || 99,
-          text: s.finalStanding ? ordinal(s.finalStanding) : "—",
-          color: s.finalStanding === 1 ? "var(--good)" : undefined,
-        },
-        players: { sort: s.players.length, text: String(s.players.length) },
-      },
-    };
-  });
-  return <SortableTable cols={cols} rows={rows} defaultKey="season" defaultDesc />;
-}
+/*
+ * The landing page's own two components — a 4-tile career strip and an eight-column
+ * seasons table — used to live here. They are now `components/SeasonShelf.tsx`, which
+ * says why the table became a shelf.
+ */
 
 /* -------------------------------------------------------------------------- */
 /* Players                                                                     */
@@ -119,67 +55,33 @@ export function SeasonsTable({ log }: { log: CareerLog }) {
 /** Rows per page. The full 196 stay in the table — see `pageSize` in SortableTable. */
 const PLAYER_ROWS = 50;
 
+/**
+ * Every player ever rostered.
+ *
+ * A thin server shim: it maps the career log down to the compact per-player numbers the
+ * table needs and hands them over. The unit toggle and the leader bolding live in the
+ * client component, because both are view state — and the log itself must not cross that
+ * boundary, so the mapping happens here rather than there.
+ */
 export function PlayersTable({ log }: { log: CareerLog }) {
-  const players = hallOfFame(log);
-  const cols: SortCol[] = [
-    { key: "name", label: "Player" },
-    { key: "seasons", label: "Seasons" },
-    { key: "days", label: "Days", num: true },
-    { key: "gp", label: "Games", num: true },
-    { key: "PTS", label: "PTS", num: true },
-    { key: "REB", label: "REB", num: true },
-    { key: "AST", label: "AST", num: true },
-    { key: "STL", label: "STL", num: true },
-    { key: "BLK", label: "BLK", num: true },
-    { key: "3PM", label: "3PM", num: true },
-    { key: "TO", label: "TO", num: true },
-    { key: "fg", label: "FG%", num: true },
-    { key: "titles", label: "Titles", num: true },
-    { key: "rating", label: "Rating", num: true },
-    // HoF and Jersey were two columns that were never independent — a retired jersey
-    // always implies the Hall. One column says the same thing and buys back the width.
-    { key: "honors", label: "Honors" },
-  ];
-  const rows: SortRow[] = players.map((p) => ({
+  const players: CareerPlayerRow[] = hallOfFame(log).map((p) => ({
     id: p.playerId,
-    cells: {
-      name: { sort: p.name, text: p.name },
-      seasons: { sort: p.seasons[0] ?? 0, text: p.seasons.map(shortSeason).join(", ") },
-      days: { sort: p.days, text: String(p.days) },
-      gp: { sort: p.gp, text: p.gp ? String(p.gp) : "—" },
-      PTS: { sort: p.PTS, text: p.gp ? p.PTS.toFixed(1) : "—" },
-      REB: { sort: p.REB, text: p.gp ? p.REB.toFixed(1) : "—" },
-      AST: { sort: p.AST, text: p.gp ? p.AST.toFixed(1) : "—" },
-      STL: { sort: p.STL, text: p.gp ? p.STL.toFixed(1) : "—" },
-      BLK: { sort: p.BLK, text: p.gp ? p.BLK.toFixed(1) : "—" },
-      "3PM": { sort: p["3PM"], text: p.gp ? p["3PM"].toFixed(1) : "—" },
-      TO: { sort: p.TO, text: p.gp ? p.TO.toFixed(1) : "—" },
-      fg: { sort: p.fgPct, text: rate(p.fgPct) },
-      titles: {
-        sort: p.titles,
-        text: p.titles ? String(p.titles) : "—",
-        color: p.titles ? "var(--good)" : undefined,
-      },
-      // A dash, not 0.00: players under the games minimum are UNRATED rather than rated
-      // zero, and a printed 0.00 would read as a verdict the sample cannot support.
-      rating: { sort: p.rating, text: p.rating > 0 ? p.rating.toFixed(2) : "—" },
-      honors: {
-        sort: p.jersey ? 2 : p.hof ? 1 : 0,
-        text: p.jersey ? "Jersey" : p.hof ? "HoF" : "—",
-        color: p.jersey ? "var(--cobalt)" : p.hof ? "var(--good)" : undefined,
-      },
-    },
+    name: p.name,
+    seasons: p.seasons,
+    days: p.days,
+    gp: p.gp,
+    PTS: p.PTS, REB: p.REB, AST: p.AST, STL: p.STL, BLK: p.BLK,
+    // Renamed off "3PM" so the row is a plain identifier-keyed object; the column keeps
+    // the "3PM" label the rest of the app uses.
+    TPM: p["3PM"],
+    TO: p.TO,
+    fgPct: p.fgPct,
+    fga: p.fga,
+    titles: p.titles,
+    rating: p.rating,
+    honors: p.jersey ? "Jersey" : p.hof ? "HoF" : null,
   }));
-  return (
-    <SortableTable
-      cols={cols}
-      rows={rows}
-      defaultKey="rating"
-      defaultDesc
-      className="sheet-tight"
-      pageSize={PLAYER_ROWS}
-    />
-  );
+  return <CareerPlayersTable players={players} minGp={RATE_MIN_GP} />;
 }
 
 /** The headline counts above the player table — how exclusive the rafters actually are. */
@@ -189,18 +91,26 @@ export function HallOfFameStrip({ log }: { log: CareerLog }) {
   const jerseys = players.filter((p) => p.jersey);
   const top = players[0];
   return (
-    <div className="metrics metrics-3">
-      <Tile
-        label="Hall of Famers"
-        value={String(hof.length)}
-        sub={`of ${players.length} ever rostered`}
-        good={hof.length > 0}
-      />
-      <Tile
-        label="Jerseys retired"
-        value={String(jerseys.length)}
-        sub={jerseys.length ? jerseys.map((p) => p.name).join(", ") : "none yet"}
-      />
+    /* Four tiles, so no `metrics-3` — the base `.metrics` grid is already 4-up on desktop.
+       `hof-strip` hides the whole row on a phone: as 2x2 it cost ~230px above the fold and
+       pushed the player table, which is the page, most of a screen down. The four figures
+       are context, not the reason you opened this. */
+    <div className="metrics hof-strip">
+      {/*
+        Bare counts, no subtitles. They used to read "of 196 ever rostered" and a list of
+        the four retired jerseys, both of which the table directly below already says — the
+        Honors column names every one of them. The 196 was worth keeping though, so it is
+        its own tile now rather than a footnote on another number.
+
+        It leads, because it is the denominator the other three are read against: 196
+        rostered, 7 of them in the Hall, 4 in the rafters.
+
+        No `good` colour on the Hall count either — green is this app's "in your favour"
+        marker, and a museum count is not a result.
+      */}
+      <Tile label="Players rostered" value={String(players.length)} />
+      <Tile label="Hall of Famers" value={String(hof.length)} />
+      <Tile label="Jerseys retired" value={String(jerseys.length)} />
       <Tile
         label="Top rating"
         value={top && top.rating > 0 ? top.rating.toFixed(1) : "—"}
@@ -307,91 +217,16 @@ export function ManagersTable({ log }: { log: CareerLog }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Matchups                                                                    */
-/* -------------------------------------------------------------------------- */
+/*
+ * The matchup log used to be a nine-column table here. It is now the scores feed in
+ * `components/MatchupFeed.tsx` — two scores on the outside, the result in the middle.
+ */
 
-export function MatchupsTable({ log }: { log: CareerLog }) {
-  const games = gameLog(log);
-  const cols: SortCol[] = [
-    { key: "when", label: "Season" },
-    { key: "week", label: "Week", num: true },
-    { key: "team", label: "Your team" },
-    { key: "opp", label: "Opponent" },
-    { key: "cats", label: "Score", num: true },
-    { key: "oppCats", label: "Opp", num: true },
-    { key: "type", label: "Type" },
-    { key: "diff", label: "Diff", num: true },
-    { key: "result", label: "Result" },
-  ];
-  const rows: SortRow[] = games.map((g, i) => {
-    const d = g.scoreFor - g.scoreAgainst;
-    // A points week prints 1,643.0; a category week prints 9. Same column, different
-    // units — which is why the header says "Score" and the Type column names the format.
-    const fmt = (v: number) =>
-      g.scoring === "points" ? v.toFixed(1) : String(v);
-    /* A first-round playoff bye. ESPN files it as a 0-0 entry with no opponent, so every
-       score column here would otherwise print a zero that looks like a shutout. The row
-       stays — earning a bye is worth seeing — but as dashes. */
-    const bye = g.bye || g.result === "BYE";
-    return {
-      id: `${g.season}-${g.week}-${i}`,
-      cells: {
-        // Sorted on a composite so "newest first" holds ACROSS seasons — sorting on the
-        // week alone would interleave every season's week 1.
-        when: { sort: g.season * 100 + (g.week ?? 0), text: seasonLabel(g.season) },
-        week: {
-          sort: g.week ?? 0,
-          text: g.playoff ? `${g.week} (PO)` : String(g.week ?? "—"),
-        },
-        team: { sort: g.teamName, text: g.teamName },
-        opp: { sort: g.oppOwner, text: bye ? "—" : g.oppOwner },
-        cats: { sort: g.scoreFor, text: bye ? "—" : fmt(g.scoreFor) },
-        oppCats: { sort: g.scoreAgainst, text: bye ? "—" : fmt(g.scoreAgainst) },
-        type: {
-          sort: g.scoring,
-          text: bye ? "—" : g.scoring === "points" ? "Points" : "Cats",
-        },
-        diff: {
-          sort: d,
-          text: bye ? "—" : `${d > 0 ? "+" : ""}${fmt(d)}`,
-          color: bye ? undefined : d > 0 ? "var(--good)" : d < 0 ? "var(--bad)" : undefined,
-        },
-        result: {
-          sort: g.result,
-          text: bye ? "Bye" : g.result === "W" ? "Won" : g.result === "L" ? "Lost" : "Tied",
-          color:
-            bye ? "var(--ink-3)"
-              : g.result === "W" ? "var(--good)"
-                : g.result === "L" ? "var(--bad)"
-                  : undefined,
-        },
-      },
-    };
-  });
-  return <SortableTable cols={cols} rows={rows} defaultKey="when" defaultDesc />;
-}
-
-function Tile({
-  label,
-  value,
-  sub,
-  good,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  good?: boolean;
-}) {
+function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="metric">
       <div className="eyebrow">{label}</div>
-      <div
-        className="metric-value mono"
-        style={good ? { color: "var(--good)" } : undefined}
-      >
-        {value}
-      </div>
+      <div className="metric-value mono">{value}</div>
       {sub && <div className="metric-delta mono">{sub}</div>}
     </div>
   );

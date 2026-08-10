@@ -8,9 +8,6 @@ export default async function Page() {
   return (
     <>
       <h1>Player Value</h1>
-      <p className="caption">
-        Every rostered player and the top free agents, ranked by 9-cat value.
-      </p>
       <PlayerValueView league={slim} />
     </>
   );

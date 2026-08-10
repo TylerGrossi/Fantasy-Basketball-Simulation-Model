@@ -28,12 +28,20 @@ interface Split {
   games: PlayerGame[];
 }
 
-/** Rest buckets. Anything past two nights is one group — it stops mattering after that. */
+/**
+ * Rest buckets. Anything past two nights is one group — it stops mattering after that.
+ *
+ * Labels are DELIBERATELY SHORT. This column sets the table's width, and "Back-to-back"
+ * and "2+ nights off" made it the widest thing on the card, pushing the five stat columns
+ * into a sideways scroll. "B2B" is the standard shorthand; "1 day" and "2+ days" name the
+ * rest rather than the nights, which is shorter and the way schedules are actually
+ * discussed.
+ */
 function restLabel(rest: number | null): string | null {
   if (rest == null) return null;
-  if (rest === 0) return "Back-to-back";
-  if (rest === 1) return "1 night off";
-  return "2+ nights off";
+  if (rest === 0) return "B2B";
+  if (rest === 1) return "1 day";
+  return "2+ days";
 }
 
 export default function PlayerSplits({
@@ -71,9 +79,9 @@ export default function PlayerSplits({
     return [
       pick("Home", (g) => g.home),
       pick("Away", (g) => !g.home),
-      pick("Back-to-back", (g) => restLabel(g.rest) === "Back-to-back"),
-      pick("1 night off", (g) => restLabel(g.rest) === "1 night off"),
-      pick("2+ nights off", (g) => restLabel(g.rest) === "2+ nights off"),
+      pick("B2B", (g) => restLabel(g.rest) === "B2B"),
+      pick("1 day", (g) => restLabel(g.rest) === "1 day"),
+      pick("2+ days", (g) => restLabel(g.rest) === "2+ days"),
     ].filter((s) => s.games.length > 0);
   }, [games]);
 
@@ -83,7 +91,6 @@ export default function PlayerSplits({
     <section className="pd-sheet">
       <div className="pd-sheet-h">
         <h2>Splits</h2>
-        <span className="pd-sheet-n">value scored on the season pool</span>
       </div>
 
       {loading && <p className="pd-sheet-note">Loading…</p>}
@@ -124,9 +131,6 @@ function SplitTable({
               <th className="num">PTS</th>
               <th className="num">REB</th>
               <th className="num">AST</th>
-              <th className="num">STL</th>
-              <th className="num">BLK</th>
-              <th className="num">TO</th>
               <th className="num">Val</th>
             </tr>
           </thead>
@@ -145,9 +149,6 @@ function SplitTable({
                   <td className="num">{cell("PTS")}</td>
                   <td className="num">{cell("REB")}</td>
                   <td className="num">{cell("AST")}</td>
-                  <td className="num">{cell("STL")}</td>
-                  <td className="num">{cell("BLK")}</td>
-                  <td className="num">{cell("TO")}</td>
                   <td className="num pd-split-v">
                     {v >= 0 ? "+" : ""}
                     {v.toFixed(1)}

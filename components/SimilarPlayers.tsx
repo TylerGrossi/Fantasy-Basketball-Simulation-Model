@@ -21,8 +21,15 @@ import PlayerLink from "./PlayerLink";
  * and offering one as a replacement would be recommending noise.
  */
 
-/** How many neighbours to show. Ten fills the column beside the shape dial. */
-const N = 10;
+/**
+ * How many neighbours to show.
+ *
+ * Five, not ten. As a ten-column table the extra rows cost nothing to render and were
+ * skimmed past; as cards each one is a real block of the screen, and the fifth-closest
+ * comp is already a stretch — past that the shapes stop resembling each other enough for
+ * the answer to be useful.
+ */
+const N = 5;
 
 /** Distance in nine-category z-space. Plain Euclidean: every category counts once. */
 function distance(a: Record<string, number>, b: Record<string, number>): number {
@@ -64,46 +71,27 @@ export default function SimilarPlayers({
         <span className="pd-sheet-n">by category profile</span>
       </div>
 
-      <div className="table-scroll">
-        <table className="sheet sheet-tight">
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>Team</th>
-              <th className="num">Match</th>
-              <th className="num">Val</th>
-              <th className="num">PTS</th>
-              <th className="num">REB</th>
-              <th className="num">AST</th>
-              <th className="num">STL</th>
-              <th className="num">BLK</th>
-              <th className="num">3PM</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ p, d }) => (
-              <tr key={p.name}>
-                <td>
-                  <PlayerLink name={p.name} />
-                </td>
-                {/* Who holds him matters more than which NBA team he plays for: it is the
-                    difference between a waiver add and a trade you have to negotiate. */}
-                <td className="pd-sim-own">{p.owner === "FA" ? "Free Agent" : p.owner}</td>
-                <td className="num">{pct(d)}</td>
-                <td className="num pd-split-v">
-                  {p.value >= 0 ? "+" : ""}
-                  {p.value.toFixed(1)}
-                </td>
-                <td className="num">{p.PTS.toFixed(1)}</td>
-                <td className="num">{p.REB.toFixed(1)}</td>
-                <td className="num">{p.AST.toFixed(1)}</td>
-                <td className="num">{p.STL.toFixed(1)}</td>
-                <td className="num">{p.BLK.toFixed(1)}</td>
-                <td className="num">{p["3PM"].toFixed(1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/*
+        A card per neighbour, not a ten-column table.
+        The question this panel answers is "who else plays like him", and the answer is a
+        name and how close it is — the six category columns were the working, not the
+        result, and they are one tap away on that player's own card. Owner stays because
+        it decides what you can DO about it: a waiver add or a trade you have to negotiate.
+      */}
+      <div className="pd-sim-list">
+        {rows.map(({ p, d }) => (
+          <PlayerLink key={p.name} name={p.name} className="pd-sim-card">
+            <span className="pd-sim-who">
+              <span className="pd-sim-name">{p.name}</span>
+              <span className="pd-sim-meta">
+                {[p.nbaTeam, p.position].filter(Boolean).join(" · ")}
+                {" · "}
+                {p.owner === "FA" ? "Free Agent" : p.owner}
+              </span>
+            </span>
+            <span className="pd-sim-pct mono">{pct(d)}</span>
+          </PlayerLink>
+        ))}
       </div>
     </section>
   );

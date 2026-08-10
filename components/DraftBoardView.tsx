@@ -2,7 +2,10 @@
 
 import { useMemo, useState } from "react";
 import MultiSelect from "./MultiSelect";
+import FilterBar from "./FilterBar";
 import { POSITION_ORDER, headshotUrl, playerStatus } from "@/lib/playerPool";
+import PlayerLink from "./PlayerLink";
+import StatusBadge from "./StatusBadge";
 import {
   NINE_CAT,
   scoreProjections,
@@ -91,7 +94,7 @@ export default function DraftBoardView({
 
   return (
     <>
-      <div className="controls pv-filters">
+      <FilterBar className="controls pv-filters">
         <div className="ms pv-f-name">
           <div className="ms-label">Player name</div>
           <input
@@ -157,7 +160,7 @@ export default function DraftBoardView({
             ))}
           </select>
         </div>
-      </div>
+      </FilterBar>
 
       {punts.length > 0 && (
         <p className="dg-punt-note">
@@ -340,7 +343,7 @@ function BoardRow({
           />
           <span className="pv-rank">{r.rank}</span>
           <span className="pv-name">{r.name}</span>
-          {code && <span className={`pv-badge ${sev}`}>{code}</span>}
+          {code && <StatusBadge status={r.status} />}
           <span className="pv-meta dg-slots">{r.eligibleSlots.join("/") || r.position}</span>
           <EspnGap modelRank={r.rank} espnRank={r.espnRank} adp={r.adp} />
           <span className="dg-gp" title="Projected games played next season">
@@ -364,7 +367,11 @@ function BoardRow({
                 <div className="pv-shot pv-shot-blank" />
               )}
               <div className="pv-chead">
-                <div className="pv-cname">{r.name}</div>
+                {/* On the expanded card, not the <summary> row that opens it — see the
+                    same call in PlayerValueView. */}
+                <div className="pv-cname">
+                  <PlayerLink name={r.name} />
+                </div>
                 <div className="pv-csub">
                   <span className="pv-cmeta">
                     {[

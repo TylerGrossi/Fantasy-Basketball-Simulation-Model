@@ -8,18 +8,6 @@ const STATS = [
   "DD", "TW",
 ];
 
-/** Category leaders on your roster, and the unit each is counted in. */
-const LEADERS: Array<[string, string, string]> = [
-  ["PTS", "Points Leader", "pts"],
-  ["FGM", "FGM Leader", "fgm"],
-  ["REB", "Rebounds Leader", "reb"],
-  ["AST", "Assists Leader", "ast"],
-  ["STL", "Steals Leader", "stl"],
-  ["BLK", "Blocks Leader", "blk"],
-  ["3PM", "3PM Leader", "3pm"],
-  ["DD", "DD Leader", "dd"],
-];
-
 /**
  * Your roster, player by player: who carried which category, and every line behind it.
  *
@@ -54,42 +42,16 @@ export default async function Page() {
     return { name: p.name, gp: p.gp, stats };
   });
 
-  /** Highest total in a category, and what fraction of the team's output that is. */
-  const leaderIn = (stat: string) => {
-    let best: SeasonPlayer | null = null;
-    for (const p of players) {
-      if (!best || (p.stats[stat] ?? 0) > (best.stats[stat] ?? 0)) best = p;
-    }
-    if (!best || !(best.stats[stat] > 0)) return null;
-    const total = teamTotals[stat] ?? 0;
-    return {
-      name: best.name,
-      value: best.stats[stat],
-      share: total > 0 ? (best.stats[stat] / total) * 100 : null,
-    };
-  };
-
+  /*
+   * There is no separate "top contributors" block. It was a grid of KPI cards, one per
+   * category, and it restated what the table below it already held — eight cards carrying
+   * three names, since the same two players led most categories. The table marks its own
+   * column leaders in bold instead (see SeasonStatsView), the way a reference table has
+   * always done it: one place to look, and it follows the sort and unit toggles for free.
+   */
   return (
     <>
       <h1>Season Stats</h1>
-
-      <h2>Top contributors</h2>
-      <div className="leader-grid">
-        {LEADERS.map(([stat, label, unit]) => {
-          const l = leaderIn(stat);
-          if (!l) return null;
-          return (
-            <div className="leader" key={stat}>
-              <div className="eyebrow">{label}</div>
-              <div className="leader-name">{l.name}</div>
-              <div className="leader-detail mono">
-                {Math.round(l.value).toLocaleString("en-US")} {unit}
-                {l.share !== null && ` (${l.share.toFixed(1)}%)`}
-              </div>
-            </div>
-          );
-        })}
-      </div>
 
       <h2>Player contributions</h2>
       <SeasonStatsView players={players} teamTotals={teamTotals} />

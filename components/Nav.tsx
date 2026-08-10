@@ -5,12 +5,17 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   WEEK_PAGES,
+  indexHref,
   isActive,
+  isIndexed,
+  labelForPath,
   navFor,
+  pageLabelFor,
   sectionFor,
   type NavEntry,
+  type SectionKey,
 } from "@/lib/nav";
-import { ChevronIcon, SECTION_ICONS, SettingsIcon } from "./Icons";
+import { ChevronIcon, ChevronLeftIcon, SECTION_ICONS, SettingsIcon } from "./Icons";
 
 /**
  * Navigation. Desktop and mobile intentionally differ — carried over from the Streamlit
@@ -19,11 +24,19 @@ import { ChevronIcon, SECTION_ICONS, SettingsIcon } from "./Icons";
  *  - DESKTOP: one flat header row — brand (= Home), a text link per page, Stats/Tools
  *    dropdowns, and the Settings gear at the right. No icons on the links; icons are a
  *    mobile pattern.
- *  - MOBILE: no top header at all. A fixed bottom icon bar (one per section), a labelled
- *    sub-row for the section's pages, and the This Week rail as a sub-bar at the top.
+ *  - MOBILE: no top header. A fixed bottom icon bar (one per section), and INDEX-AND-DRILL
+ *    above it — This Week / Season / Tools open a contents screen (`/browse/<key>`,
+ *    SectionIndex.tsx) and a page opens from there under a back row naming its index.
  *
- * Both are rendered and shown/hidden by CSS breakpoint, so there is no width detection
- * and no flash of the wrong layout.
+ * The back row REPLACED a fixed strip of text links that scrolled sideways. On Season it
+ * carried twelve items and showed about five, so History's last three pages could only be
+ * reached by a swipe with no cue that there was anything to swipe to. It also cost 56px
+ * of every screen on every page in the section, and changed length between sections, so
+ * the top of the screen never became a landmark. The index shows all twelve at once, with
+ * a figure on each; the back row costs 40px and only appears one level down.
+ *
+ * Both layouts are rendered and shown/hidden by CSS breakpoint, so there is no width
+ * detection and no flash of the wrong layout.
  *
  * `seasonOver` comes from the export via the layout rather than being read here: the
  * links have to be right in the FIRST paint (a header that drops an item after hydration
@@ -38,16 +51,83 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
   const section = sectionFor(pathname);
   const activeSection = sections.find((s) => s.key === section);
   /*
-   * The section's pages, as the mobile sub-row.
+   * The mobile back row: shown one level DOWN from an index, never on the index itself
+   * and never in Home or Agent, which have none.
    *
-   * "week" used to be excluded because This Week had its own rail. That rail no longer
-   * renders, which left the five This Week pages with NO navigation between them on a
-   * phone: the bottom bar drops you on Scoreboard and Matchup, Streamers, Bench and
-   * Roster became unreachable. They use the same sub-row as Season and Tools now —
-   * the pattern the app already has, rather than bringing the rail back.
+   * The label comes from the unfiltered lookup in lib/nav.ts, so a page that is hidden
+   * from the menus (a bookmark to /playoffs in the offseason, /lineup on a phone) still
+   * gets a named back row rather than a bare chevron.
    */
-  const subPages =
-    activeSection && activeSection.pages.length > 1 ? activeSection.pages : null;
+  const onIndex = isIndexed(section) && pathname === indexHref(section);
+  /*
+   * WHERE YOU CAME FROM, so back means back.
+   *
+   * The row used to always point at the section index, which is right when you drilled in
+   * from there and wrong the moment you didn't: tapping a player in the Season Stats table
+   * opens the Player Card, which lives in Tools, and "back" then threw you into the Tools
+   * index — a screen you had never seen, with no way to return to the table you were
+   * reading. Player names are linked from a dozen tables, so this was the common path.
+   *
+   * Recorded in an effect rather than read from history, because the browser's history
+   * entry cannot tell us the LABEL, and a back row that says where it goes is the whole
+   * point. On a cold load (a shared link, a refresh) there is no previous page and it
+   * falls back to the section index, which is the right answer when nothing preceded it.
+   */
+  const prevRef = useRef<string | null>(null);
+  const stackRef = useRef<string[]>([]);
+  const [prev, setPrev] = useState<{ href: string; label: string } | null>(null);
+  useEffect(() => {
+    const from = prevRef.current;
+    prevRef.current = pathname;
+    if (!from || from === pathname) return;
+    /*
+     * A STACK, not just "the last page" — that was a loop.
+     *
+     * Remembering only where you came from is symmetric, so Compare → Player Card set
+     * back to Compare, and following it set back to the Player Card: the two pages
+     * pointed at each other and there was no way out of the pair. Popping on a return
+     * makes going back UNWIND, so Compare → Player Card → back lands on Compare with the
+     * stack empty again, and the next back falls through to the section index.
+     */
+    const stack = stackRef.current;
+    if (stack.length && stack[stack.length - 1] === pathname) stack.pop();
+    else stack.push(from);
+
+    const top = stack[stack.length - 1];
+    const label = top ? labelForPath(top) : null;
+    setPrev(top && label ? { href: top, label } : null);
+  }, [pathname]);
+
+  /*
+   * WHERE YOU LEFT EACH TAB.
+   *
+   * Switching to Tools, reading a player card, then going to Season and back to Tools
+   * dropped you on the Tools index again — the app forgot the screen you were on the
+   * moment you glanced at something else. Each section now remembers its last page, so a
+   * tab returns you to it, the way every native tab bar behaves.
+   *
+   * Tapping the tab you are ALREADY on still goes to its index. That is the escape hatch:
+   * without it there would be no way back to the index from a page four taps deep, since
+   * the tab would just re-open the page you are looking at.
+   *
+   * State, not a ref, because the bar's hrefs have to re-render when it changes — a ref
+   * would keep pointing at wherever you were when the bar last painted. Deliberately NOT
+   * persisted: on a cold load every tab opens on its index, which is the right default
+   * for a session that has no history yet.
+   */
+  const [lastSeen, setLastSeen] = useState<Partial<Record<SectionKey, string>>>({});
+  useEffect(() => {
+    setLastSeen((prev) => (prev[section] === pathname ? prev : { ...prev, [section]: pathname }));
+  }, [pathname, section]);
+
+  const back =
+    isIndexed(section) && !onIndex && activeSection
+      ? {
+          href: prev?.href ?? indexHref(section),
+          label: prev?.label ?? activeSection.label,
+          here: pageLabelFor(pathname),
+        }
+      : null;
 
   return (
     <>
@@ -118,19 +198,19 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
         </div>
       </nav>
 
-      {/* Mobile section sub-row (Season / Tools). This Week uses the rail instead. */}
-      {subPages && (
-        <nav className="sub-row" aria-label={activeSection?.label}>
-          {subPages.map((p) => (
-            <Link
-              key={p.href}
-              href={p.href}
-              className="sub-link"
-              aria-current={pathname === p.href ? "page" : undefined}
-            >
-              {p.label}
-            </Link>
-          ))}
+      {/*
+        Mobile back row. Sticky rather than fixed: it has to stay reachable on a long
+        page, but it is part of the document, so it takes its 40px out of the flow once
+        instead of being an offset every page's padding has to be told about — which is
+        exactly the coupling the old fixed sub-row created (`body:has(.sub-row) .page`).
+      */}
+      {back && (
+        <nav className="crumb" aria-label="Back">
+          <Link href={back.href} className="crumb-back">
+            <ChevronLeftIcon size={13} />
+            {back.label}
+          </Link>
+          {back.here && <span className="crumb-here">{back.here}</span>}
         </nav>
       )}
 
@@ -138,10 +218,12 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
       <nav className="bottom-nav" aria-label="Sections">
         {sections.map((s) => {
           const Icon = SECTION_ICONS[s.key];
+          // The tab you are on resets to its index; every other tab resumes.
+          const href = s.key === section ? s.landing : (lastSeen[s.key] ?? s.landing);
           return (
             <Link
               key={s.key}
-              href={s.landing}
+              href={href}
               className="bottom-link"
               aria-current={section === s.key ? "page" : undefined}
             >

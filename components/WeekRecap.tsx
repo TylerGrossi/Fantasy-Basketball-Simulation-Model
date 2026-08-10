@@ -139,8 +139,16 @@ export function buildWeekRecap({
         </div>
       </div>
 
-      {/* Directly under the board: these are per-side facts about the same scoreline,
-          so they belong with it rather than after the category detail. */}
+      <CategorySheet
+        league={league}
+        youName={name(teamId)}
+        oppName={name(oppId)}
+        youVec={you}
+        oppVec={opp}
+      />
+
+      {/* Under the sheet, matching Scoreboard.tsx — a footnote about how the week was
+          managed, after the categories rather than between them and the score. */}
       <AcquisitionLine
         youName={name(teamId)}
         oppName={name(oppId)}
@@ -148,14 +156,6 @@ export function buildWeekRecap({
         oppAcq={oppAcq}
         youGp={gp(teamId)}
         oppGp={gp(oppId)}
-      />
-
-      <CategorySheet
-        league={league}
-        youName={name(teamId)}
-        oppName={name(oppId)}
-        youVec={you}
-        oppVec={opp}
       />
       </div>
     </>

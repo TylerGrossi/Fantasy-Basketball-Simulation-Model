@@ -102,8 +102,21 @@ export default function Scoreboard({
         </div>
       </div>
 
-      {/* Directly under the board: these are per-side facts about the same scoreline,
-          so they belong with it rather than after the category detail. */}
+      <CategorySheet
+        league={league}
+        youName={youName}
+        oppName={oppName}
+        youVec={live.you}
+        oppVec={live.opp}
+      />
+
+      {/*
+        Acquisitions and games played sit UNDER the category sheet.
+        They used to sit directly beneath the board, which put two lines of secondary
+        detail between the score and the categories — the thing you opened the page for.
+        They are a footnote about how the week was managed, not part of the scoreline, and
+        a footnote belongs after the thing it annotates.
+      */}
       <AcquisitionLine
         youName={youName}
         oppName={oppName}
@@ -111,14 +124,6 @@ export default function Scoreboard({
         oppAcq={oppAcq}
         youGp={youGp}
         oppGp={oppGp}
-      />
-
-      <CategorySheet
-        league={league}
-        youName={youName}
-        oppName={oppName}
-        youVec={live.you}
-        oppVec={live.opp}
       />
 
     </div>

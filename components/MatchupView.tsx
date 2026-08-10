@@ -34,6 +34,16 @@ interface Props {
   forecast?: Forecast | null;
   youName: string;
   oppName: string;
+  /**
+   * Team abbreviations, for the FINAL TOTALS table's two value columns.
+   *
+   * Full names are right in the header block above, where they identify the two teams and
+   * have the width to do it. In the table they are column labels over a number, and
+   * "Hustle and Hart" as a heading forces the five-column table wider than a phone —
+   * "HAH" says the same thing to anyone reading their own league's scoreboard.
+   */
+  youAbbrev?: string;
+  oppAbbrev?: string;
 }
 
 const RATIO_PAIRS: Record<string, [string, string]> = {
@@ -51,6 +61,8 @@ export default function MatchupView({
   simulated = false,
   youName,
   oppName,
+  youAbbrev,
+  oppAbbrev,
   forecast = null,
 }: Props) {
   const you = isHome ? matchup.home : matchup.away;
@@ -94,6 +106,8 @@ export default function MatchupView({
         league={league}
         youName={youName}
         oppName={oppName}
+        youAbbrev={youAbbrev}
+        oppAbbrev={oppAbbrev}
         youVec={live.you}
         oppVec={live.opp}
         forecast={forecast}
@@ -166,6 +180,8 @@ function Recap({
   league,
   youName,
   oppName,
+  youAbbrev,
+  oppAbbrev,
   youVec,
   oppVec,
   badge,
@@ -174,6 +190,8 @@ function Recap({
   league: LeagueData;
   youName: string;
   oppName: string;
+  youAbbrev?: string;
+  oppAbbrev?: string;
   youVec: number[];
   oppVec: number[];
   badge: ReactNode;
@@ -245,8 +263,8 @@ function Recap({
           <thead>
             <tr>
               <th>Category</th>
-              <th className="num">{youName}</th>
-              <th className="num">{oppName}</th>
+              <th className="num">{youAbbrev || youName}</th>
+              <th className="num">{oppAbbrev || oppName}</th>
               <th className="num">Margin</th>
               <th>Result</th>
             </tr>

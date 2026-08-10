@@ -44,6 +44,11 @@ export default async function Page({
 
   // Only what this page's client component needs — see trimLeague.
   const slim = trimLeague(league, { matchupTeamId: me.id });
+  // Same helper the scoreboard page uses: the team's own abbrev, or the first few letters
+  // of its name when ESPN has none.
+  const byId = new Map(league.teams.map((t) => [t.id, t]));
+  const abbrev = (id: number) =>
+    byId.get(id)?.abbrev || byId.get(id)?.name.slice(0, 4) || "";
   const matchup = override ? phasedMatchup(league, r.matchup, override) : r.matchup;
   // The real state of the week, which moves pre -> mid -> final on its own as games
   // are played. Nothing selects it; it is read off the matchup.
@@ -51,15 +56,10 @@ export default async function Page({
   return (
     <>
       <h1>Matchup</h1>
-      <p className="caption">
-        {override
-          ? "A simulated in-progress week, so the live views can be seen out of season."
-          : phase === "post"
-            ? "Final result — how the matchup finished, category by category."
-            : phase === "pre"
-              ? `Period ${league.period} has not tipped off — every game is still ahead.`
-              : `Projected to the end of period ${league.period}.`}
-      </p>
+      {/* The phase caption was removed: the panels below state the week's state
+          themselves, and on a phone it was a line of prose between the title and the
+          number you came for. PhaseBanner still calls out the dev-only simulated week,
+          which is the one case nothing else on the page announces. */}
       <PhaseBanner phase={override} />
       <MatchupView
         live={!demo && !override}
@@ -70,6 +70,11 @@ export default async function Page({
         teamId={me.id}
         youName={r.youName}
         oppName={r.oppName}
+        // Abbreviations for the Final totals table's column headers — see the prop's note
+        // in MatchupView. Falls back to a name slice when a team has no abbrev set, so the
+        // column always has a short label rather than an empty one.
+        youAbbrev={abbrev(me.id)}
+        oppAbbrev={abbrev(r.oppId)}
         forecast={forecast}
       />
     </>

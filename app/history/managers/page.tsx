@@ -4,10 +4,7 @@ import { ManagerRangeChart } from "@/components/HistoryCharts";
 
 export default function Page() {
   return (
-    <HistoryShell
-      title="Managers"
-      intro="Everyone you've shared a league with, across all of them, ranked by titles then win %."
-    >
+    <HistoryShell title="Managers">
       {(log) => (
         <>
           <ManagersTable log={log} />

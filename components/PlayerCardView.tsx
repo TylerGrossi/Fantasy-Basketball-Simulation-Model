@@ -340,8 +340,17 @@ function PlayerDetail({
               "2025-26", not ESPN's seasonId of 2026 — a basketball season spans two years,
               and every other page in the app labels it that way.
             */}
+            {/*
+              On a phone the heading is "Season Average Percentiles". The full sentence
+              wrapped to two lines above a chart that is itself only a few lines tall, and
+              the year is already stated at the top of the card — so the mobile spelling
+              drops the year and the word "League" and keeps the part that names the
+              control: the window picker stays in the heading at every width.
+            */}
             <h2 className="pd-rank-h">
-              {season - 1}-{String(season % 100).padStart(2, "0")}{" "}
+              <span className="pd-rank-yr">
+                {season - 1}-{String(season % 100).padStart(2, "0")}{" "}
+              </span>
               {available.length > 1 ? (
                 <select
                   className="pd-rank-sel"
@@ -358,7 +367,8 @@ function PlayerDetail({
               ) : (
                 BASIS_LABEL[active]
               )}{" "}
-              League Percentile Rankings
+              <span className="pd-rank-full">League Percentile Rankings</span>
+              <span className="pd-rank-short">Percentiles</span>
             </h2>
           </div>
 

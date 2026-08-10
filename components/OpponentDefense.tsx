@@ -24,9 +24,12 @@ import { useTeamDefense } from "@/lib/teamDefense";
  */
 
 const TIERS = [
-  { key: "top", label: "Top 10 defenses", lo: 1, hi: 10 },
+  // "defenses" is dropped: the column is headed Tier and the panel is headed Opponent
+  // Defense, so the word appeared three times on one small table — and it was what made
+  // this the widest column.
+  { key: "top", label: "Top 10", lo: 1, hi: 10 },
   { key: "mid", label: "Middle 10", lo: 11, hi: 20 },
-  { key: "bot", label: "Bottom 10 defenses", lo: 21, hi: 30 },
+  { key: "bot", label: "Bottom 10", lo: 21, hi: 30 },
 ] as const;
 
 export default function OpponentDefense({
@@ -61,7 +64,6 @@ export default function OpponentDefense({
     <section className="pd-sheet">
       <div className="pd-sheet-h">
         <h2>By Opponent Defense</h2>
-        <span className="pd-sheet-n">teams ranked by points allowed</span>
       </div>
 
       {(loading || !defense) && <p className="pd-sheet-note">Loading…</p>}
@@ -75,14 +77,11 @@ export default function OpponentDefense({
             <table className="sheet sheet-tight">
               <thead>
                 <tr>
-                  <th>Opponent tier</th>
+                  <th>Tier</th>
                   <th className="num">GP</th>
                   <th className="num">PTS</th>
                   <th className="num">REB</th>
                   <th className="num">AST</th>
-                  <th className="num">STL</th>
-                  <th className="num">BLK</th>
-                  <th className="num">TO</th>
                   <th className="num">Val</th>
                 </tr>
               </thead>
@@ -99,9 +98,6 @@ export default function OpponentDefense({
                       <td className="num">{c("PTS")}</td>
                       <td className="num">{c("REB")}</td>
                       <td className="num">{c("AST")}</td>
-                      <td className="num">{c("STL")}</td>
-                      <td className="num">{c("BLK")}</td>
-                      <td className="num">{c("TO")}</td>
                       <td className="num pd-split-v">
                         {v >= 0 ? "+" : ""}
                         {v.toFixed(1)}
@@ -112,48 +108,19 @@ export default function OpponentDefense({
               </tbody>
             </table>
           </div>
-          <p className="pd-shape-note">
-            <Gap rows={rows} value={value} />
-            {unmatched > 0 && ` ${unmatched} game${unmatched === 1 ? "" : "s"} against a team the ratings did not cover.`}
-          </p>
+          {/* The "against the ten stingiest… a gap of N" sentence used to sit here. The
+              three tiers are the comparison and the table already prints them; the
+              sentence restated two of its own rows in prose. Only the uncovered-games
+              caveat remains, because nothing else on the panel says it. */}
+          {unmatched > 0 && (
+            <p className="pd-shape-note">
+              {unmatched} game{unmatched === 1 ? "" : "s"} against a team the ratings did
+              not cover.
+            </p>
+          )}
         </>
       )}
     </section>
   );
 }
 
-/** The one sentence the table is read for: how much the level of opposition moved him. */
-function Gap({
-  rows,
-  value,
-}: {
-  rows: Array<{ key: string; games: PlayerGame[] }>;
-  value: ReturnType<typeof makeValuer>;
-}) {
-  const val = (key: string) => {
-    const r = rows.find((x) => x.key === key);
-    if (!r) return null;
-    const { off, def } = value(averageLine(r.games));
-    return off + def;
-  };
-  const top = val("top");
-  const bot = val("bot");
-  if (top == null || bot == null) return null;
-  const gap = bot - top;
-  return (
-    <>
-      Against the ten stingiest defences he was{" "}
-      <strong>
-        {top >= 0 ? "+" : ""}
-        {top.toFixed(1)}
-      </strong>
-      , against the ten softest{" "}
-      <strong>
-        {bot >= 0 ? "+" : ""}
-        {bot.toFixed(1)}
-      </strong>{" "}
-      — a gap of {Math.abs(gap).toFixed(1)}
-      {Math.abs(gap) < 1.5 ? ", which is nothing: he showed up either way." : "."}
-    </>
-  );
-}

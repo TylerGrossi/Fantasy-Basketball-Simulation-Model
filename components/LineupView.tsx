@@ -3,6 +3,8 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { categoryValue, formatValue } from "@/lib/league";
 import { headshotUrl, playerStatus } from "@/lib/playerPool";
+import PlayerLink from "./PlayerLink";
+import StatusBadge from "./StatusBadge";
 
 export interface LineupPlayer {
   name: string;
@@ -605,7 +607,7 @@ function SlotRow({
               <span className="lu-name-n">{player.name}</span>
               <span className="lu-name-sub">
                 {player.nbaTeam} · {positionLabel(player)}
-                {code && <span className={`pv-badge ${sev}`}>{code}</span>}
+                {code && <StatusBadge status={player.status} />}
               </span>
             </span>
           </span>
@@ -691,8 +693,15 @@ function DetailTable({
           <tbody>
             {players.map((p) => (
               <tr key={p.name} className={p.injured ? "row-muted" : undefined}>
+                {/*
+                  The stat table's name links; the name on the DRAGGABLE card above does
+                  not. That card is a drag handle — a link inside it competes with the
+                  drag for the same press, and on a touch screen the two are the same
+                  gesture until you have already moved. This table is the safe place to
+                  reach a player's card from the lineup board.
+                */}
                 <td className="lu-name">
-                  {p.name}
+                  <PlayerLink name={p.name} />
                   {p.injured && <span className="tag">{p.status || "OUT"}</span>}
                 </td>
                 <td className="lu-pos">{positionLabel(p)}</td>

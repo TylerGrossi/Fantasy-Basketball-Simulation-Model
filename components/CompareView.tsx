@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
-import GameLog from "./GameLog";
 import PlayerSearch from "./PlayerSearch";
 import { headshotUrl, playerStatus } from "@/lib/playerPool";
 import PlayerLink from "./PlayerLink";
+import StatusBadge from "./StatusBadge";
 
 /**
  * Head-to-head of any two players: 9-cat Value plus the season per-game line, each row a
@@ -121,14 +121,11 @@ function Comparison({ a, b }: { a: PoolPlayer; b: PoolPlayer }) {
         })}
       </div>
 
-      <div className="pv-cmp-logs">
-        <div className="pv-cmp-log">
-          <GameLog key={a.playerId ?? a.name} playerId={a.playerId} compact />
-        </div>
-        <div className="pv-cmp-log">
-          <GameLog key={b.playerId ?? b.name} playerId={b.playerId} compact />
-        </div>
-      </div>
+      {/* The two "last 10 games" logs used to sit here. They now live on the Player Card,
+          which is one tap from either name above — and side by side on a phone they were
+          two five-column tables in half a screen each, which is the least readable place
+          in the app to put a game log. Compare is for the head-to-head; the detail on one
+          player belongs on that player's page. */}
     </div>
   );
 }
@@ -150,7 +147,7 @@ function CompareHeader({ p }: { p: PoolPlayer }) {
           {[p.nbaTeam, p.position].filter(Boolean).join(" · ")}
         </span>
         <span className="pv-badges">
-          {code && <span className={`pv-badge ${sev}`}>{code}</span>}
+          {code && <StatusBadge status={p.status} />}
           {isFa && <span className="pv-fa">FA</span>}
         </span>
       </div>

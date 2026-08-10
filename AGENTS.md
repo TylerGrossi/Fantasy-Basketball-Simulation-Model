@@ -109,8 +109,27 @@ engine + cross-language tests, and **nine pages** — Scoreboard, Matchup, Roste
 Streamers, Bench, Season, Schedule, Rankings, Playoffs.
 
 **Feature parity reached** at 18 routes — plus the desktop header (with Stats/Tools
-dropdowns) and the full mobile pattern (no header; bottom icon bar + section sub-row +
-This Week top sub-bar). The Agent chat page was the last gap.
+dropdowns) and the full mobile pattern. The Agent chat page was the last gap.
+
+**Mobile navigation is INDEX-AND-DRILL** (rebuilt 2026-08-09; the market research and the
+three rejected alternatives are in the study artifact). No top header. A fixed bottom icon
+bar of five sections, and This Week / Season / Tools open a **contents screen** —
+`/browse/[section]` (`app/browse`, `components/SectionIndex.tsx`) — where every row names a
+page, says what it answers, and carries the figure that page exists to report ("Rankings ·
+#1 · no change"). A page opens from there under a sticky 45px back row (`.crumb` in
+Nav.tsx) naming its index. **Home and Agent are unchanged**: Home already is an index (the
+tile grid) and Agent is one page.
+
+What this replaced, so it does not come back: a fixed strip of text links across the top,
+`overflow-x: auto`. It carried **twelve items on Season and showed about five**, so
+History's last three pages needed a swipe nothing prompted; it cost 56px of every screen in
+the section; and it was fixed, so every page's top padding had to know about it
+(`body:has(.sub-row) .page`). The index shows all twelve at once. The desktop header is
+untouched — `flat` in `lib/nav.ts` still drives it, and only `sections` changed.
+
+Two consequences worth knowing: `Section.landing` for those three is now their INDEX, not a
+chosen first page (so the old "chase the first surviving page" rule is gone), and
+`SEASON_PAGES` sets `group: "History"` instead of prefixing five labels with `"History: "`.
 
 **Now at 23 routes**, i.e. ahead of the Streamlit app. Added since parity: Lineup, Cheat
 Sheets, League Rosters, Recent Moves, Draft Guide. Four are not in every menu and all four
@@ -128,6 +147,14 @@ from the menus never means disabled: every one still renders at its URL.
 `FREEAGENCY`. Mapping only the obvious names silently blanked 45 of 142 rostered players.
 `acquisition_label()` in `build_data.py` title-cases anything unrecognised instead of
 dropping it, so the next unknown code shows up as itself rather than vanishing.
+
+**`PoolPlayer.owner` has the same shape of trap, and its own doc comment is wrong about
+it.** The comment says a free agent carries `""` or `"Waivers"`; this export writes
+**`"FA"`**. Excluding the documented markers counted all 289 pool players as rostered
+(the Season index read "289 rostered" under ten teams of thirteen). **Count by matching a
+team name from `league.teams`, never by excluding a free-agent marker** — an allowlist
+built from the same export cannot go stale when ESPN invents a new code. Correct answer
+is 142.
 
 **~290 per-athlete requests is affordable.** The old assumption that per-player fan-out
 was too expensive for the pipeline is false: `fetch_player_history` fetches all 289 in
@@ -186,11 +213,14 @@ reason the Player Value cards only MOUNT their body once the row is opened; rend
 
 **The nav is SEASONAL.** `navFor(seasonOver)` in `lib/nav.ts` drops every href in
 `IN_SEASON_ONLY` (currently `/playoffs`) from the desktop dropdowns and the mobile
-sub-row once the season is over, and Home swaps its fourth card from Playoff Odds to
+indexes once the season is over, and Home swaps its fourth card from Playoff Odds to
 Power Rankings — a forecast page has nothing to forecast in July, and a permanent link to
 one is how a 50/50 number gets read as a verdict on a finished bracket. The **route stays
-reachable**, and `sectionFor` deliberately still uses the UNFILTERED sections so a direct
-visit to /playoffs in the offseason keeps its Tools sub-row. `seasonOver` reaches the
+reachable**, and `sectionFor` / `pageLabelFor` deliberately still use the UNFILTERED
+sections so a direct visit to /playoffs in the offseason still gets a named back row
+pointing at its section index. The same rule governs the index FIGURES: the This Week
+index shows the model's win probability while there are games left and the RESULT once
+the week is final, rather than a 100% that restates the row above it. `seasonOver` reaches the
 client `Nav` as a **boolean prop from the root layout** (`app/layout.tsx` is now `async`
 and calls `loadLeague`) — never the league object, which would land in the payload of
 every page. The statically prerendered pages bake the flag in at build time, so

@@ -171,6 +171,29 @@ function s_len(log: CareerLog) {
 /* Head-to-head, managers, and the game log                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The same person under a different ESPN owner string, mapped to one name.
+ *
+ * ESPN writes the owner field from the team's CO-OWNERS, so a season where a manager
+ * added a second owner comes back as both names run together. "Matt Taj Greg Goldberg" is
+ * the season Matt co-owned with Greg; left alone it made a second manager who happened to
+ * have played one season, sitting in the table below the same person's other three.
+ *
+ * Deliberately an explicit map and not a heuristic. "Does one name start with another"
+ * would merge genuinely different managers the moment two share a first and last name,
+ * and there is no rule that recovers "which of these two people is the continuing owner"
+ * from the string — that is league knowledge. Add a line when it happens again.
+ */
+const OWNER_ALIASES: Record<string, string> = {
+  "Matt Taj Greg Goldberg": "Matt Taj",
+};
+
+/** One canonical name per person, for every table that groups by manager. */
+export function canonicalOwner(name: string | undefined): string {
+  const raw = String(name ?? "").trim();
+  return OWNER_ALIASES[raw] ?? raw;
+}
+
 export interface CareerMatchup {
   week: number;
   playoff: boolean;
@@ -252,14 +275,16 @@ export function headToHead(log: CareerLog): HeadToHead[] {
   for (const s of log.seasons) {
     for (const m of s.matchups ?? []) {
       if (m.bye || m.oppTeamId == null) continue; // a bye is not an opponent
-      let h = by.get(m.oppOwner);
+      // Canonical, so a co-owned season folds into that manager's own row.
+      const oppOwner = canonicalOwner(m.oppOwner);
+      let h = by.get(oppOwner);
       if (!h) {
         h = {
-          owner: m.oppOwner, teams: [], wins: 0, losses: 0, ties: 0, winPct: 0,
+          owner: oppOwner, teams: [], wins: 0, losses: 0, ties: 0, winPct: 0,
           playoffW: 0, playoffL: 0, avgFor: 0, avgAgainst: 0, best: 0, diff: 0,
           closest: Number.POSITIVE_INFINITY, meetings: 0, scored: 0, _teams: new Set(),
         };
-        by.set(m.oppOwner, h);
+        by.set(oppOwner, h);
       }
       h._teams.add(m.oppTeam);
       h.meetings++;
@@ -327,14 +352,15 @@ export function managerTable(log: CareerLog, meName?: string): ManagerRow[] {
   const by = new Map<string, ManagerRow & { _finishes: number[] }>();
   for (const s of log.seasons) {
     for (const t of s.standings ?? []) {
-      let m = by.get(t.owner);
+      const owner = canonicalOwner(t.owner);
+      let m = by.get(owner);
       if (!m) {
         m = {
-          owner: t.owner, seasons: 0, avgFinish: 0, bestFinish: 0, worstFinish: 0,
+          owner, seasons: 0, avgFinish: 0, bestFinish: 0, worstFinish: 0,
           titles: 0, wins: 0, losses: 0, ties: 0, winPct: 0,
           isYou: false, _finishes: [],
         };
-        by.set(t.owner, m);
+        by.set(owner, m);
       }
       m.seasons++;
       m.wins += t.record[0] ?? 0;
@@ -393,7 +419,7 @@ export function gameLog(log: CareerLog) {
 export function myOwnerName(log: CareerLog): string | undefined {
   for (const s of log.seasons) {
     const mine = (s.standings ?? []).find((t) => t.teamId === s.teamId);
-    if (mine) return mine.owner;
+    if (mine) return canonicalOwner(mine.owner);
   }
   return undefined;
 }
@@ -422,8 +448,14 @@ export interface HallOfFamer extends CareerPlayer {
 const SEASON_DAYS = 165;
 /** NBA games in a season — the unit `volume` is expressed in. */
 const GAMES_PER_SEASON = 82;
-/** Below this many career games a rating is noise, so the player is listed but unrated. */
-const RATE_MIN_GP = 15;
+/**
+ * Below this many career games a rating is noise, so the player is listed but unrated.
+ *
+ * Exported because the players table needs the SAME floor to decide who may lead a
+ * per-game column: a two-game streamer who went for 30 is not the career scoring leader,
+ * for exactly the reason he is not rated. One threshold, one meaning.
+ */
+export const RATE_MIN_GP = 15;
 /** Games needed to help SET the baseline — a 3-game cameo must not widen the spread. */
 const BASELINE_MIN_GP = 40;
 /** Roughly replacement level in z-sum terms; shifts the scale so 0 means "waiver fodder". */

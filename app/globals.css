@@ -177,9 +177,9 @@ body {
    no width detection, no flash of the wrong one. Breakpoint is 767px: an iPad in portrait
    (768) gets the desktop treatment.
 
-     desktop  : one flat sticky header + a left "This Week" rail on week pages
-     mobile   : NO header. Fixed bottom icon bar + a section sub-row, and the This Week
-                rail becomes a sub-bar pinned to the top.
+     desktop  : one flat sticky header, with dropdowns for the grouped sections
+     mobile   : NO header. Fixed bottom icon bar + index-and-drill — a section icon opens
+                a contents screen, a page opens from there under a sticky back row.
    ============================================================ */
 
 .nav {
@@ -374,44 +374,12 @@ body {
 .nav-menu-item:hover { background: var(--surface-2); color: var(--ink); }
 .nav-menu-item[aria-current="page"] { color: var(--ink); font-weight: 700; }
 
-/* -------- "This Week" rail: desktop left rail -------- */
-.week-rail {
-  position: fixed;
-  top: var(--nav-h);
-  left: 0;
-  bottom: 0;
-  width: 230px;
-  padding: 1.2rem 0.9rem;
-  background: var(--surface-2);
-  border-right: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  z-index: 90;
-}
-.week-rail-label { margin-bottom: 0.5rem; padding-left: 0.7rem; }
-.week-link {
-  display: block;
-  padding: 0.5rem 0.7rem;
-  border-radius: 6px;
-  color: var(--ink-2);
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 0.9rem;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.week-link:hover { background: var(--cobalt-soft); color: var(--ink); }
-.week-link:active,
-.week-link[aria-current="page"] {
-  background: var(--cobalt-soft);
-  color: var(--ink);
-  box-shadow: inset 3px 0 0 var(--cobalt);
-}
-/* Page content shifts right to clear the rail — only when the rail is present. */
-body:has(.week-rail) .page { padding-left: calc(230px + var(--page-pad)); }
+/* The "This Week" left rail (`.week-rail` / `.week-link`) used to live here. Nothing has
+   rendered it since the This Week pages moved onto the shared section navigation, and it
+   was removed with the mobile sub-row it was the desktop half of. */
 
 /* -------- mobile-only chrome, hidden on desktop -------- */
-.sub-row,
+.crumb,
 .bottom-nav { display: none; }
 
 /* ---------------------------------------------------------------- typography */
@@ -868,66 +836,6 @@ table.sheet.tape th:first-child { width: 1%; }
   margin-top: 0.15rem;
 }
 
-/* ---- Season Stats: category leaders ---------------------------------------
-   Eight tiles read as one block at 4-up, and stay legible at 2-up on a phone
-   rather than stacking into eight full-width cards that bury the table. */
-.leader-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.7rem;
-  margin: 0.6rem 0 1.4rem;
-}
-.leader {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.7rem 0.85rem;
-  min-width: 0;
-}
-.leader-name {
-  font-weight: 700;
-  font-size: 1.05rem;
-  margin-top: 0.2rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.leader-detail {
-  font-size: 0.8rem;
-  color: var(--ink-2);
-  margin-top: 0.1rem;
-}
-
-@media (max-width: 900px) {
-  .leader-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 767px) {
-  /* Eight leader cards at desktop proportions are four tall rows — roughly 370px, which
-     pushed the player table, the actual subject of the page, entirely below the fold.
-     Same eight facts, two thirds of the height. */
-  .leader-grid {
-    gap: 0.45rem;
-    margin: 0.5rem 0 1.1rem;
-  }
-  .leader {
-    padding: 0.5rem 0.6rem;
-  }
-  .leader .eyebrow {
-    font-size: 0.58rem;
-  }
-  .leader-name {
-    font-size: 0.92rem;
-    margin-top: 0.1rem;
-  }
-  .leader-detail {
-    font-size: 0.72rem;
-  }
-}
-
-
 /* ---- a table sized to be READ, not scanned sideways ------------------------
    The column groups keep this to nine columns at most, which fits the content
    column outright on a desktop — so it never actually scrolls there, even though
@@ -944,6 +852,31 @@ table.sheet.sheet-lg th {
 table.sheet.sheet-lg td {
   padding: 0.6rem 0.8rem;
 }
+/*
+ * COLUMN LEADER — the reference-table convention: the best figure in each column is set
+ * bold, so the leaders read straight off the table and no separate "top contributors"
+ * block has to repeat them. (One did, and it carried three names across eight cards.)
+ *
+ * Weight ALONE, no colour and no fill. The table already spends colour on the "your team"
+ * row highlight and on good/bad deltas elsewhere; a third meaning on the same channel is
+ * how a sheet stops being scannable. The markup is <strong>, so the fact survives a
+ * screen reader and forced-colors mode where this rule doesn't apply — see SeasonStatsView.
+ *
+ * `--ink` on the CELL only, never on the inner <strong>. The cell can carry an inline
+ * colour that means something of its own (green titles, red luck), and an inline style
+ * beats this rule on the `td` — but a `color` here would have overridden it on the
+ * `strong` inside and quietly repainted those cells black. The strong inherits instead,
+ * so a coloured leader comes out bold AND still its own colour.
+ */
+table.sheet .is-leader {
+  font-weight: 700;
+  color: var(--ink);
+}
+table.sheet .is-leader strong {
+  font-weight: 700;
+  color: inherit;
+}
+
 /* The one column with real text takes the slack; the numbers stay tight. */
 table.sheet.sheet-lg .cell-name {
   width: 40%;
@@ -996,11 +929,84 @@ table.sheet.sheet-lg .cell-name {
     z-index: 3;
     box-shadow: inset -1px 0 0 var(--line);
   }
+
+  /*
+   * Phone widths for the locked table. The desktop rule gives the name column 34%, which
+   * outranks the sticky rule above it on specificity (0,4,2 beats 0,3,3) — so on a phone
+   * the name took 211px of a 620px table and the nine numeric columns were left 45px each.
+   * "1,888" needs 50, so the season's biggest figures rendered as "1,8…": the table cut
+   * off the one column it exists to show.
+   *
+   * A fixed px name column rather than a percentage, because the requirement here is not
+   * a share of the table, it is "wide enough for a name" — 140px fits everything up to
+   * "Shaedon Sharpe" and lets the long tail ellipsis. That alone frees the 71px the
+   * numbers were short of: the nine numeric columns go from 45px to 53px inside the SAME
+   * 620px min-width, which is past the 50px "1,888" needs. Measured, not estimated.
+   *
+   * DO NOT add a `min-width` override here. This block sits ABOVE the base rules in the
+   * file, so at equal specificity theirs wins on source order — a min-width written here
+   * silently does nothing, while the `width` below does apply because `thead th` gives it
+   * one more element than the base rule's `th`. Change the base min-width instead.
+   */
+  table.sheet.sheet-fixed.sheet-lg thead th:first-child { width: 140px; }
+  /* Ellipsis, not overflow: a fixed column cannot grow, so a visible overrun would paint
+     the name across the numbers scrolling beneath the pinned column. */
+  table.sheet.sheet-fixed.sheet-lg .cell-name,
+  table.sheet.sheet-fixed.sheet-lg thead th:first-child {
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* ---- sortable table headers ------------------------------------------------
    The whole header cell is the hit target, so the caret is decoration rather
    than the thing you have to aim at. */
+/* ---- LOCKED COLUMN WIDTHS -------------------------------------------------
+   A sortable table must not re-measure itself when you sort it. Under the default `auto`
+   layout each column is as wide as the widest cell CURRENTLY RENDERED, so sorting PTS
+   descending (1,888) then ascending (9) redraws the grid at different widths — every
+   column shifts under the cursor mid-click, and it happens again on every page turn and
+   every unit toggle.
+
+   `fixed` takes the widths from the header row instead, which never changes, so the grid
+   stays put whatever is sorted into view.
+
+   `min-width` matters as much as the layout mode: `fixed` with `width: 100%` would CRUSH
+   fifteen columns into 390px rather than overflow, and the point of the .table-scroll
+   wrapper is that a wide table scrolls inside its own box. The min-width keeps it
+   overflowing there instead of collapsing.
+
+   Cells must clip, because a fixed column can no longer grow to fit a long name — without
+   this an over-long name paints across the column to its right.
+
+   OPT-IN, via `.sheet-fixed`, and it MUST STAY OPT-IN. `fixed` and `min-width` are a pair:
+   the layout mode stops the table sizing itself to its content, and the min-width is then
+   the only thing left telling it how wide to be. Applied to every `.sortable` table — the
+   first attempt — the four history tables, League Stats and the box score got the layout
+   mode without a width, so at 390px ten columns split the screen evenly and every cell
+   clipped to one character and an ellipsis ("C…", "1…", "8…"). A table opts in here only
+   together with a min-width below. */
+table.sheet.sheet-fixed {
+  table-layout: fixed;
+}
+table.sheet.sheet-fixed td,
+table.sheet.sheet-fixed th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+table.sheet.sheet-fixed.sheet-lg { min-width: 620px; }
+table.sheet.sheet-fixed.sheet-lg th:first-child { width: 34%; }
+/* 980, not 900: Seasons has to hold a THREE-season list — "25-26, 24-25, 22-23" measures
+   114px and the column was 108, so the app's longest-tenured players were the ones whose
+   tenure got cut off. Widening the column alone would have taken it out of the numeric
+   ones, so the table grows instead; it already scrolls in its own box. */
+table.sheet.sheet-fixed.sheet-tight { min-width: 980px; }
+/* Player and Seasons carry text and need more than an even share; the other thirteen are
+   numbers of known width and divide what is left (~52px, past the widest career total). */
+table.sheet.sheet-fixed.sheet-tight th:first-child { width: 14%; }
+table.sheet.sheet-fixed.sheet-tight th:nth-child(2) { width: 17%; }
+
 table.sheet.sortable th {
   padding: 0;
 }
@@ -1313,6 +1319,15 @@ table.sheet .num {
  * Alignment and tabular figures are deliberately left alone — only the face changes.
  */
 table.sheet th.num { font-family: var(--sans); }
+
+/* A header with two spellings — see `shortLabel` in SortableTable. Header text sets the
+   column width under `table-layout: fixed`, so "Acquisitions" was squeezing every other
+   column of the Transaction Counter on a phone. */
+.th-short { display: none; }
+@media (max-width: 767px) {
+  .th-full { display: none; }
+  .th-short { display: inline; }
+}
 table.sheet .row-muted td {
   color: var(--ink-3);
 }
@@ -1433,6 +1448,70 @@ tr.row-link:focus-within td { background: var(--row-highlight); }
   gap: 1.2rem;
   flex-wrap: wrap;
   margin: 0 0 0.8rem;
+}
+
+/* ---- FILTER BAR: inline on desktop, collapsible on a phone -----------------
+   See components/FilterBar.tsx. The toggle does not exist above 767px and the panel keeps
+   its original `controls` / `pv-filters` classes, so the desktop row is byte-for-byte the
+   layout it was before it was wrapped. */
+.fbar-toggle { display: none; }
+
+@media (max-width: 767px) {
+  .fbar { margin: 0 0 0.7rem; }
+  .fbar-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.5rem 0.75rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 650;
+    color: var(--ink);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .fbar-label { flex: none; }
+  /* The active selection, so a closed bar still says what it is doing. */
+  .fbar-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    font-weight: 500;
+    font-size: 0.78rem;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fbar-chev {
+    flex: none;
+    color: var(--ink-3);
+    transition: transform 0.15s ease;
+  }
+  .fbar-open .fbar-chev { transform: rotate(180deg); }
+
+  /* Hidden by DISPLAY, not unmounted: the controls keep their state while shut.
+     `.fbar .fbar-panel`, not `.fbar-panel`: the panel also carries the page's own row
+     class, and `.pv-filters` sets `display: grid` in a later block — at equal specificity
+     that won, so Player Value rendered its filters expanded with a toggle above them. */
+  .fbar .fbar-panel { display: none; }
+  .fbar-open .fbar-panel {
+    display: flex;
+    margin: 0.5rem 0 0;
+    padding: 0.75rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    gap: 0.7rem;
+  }
+  /* One control per line inside the open panel — side by side they are each too narrow
+     to read their own label. */
+  .fbar-open .fbar-panel > * { flex: 1 1 100%; min-width: 0; }
 }
 .check {
   display: inline-flex;
@@ -1671,91 +1750,122 @@ table.sheet.ss-standings td {
 
 
 /* ===================== MOBILE NAVIGATION (<=767px) =====================
-   At this width there is NO top header at all — exactly the Streamlit app's pattern.
-   Navigation is the fixed bottom icon bar plus a section sub-row, and the This Week rail
-   becomes a sub-bar pinned to the top (there is no header above it to sit under).
+   At this width there is NO top header at all. Navigation is the fixed bottom icon bar
+   plus INDEX-AND-DRILL: This Week / Season / Tools open a contents screen (`.idx`, below)
+   and a page opens from there under a sticky back row (`.crumb`).
+
+   WHAT THIS REPLACED, so it doesn't come back: a fixed strip of text links across the
+   top, `overflow-x: auto`. It held twelve items on Season and showed about five; the rest
+   were unreachable without a swipe nothing prompted. It also cost 56px of every screen on
+   every page of the section, and it was FIXED, so every page's top padding had to be told
+   about it (`body:has(.sub-row) .page { padding-top: 3.5rem }`) — a coupling between the
+   nav and the page shell that broke whenever either changed. The back row is sticky and
+   in-flow, so it takes its own space and nothing else needs to know it exists.
    ====================================================================== */
 
 @media (max-width: 767px) {
   .nav { display: none; }
 
   .page {
-    /* Clear the bottom bar; the top offset depends on whether a sub-bar is showing. */
+    /* Clear the bottom bar. There is no fixed top chrome left to offset. */
     padding-bottom: calc(var(--bottomnav-h) + 1.5rem);
-    padding-top: 0.75rem;
-  }
-  /* Neither rail nor sub-row is a left rail on mobile, so drop the desktop inset. */
-  body:has(.week-rail) .page { padding-left: var(--page-pad); }
-  /* A top sub-bar is fixed, so its height has to come out of the page's top padding. */
-  body:has(.week-rail) .page,
-  body:has(.sub-row) .page { padding-top: 3.5rem; }
-
-  /* -------- This Week rail becomes a fixed top sub-bar -------- */
-  .week-rail {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: auto;
-    width: 100%;
-    height: auto;
-    flex-direction: row;
-    align-items: center;
-    gap: 0.1rem;
-    padding: 0.4rem var(--page-pad);
-    background: var(--paper);
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    overflow-x: auto;
-    scrollbar-width: none;
-    z-index: 95;
-  }
-  .week-rail::-webkit-scrollbar { display: none; }
-  /* The "This Week" caption is a vertical-rail affordance; it reads as clutter in a row. */
-  .week-rail-label { display: none; }
-  .week-link {
-    flex: 0 0 auto;
-    padding: 0.4rem 0.6rem;
-    font-size: 0.86rem;
-    border-radius: 0;
-  }
-  /* Underline, not a tinted box — a filled pill reads as "boxed" in a horizontal bar. */
-  .week-link:active,
-  .week-link[aria-current="page"] {
-    background: transparent;
-    box-shadow: inset 0 -2px 0 var(--cobalt);
+    padding-top: 0.35rem;
   }
 
-  /* -------- section sub-row (Season / Tools) -------- */
-  .sub-row {
-    display: flex;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    align-items: center;
-    gap: 0.1rem;
-    padding: 0.4rem var(--page-pad);
-    background: var(--paper);
-    border-bottom: 1px solid var(--line);
-    overflow-x: auto;
-    scrollbar-width: none;
-    z-index: 95;
-  }
-  .sub-row::-webkit-scrollbar { display: none; }
-  .sub-link {
-    flex: 0 0 auto;
-    padding: 0.4rem 0.6rem;
-    color: var(--ink-2);
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.86rem;
+  /*
+   * The back row already names the page, so the <h1> one line below it said the same word
+   * twice and cost ~90px of a 844px screen before any content appeared.
+   *
+   * HIDDEN VISUALLY, NOT REMOVED. `display: none` would delete the page's only level-1
+   * heading from the accessibility tree, leaving screen-reader users on a document whose
+   * outline starts at <h2>. This is the standard clip technique: the heading stays in the
+   * tree and in the tab/heading order, it just paints nothing.
+   */
+  body:has(.crumb) .page > h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
     white-space: nowrap;
   }
-  .sub-link:active,
-  .sub-link[aria-current="page"] {
+  /*
+   * PAGE SUBTITLES are desktop-only.
+   *
+   * The one-line description under a page title ("Two players, category by category.",
+   * "Every rostered player and the top free agents…") explains the page to someone seeing
+   * it for the first time, which is a laptop-with-room job. On a phone it is a sentence
+   * between the title and the content, every time, forever — and the title itself is
+   * already hidden here because the back row says it.
+   *
+   * `h1 + .caption` and not `.caption`: it targets the SUBTITLE specifically, by its one
+   * structural property. A plain `.caption` rule would also have taken out the legend
+   * under the Season Stats table, which is the line explaining what the bold means.
+   */
+  .page > h1 + .caption { display: none; }
+
+  /* With the h1 out of flow, the first real block would otherwise sit against the back
+     row — this is the gap between the two, set once rather than per page. The second
+     selector covers the pages whose subtitle sits between them and is now hidden. */
+  body:has(.crumb) .page > h1 + *,
+  body:has(.crumb) .page > h1 + .caption + * { margin-top: 0.55rem; }
+
+  /* Sections sit closer together on a phone. The desktop rhythm was set for a page read
+     at arm's length in a wide column; at 390px the same spacing means one section per
+     screen and a lot of scrolling past nothing.
+     `>` MATTERS: as a descendant selector this also hit every h2 nested inside a card —
+     the percentile heading picked up 18px of margin against the card's own padding and
+     opened a gap above itself. Only the page's own section headings want this. */
+  .page > h2 { margin-top: 1.15rem; margin-bottom: 0.5rem; }
+  .pd-sheets { gap: 0.8rem; margin-top: 0.8rem; }
+
+  /* -------- back row: one level down from an index -------- */
+  .crumb {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    /* Sticky, not fixed: it stays reachable on a long page without becoming an offset
+       every page has to account for. `body` sets `overflow-x: clip`, which creates no
+       scroll container, so this sticks to the viewport as intended — see the note on
+       `.nav`'s sticky positioning. */
+    position: sticky;
+    top: 0;
+    z-index: 95;
+    /* No vertical padding: the row's height comes from the 44px target inside it, so the
+       bar is as short as an accessible target allows and not a pixel more. */
+    padding: 0 var(--page-pad);
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+  }
+  .crumb-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    /* The whole label is the hit area, and `min-height` sets it rather than padding
+       arithmetic over a 13px chevron and a 14px label — which lands at 40px and fails
+       the 44px minimum by exactly the amount that is hard to see in a screenshot. */
+    min-height: 44px;
+    padding: 0 0.4rem 0 0;
+    color: var(--cobalt);
+    text-decoration: none;
+    font-weight: 650;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .crumb-here {
+    font-size: 0.88rem;
+    font-weight: 700;
     color: var(--ink);
-    box-shadow: inset 0 -2px 0 var(--cobalt);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* Separated by a hairline rather than a slash: the two are a path, not a sentence. */
+    padding-left: 0.55rem;
+    border-left: 1px solid var(--line);
   }
 
   /* -------- fixed bottom icon bar -------- */
@@ -1806,12 +1916,108 @@ table.sheet.ss-standings td {
 
   /* Metric tiles wrap 2-up rather than one-per-screen. */
   .metrics { grid-template-columns: repeat(2, 1fr); }
+
+  /* The History > Players tile row is desktop-only. As 2x2 it cost ~230px above the fold
+     and pushed the player table — the reason you opened the page — most of a screen down.
+     Scoped to this one strip on purpose: `.metrics` is also the Bench, Matchup, Schedule
+     and Season Summary KPI row, where the tiles ARE the content. */
+  .metrics.hof-strip { display: none; }
 }
 
-/* Tablet and up: the sub-row is desktop-redundant (those pages are top-level links or
-   live in the dropdowns), so it never shows. */
+/* Tablet and up: the back row is desktop-redundant — every page it would point back to is
+   a header link or a dropdown item — so it never shows. The INDEX pages stay reachable at
+   their URLs and render as a plain directory under the desktop header; nothing links to
+   them there, but a phone bookmark opened on a laptop should still be a page. */
 @media (min-width: 768px) {
-  .sub-row { display: none; }
+  .crumb { display: none; }
+}
+
+
+/* ===================== SECTION INDEX (mobile index-and-drill) =====================
+   The screen This Week / Season / Tools open on a phone: one row per page, carrying the
+   figure that page exists to report. See components/SectionIndex.tsx for why the figure
+   is there and why some rows deliberately have none.
+
+   Sized so a row is a comfortable target at any label length: the name column takes the
+   slack, the figure column takes what it needs, and the chevron is fixed — so a long
+   blurb wraps inside the name rather than pushing the figure off the row.
+   ============================================================ */
+
+.idx-page { display: grid; gap: 1.4rem; }
+.idx-head h1 { margin: 0; }
+.idx-caption {
+  margin: 0.15rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+.idx-group { display: grid; gap: 0.5rem; }
+.idx-group-title {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.idx { display: grid; gap: 0.45rem; }
+.idx-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.7rem;
+  align-items: center;
+  /* Comfortably past the 44px minimum, and the whole row is the target. */
+  min-height: 60px;
+  padding: 0.6rem 0.8rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.idx-row:hover { border-color: var(--line-strong); }
+.idx-row:active { background: var(--cobalt-soft); border-color: var(--cobalt); }
+.idx-name { display: grid; gap: 0.1rem; min-width: 0; }
+.idx-name strong {
+  font-size: 0.94rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.idx-name em {
+  font-style: normal;
+  font-size: 0.76rem;
+  line-height: 1.3;
+  color: var(--ink-3);
+}
+.idx-stat {
+  display: grid;
+  justify-items: end;
+  gap: 0.05rem;
+  text-align: right;
+}
+.idx-stat b {
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+.idx-stat i {
+  font-style: normal;
+  font-size: 0.66rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+/* Semantic, and used sparingly on purpose — see the `tone` note in SectionIndex.tsx. */
+.idx-good b { color: var(--good); }
+.idx-bad b { color: var(--bad); }
+.idx-chev { color: var(--ink-3); flex: none; }
+
+/* On a wide screen the index is a directory, not a phone screen: it gets a comfortable
+   measure instead of running the full content column with a chevron at the far right. */
+@media (min-width: 768px) {
+  .idx-page { max-width: 640px; }
 }
 
 
@@ -2796,6 +3002,13 @@ table.sheet.lu-table .lu-pos {
 }
 .pv-badge.out { background: rgba(192, 57, 43, 0.14); color: var(--bad); }
 .pv-badge.day { background: rgba(224, 106, 59, 0.16); color: var(--clay); }
+/* Long badge codes shrink to a single letter on a phone — see Badge in
+   LeagueRostersView. Generic so any other badge site can opt in the same way. */
+.pv-badge-short { display: none; }
+@media (max-width: 767px) {
+  .pv-badge-full { display: none; }
+  .pv-badge-short { display: inline; }
+}
 .pv-fa {
   flex: 0 0 auto;
   font-weight: 700;
@@ -3091,6 +3304,15 @@ table.sheet.lu-table .lu-pos {
 /* The heading now carries the window picker inside it, so there is nothing to space
    apart — it is one line of text with a control set into it. */
 .pd-rank-head { margin: 0 0 0.9rem; }
+/* Two spellings of the percentile heading, swapped by breakpoint — see PlayerCardView.
+   The window <select> sits between them and shows at every width. */
+.pd-rank-short { display: none; }
+@media (max-width: 767px) {
+  .pd-rank-yr,
+  .pd-rank-full { display: none; }
+  .pd-rank-short { display: inline; }
+}
+
 .pd-rank-h {
   margin: 0;
   font-size: 0.95rem;
@@ -4747,6 +4969,16 @@ table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
   padding: 1rem 1.1rem 1.1rem;
   align-items: start;
 }
+
+/* A single position selected: one column, so it takes the full width rather than sitting
+   in a third of the grid with two empty tracks beside it. */
+.cs-cols[data-single] { grid-template-columns: minmax(0, 1fr); }
+
+@media (max-width: 767px) {
+  /* Stacked either way on a phone — the Position filter is what stops "All" being ~180
+     rows of continuous scroll with no way to tell which position you are reading. */
+  .cs-cols { grid-template-columns: minmax(0, 1fr); padding-top: 0.7rem; }
+}
 .cs-col {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -4894,6 +5126,9 @@ table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
   font-size: 1rem;
   font-weight: 800;
   color: var(--ink);
+  /* `flex: 1 1 auto` alongside `min-width: 0`: without it the heading refuses to shrink
+     below its content and pushes the value off the row instead of ellipsising. */
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4928,6 +5163,12 @@ table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
 /* The table itself, ESPN's roster grid: a tinted header strip, a tinted Slot rail down
    the left, and a headshot + two-line player cell. Rows are taller than this app's
    default sheet row because the headshot sets the floor. */
+/* The two roster filters. Team takes the slack (names are long); Value is three short
+   options and stays narrow. */
+.lr-f-team { flex: 1 1 200px; min-width: 0; }
+.lr-f-basis { flex: 0 0 108px; min-width: 0; }
+.lr-f-team .field, .lr-f-basis .field { width: 100%; min-width: 0; }
+
 table.sheet.lr-table { table-layout: fixed; }
 table.sheet.lr-table thead th {
   background: var(--surface-2);
@@ -5003,6 +5244,24 @@ table.sheet.lr-table th.num { width: 4rem; }
   .lr-cols { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
 }
 
+@media (max-width: 767px) {
+  /*
+   * Drop the Acq column on a phone.
+   *
+   * `lr-table` is `table-layout: fixed` with three of its four columns at declared widths
+   * — Slot 4.2rem, Acq 6.6rem, Value 4rem — so Player gets whatever is left. In a 356px
+   * scroll box that is about 119px, and the headshot takes 28 of it: every name rendered
+   * as two truncated initials ("P… B…"), which identifies nobody. Acq is the least
+   * valuable of the four on a phone (how a player was acquired is a browsing detail, not
+   * the reason you opened a roster), and removing it hands its 106px straight to the name.
+   *
+   * `display: none` on the th AND the td, so the fixed layout drops the column entirely
+   * rather than leaving an empty one.
+   */
+  table.sheet.lr-table .lr-acq-h,
+  table.sheet.lr-table .lr-acq { display: none; }
+}
+
 /* Recent Moves — ESPN's Recent Activity feed. */
 .rm-badge {
   display: inline-block;
@@ -5047,6 +5306,280 @@ table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
 }
 .rm-team { color: var(--ink-2); }
 
+/* ---- Similar Players: a card per neighbour ------------------------------------
+   Replaced a ten-column table. The panel answers "who else plays like him", and the answer
+   is a name plus how close — the category columns were the working, not the result. */
+.pd-sim-list { display: grid; gap: 0.4rem; }
+.pd-sim-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-height: 48px;
+  padding: 0.45rem 0.65rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.pd-sim-card:hover { border-color: var(--cobalt); }
+.pd-sim-who { min-width: 0; display: grid; gap: 0.05rem; }
+.pd-sim-name {
+  font-size: 0.9rem;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pd-sim-meta {
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The match figure is the headline; it gets the size the name would otherwise have. */
+.pd-sim-pct {
+  flex: none;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--cobalt);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===================== TEAM LADDER (mobile) ==================================
+   Shared by Power Rankings and Season Summary — the same object in both places: a ranked
+   list of teams, each with a record, a chip or two, and one headline figure. The `pr-`
+   prefix is historical (it was built for Power Rankings first); a second copy under an
+   `ss-` prefix would be sixty lines waiting to drift out of step.
+   ============================================================
+   The eight-column table as one row per team: position, name, record + movement + form,
+   the power bar, and the percentage. See app/rankings for which columns were folded and
+   which stayed in the table.
+
+   SIZED SO ALL TEN FIT ONE SCREEN. That is the whole advantage over the table: the
+   league as a single object rather than something you scroll through in halves. An
+   earlier version drew a power bar per row; it cost the height that the tenth team needed
+   and told you what the ordering already had.
+   ============================================================ */
+
+.pr-ladder { display: none; }
+
+@media (max-width: 767px) {
+  .pr-ladder { display: grid; gap: 0.3rem; margin: 0.15rem 0 1rem; }
+  .pr-table-wrap { display: none; }
+
+  /* A real heading, not a mono eyebrow: on mobile the page <h1> is hidden, so this is
+     the title of the screen. */
+  .pr-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.08rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .pr-row {
+    display: grid;
+    grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    align-items: center;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    /* Tight enough that ten teams clear the bottom bar on an 844px screen — the whole
+       league on one screen is the point of the ladder. */
+    padding: 0.36rem 0.6rem;
+  }
+  /* Your own row, findable without reading names. */
+  .pr-you { border-color: var(--cobalt); background: var(--cobalt-soft); }
+
+  .pr-pos {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--ink-3);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .pr-you .pr-pos { color: var(--cobalt); }
+
+  .pr-main { min-width: 0; display: grid; gap: 0.12rem; }
+  .pr-team {
+    font-size: 0.85rem;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pr-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.28rem;
+    font-size: 0.63rem;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .pr-chip {
+    padding: 0.05rem 0.32rem;
+    border-radius: 3px;
+    background: var(--surface-2);
+    font-size: 0.62rem;
+    font-weight: 650;
+  }
+  /* Movement: green up, red down — the app's usual good/bad pair. */
+  .pr-chip.up { color: var(--good); }
+  .pr-chip.dn { color: var(--bad); }
+  /*
+   * FORM is its own scale and deliberately not the good/bad pair: hot is red because a
+   * team is on fire, cold is blue because it is not. Reusing green/red here would have
+   * put two different meanings on the same two colours in the same row.
+   */
+  .pr-chip.form-hot { color: var(--bad); background: rgba(192, 57, 43, 0.12); }
+  .pr-chip.form-cold { color: var(--cobalt); background: var(--cobalt-soft); }
+  .pr-chip.form-steady { color: var(--ink-3); }
+
+  .pr-pct {
+    font-size: 0.9rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* On Season Summary each row is a BUTTON that re-points the KPIs above it, so it needs
+     a button's reset and a press state. Power Rankings' rows are plain divs and are
+     unaffected. */
+  .pr-row-btn {
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pr-row-btn:active { background: var(--surface-2); }
+  .pr-you.pr-row-btn:active { background: var(--cobalt-soft); }
+
+  /* The picker only has one control; let it take the width rather than sit at 200px. */
+  .ss-f-team { flex: 1 1 100%; min-width: 0; }
+  .ss-f-team .field { width: 100%; }
+}
+
+/* ===================== RECENT MOVES: the mobile transaction feed =============
+   One card per TRANSACTION rather than one row per player moved. The table above is a
+   feed pretending to be a grid: a routine waiver claim is two rows — "Add Jeremiah Fears"
+   and "Drop Daniss Jenkins" — that only the identical timestamp connects, and the date is
+   reprinted on every one of the 838 of them. The card puts both sides of one decision
+   together under a day heading; see lib/moves.ts for the join.
+
+   Both this and the table are rendered, switched at 767px — no width detection, no flash
+   of the wrong layout, the same approach as the nav.
+   ============================================================ */
+
+.rm-feed { display: none; }
+
+@media (max-width: 767px) {
+  .rm-feed { display: block; }
+  .rm-table-wrap { display: none; }
+
+  .rm-day + .rm-day { margin-top: 1rem; }
+  /* The date, written ONCE for the day instead of on every row. Sticky so it stays
+     legible while you scroll a busy week — the heading is the only thing telling you
+     where in the season you are. */
+  .rm-day-h {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 0 0 0.4rem;
+    padding: 0.35rem 0;
+    background: var(--paper);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .rm-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .rm-card + .rm-card { margin-top: 0.4rem; }
+
+  .rm-card-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .rm-card-team {
+    font-size: 0.82rem;
+    font-weight: 700;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rm-card-when {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rm-card-b { padding: 0.45rem 0.6rem 0.5rem; }
+  .rm-card-label {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 0.25rem;
+  }
+
+  .rm-line {
+    display: grid;
+    grid-template-columns: 0.9rem minmax(0, 1fr) auto;
+    gap: 0.4rem;
+    align-items: baseline;
+    /* A comfortable row: the player name inside it is a link to the card. */
+    padding: 0.2rem 0;
+  }
+  /* The sign IS the label — a green + and a red − say "added" and "dropped" without a
+     word, which is what lets two moves fit on a card instead of two badges. It is
+     aria-hidden in the markup and the card's own heading names the action, so nothing
+     depends on reading the colour. */
+  .rm-sign {
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-align: center;
+    line-height: 1;
+  }
+  .rm-add .rm-sign, .rm-draft .rm-sign, .rm-moved .rm-sign { color: var(--good); }
+  .rm-drop .rm-sign { color: var(--bad); }
+  .rm-who {
+    min-width: 0;
+    font-size: 0.86rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rm-pos { font-size: 0.68rem; color: var(--ink-3); }
+  .rm-val {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 /* Recent Moves filter bar. Deliberately NOT `.pv-filters` — that class forces the
    multi-select panel to the trigger's own width ("reads as that control opening"),
    which is right for Player Value's short position/team codes but clips a full team
@@ -5082,6 +5615,12 @@ table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
   background: var(--card);
 }
 .sr-title { font-size: 1.02rem; margin: 0 0 0.9rem; }
+/* One of the two is always hidden; see the note in StarterRankingsView. */
+.sr-title-short { display: none; }
+@media (max-width: 767px) {
+  .sr-title-full { display: none; }
+  .sr-title-short { display: inline; }
+}
 .sr-shots { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; }
 .sr-shot-col { flex: 1 1 0; display: flex; justify-content: center; min-width: 0; }
 /* No frame: these sit in a row above their own bars, so the bar already gives each one
@@ -5990,6 +6529,19 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
 @media (max-width: 767px) {
   /* Two dense stat tables side by side on a phone is two unreadable tables. */
   .pd-split-cols { grid-template-columns: 1fr; gap: 1.1rem; }
+  /*
+   * Seven columns (Month, GP, MIN, PTS, REB, AST, Val) in a card on a 390px screen: the
+   * split tables were a few pixels over and picked up a sideways scroll for the sake of
+   * them. Tightening the cell padding buys ~14px per column — more than enough — without
+   * dropping a stat or shrinking the type. Applies to the SPLIT tables only, so the
+   * game log and the other sheet-tight tables keep their spacing.
+   */
+  .pd-split-block table.sheet.sheet-tight td,
+  .pd-split-block table.sheet.sheet-tight th { padding: 0.3rem 0.25rem; }
+  .pd-split-block table.sheet.sheet-tight td:first-child,
+  .pd-split-block table.sheet.sheet-tight th:first-child { padding-left: 0.45rem; }
+  .pd-split-block table.sheet.sheet-tight td:last-child,
+  .pd-split-block table.sheet.sheet-tight th:last-child { padding-right: 0.45rem; }
   .pd-con-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -6124,4 +6676,177 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
   /* Charts that need a pointer to mean anything. Hidden rather than shrunk: a scatter of
      278 dots with no hover is a smudge, not a smaller chart. */
   .pd-desktop-only { display: none; }
+}
+
+/* ------------------------------------------------ /history — the season shelf
+   Replaces the eight-column seasons table. See components/SeasonShelf.tsx for why
+   the year leads and the titles are marked rather than merely listed. */
+
+:root {
+  /* The one colour the palette lacked. Championships are the only thing that uses it,
+     and green (the app's "in your favour" marker) is already spoken for by category
+     results — a title is not a category won. */
+  --gold: #b8860b;
+  --gold-soft: rgba(184, 134, 11, 0.07);
+}
+
+/* Slimmer than the standard 108px tiles: on this page the seasons are the subject and
+   the career totals are the caption. */
+.metrics.metrics-2 { grid-template-columns: repeat(2, 1fr); }
+.metrics.metrics-slim { gap: 0.5rem; margin: 1rem 0 1.1rem; }
+.metrics.metrics-slim .metric { min-height: 0; padding: 0.7rem 0.7rem 0.75rem; }
+.metrics.metrics-slim .metric-value { font-size: 1.4rem; margin-top: 0.4rem; }
+
+.shelf {
+  list-style: none;
+  margin: 0 0 1.6rem;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+.sh {
+  display: grid;
+  /* Year | league and team | finish. The year column is fixed so every finish lines up
+     down the right edge, which is what makes the column scannable. */
+  grid-template-columns: 3.4rem minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.95rem;
+}
+.sh-champ { border-color: var(--gold); background: var(--gold-soft); }
+
+.sh-yr {
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.sh-main { min-width: 0; }
+.sh-main b {
+  display: block;
+  font-size: 0.98rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sh-main em {
+  display: block;
+  font-style: normal;
+  font-size: 0.74rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sh-fin {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.sh-gold { color: var(--gold); }
+
+@media (max-width: 767px) {
+  .metrics.metrics-slim { gap: 0.4rem; }
+  .metrics.metrics-slim .metric { padding: 0.55rem 0.4rem 0.6rem; }
+  .metrics.metrics-slim .eyebrow { font-size: 0.6rem; letter-spacing: 0.05em; }
+  .metrics.metrics-slim .metric-value { font-size: 1.15rem; margin-top: 0.3rem; }
+  .sh { grid-template-columns: 3rem minmax(0, 1fr) auto; gap: 0.6rem; padding: 0.6rem 0.7rem; }
+  .sh-yr { font-size: 0.7rem; }
+  .sh-main b { font-size: 0.88rem; }
+  .sh-main em { font-size: 0.68rem; }
+  .sh-fin { font-size: 0.95rem; }
+  /* The one figure from the old table with nowhere else to go — kept where there is room
+     for it, dropped where a third line would cost more than it tells. */
+  .sh-wide { display: none; }
+}
+
+/* --------------------------------------------- /history/matchups — scores feed
+   Two scores on the outside, the state of the game in the middle. See
+   components/MatchupFeed.tsx for why you are always the right-hand side. */
+
+/* Capped and centred rather than run to the full 1180px column. This is a phone layout by
+   design — at full width the two scores end up a foot apart with the result stranded in
+   between, and the row stops reading as one line. */
+.msf { max-width: 44rem; margin: 0 0 1.6rem; }
+.msf-season + .msf-season { margin-top: 1.4rem; }
+
+/* The season, written once. Sticky so a 128-row scroll always says which year it is in —
+   the one thing the old table's Season column was genuinely for. */
+.msf-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.5rem;
+  padding: 0.45rem 0.1rem 0.35rem;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.msf-head-meta { font-size: 0.74rem; font-weight: 500; color: var(--ink-3); }
+
+.msf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+
+.msf-row {
+  display: grid;
+  /* The middle column is FIXED, so "Final" sits on the same axis down the whole feed and
+     the two scores are the same distance from it on every row. */
+  grid-template-columns: minmax(0, 1fr) 6.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+}
+
+.msf-side { min-width: 0; display: grid; }
+.msf-side b {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.05;
+}
+/* The loser. The whole result indicator — no green, no red; see the component. */
+.msf-dim { color: var(--ink-3); }
+.msf-side em {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msf-you { color: var(--cobalt); }
+.msf-right { justify-items: end; text-align: right; }
+
+.msf-mid { display: grid; justify-items: center; text-align: center; gap: 0.1rem; }
+.msf-mid b { font-size: 0.82rem; font-weight: 700; }
+.msf-mid em {
+  font-style: normal;
+  font-size: 0.66rem;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 767px) {
+  .msf-row { grid-template-columns: minmax(0, 1fr) 5.4rem minmax(0, 1fr); gap: 0.4rem; padding: 0.55rem 0.7rem; }
+  .msf-side b { font-size: 1.1rem; }
+  .msf-side em { font-size: 0.66rem; }
+  .msf-mid b { font-size: 0.76rem; }
+  .msf-mid em { font-size: 0.62rem; }
 }

@@ -126,9 +126,6 @@ function Extremes({ title, rows }: { title: string; rows: PlayerGame[] }) {
               <th className="num">PTS</th>
               <th className="num">REB</th>
               <th className="num">AST</th>
-              <th className="num">STL</th>
-              <th className="num">BLK</th>
-              <th className="num">TO</th>
               <th className="num">Val</th>
             </tr>
           </thead>
@@ -145,9 +142,6 @@ function Extremes({ title, rows }: { title: string; rows: PlayerGame[] }) {
                   <td className="num">{c("PTS")}</td>
                   <td className="num">{c("REB")}</td>
                   <td className="num">{c("AST")}</td>
-                  <td className="num">{c("STL")}</td>
-                  <td className="num">{c("BLK")}</td>
-                  <td className="num">{c("TO")}</td>
                   <td className="num pd-split-v">
                     {g.value >= 0 ? "+" : ""}
                     {g.value.toFixed(1)}

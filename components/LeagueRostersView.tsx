@@ -1,6 +1,17 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer, Team } from "@/lib/league";
-import { headshotUrl, playerStatus } from "@/lib/playerPool";
+import {
+  headshotUrl,
+  playerStatus,
+  VALUE_BASES,
+  VALUE_COL,
+  type ValueBasis,
+} from "@/lib/playerPool";
+import FilterBar from "./FilterBar";
 import PlayerLink from "./PlayerLink";
+import StatusBadge from "./StatusBadge";
 
 /**
  * Every team's roster, one card per team, laid out the way ESPN's league-wide roster page
@@ -39,11 +50,38 @@ function positions(p: PoolPlayer): string {
   return clean.join(", ");
 }
 
-export default function LeagueRostersView({ league }: { league: LeagueData }) {
+/** The "show everything" option in the team picker. Not a team name, so it cannot collide. */
+const ALL_TEAMS = "__all__";
+
+export default function LeagueRostersView({
+  league,
+  myTeam,
+}: {
+  league: LeagueData;
+  /** Your own team's name — the picker's default, so the page opens on your roster. */
+  myTeam?: string;
+}) {
   const pool = league.seasonData?.playerPool ?? [];
   const standings = league.seasonData?.standings ?? [];
   const recordByTeam = new Map(standings.map((s) => [s.teamId, s]));
   const layout = league.rosterSlots?.length ? league.rosterSlots : DEFAULT_SLOTS;
+
+  /*
+   * ONE TEAM AT A TIME, defaulting to yours.
+   *
+   * Ten cards of sixteen rows is 160 rows of continuous scroll, and nine of them are
+   * somebody else's roster. The picker makes the page answer "who is on this team"
+   * directly; "All teams" restores the full value board for anyone using it that way.
+   */
+  const [team, setTeam] = useState<string>(myTeam || ALL_TEAMS);
+  /*
+   * WHICH VALUE. The pool carries three — season, last 30 days, last 15 — and a roster
+   * board is read differently depending on which: the season column says who drafted well,
+   * the 15-day column says who is hot right now. Same control as Player Value uses, so the
+   * word "Regular" means the same thing on both pages.
+   */
+  const [basis, setBasis] = useState<ValueBasis>("Regular");
+  const valueCol = VALUE_COL[basis];
 
   const byOwner = new Map<string, PoolPlayer[]>();
   for (const p of pool) {
@@ -53,30 +91,79 @@ export default function LeagueRostersView({ league }: { league: LeagueData }) {
     byOwner.set(p.owner, list);
   }
 
-  const cards = league.teams
-    .map((team) => {
-      const players = byOwner.get(team.name) ?? [];
-      return {
-        team,
-        players,
-        total: players.reduce((a, p) => a + (p.value ?? 0), 0),
-      };
-    })
-    .sort((a, b) => b.total - a.total);
+  /*
+   * Ranked over EVERY team, then filtered — so the rank on a card is that team's place in
+   * the league, not its place among whatever the picker left showing. Filtering first
+   * would make every selected team "1st".
+   */
+  const ranked = useMemo(() => {
+    return league.teams
+      .map((t) => {
+        const players = byOwner.get(t.name) ?? [];
+        return {
+          team: t,
+          players,
+          total: players.reduce((a, p) => a + (p[valueCol] ?? 0), 0),
+        };
+      })
+      .sort((a, b) => b.total - a.total)
+      .map((c, i) => ({ ...c, rank: i + 1 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [league.teams, pool, valueCol]);
+
+  const shown = team === ALL_TEAMS ? ranked : ranked.filter((c) => c.team.name === team);
 
   return (
-    <div className="lr-cols">
-      {cards.map(({ team, players, total }) => (
-        <RosterCard
-          key={team.id}
-          team={team}
-          players={players}
-          total={total}
-          layout={layout}
-          record={recordByTeam.get(team.id)}
-        />
-      ))}
-    </div>
+    <>
+      <FilterBar className="controls">
+        <div className="ms lr-f-team">
+          <div className="ms-label">Team</div>
+          <select
+            className="field field-select"
+            value={team}
+            onChange={(e) => setTeam(e.target.value)}
+            aria-label="Team"
+          >
+            {/* Ranked order, so the picker reads as the value board it is filtering. */}
+            {ranked.map((c) => (
+              <option key={c.team.id} value={c.team.name}>
+                {c.rank}. {c.team.name}
+              </option>
+            ))}
+            <option value={ALL_TEAMS}>All teams</option>
+          </select>
+        </div>
+        <div className="ms lr-f-basis">
+          <div className="ms-label">Value</div>
+          <select
+            className="field field-select"
+            value={basis}
+            onChange={(e) => setBasis(e.target.value as ValueBasis)}
+            aria-label="Value basis"
+          >
+            {VALUE_BASES.map((b) => (
+              <option key={b} value={b}>
+                {b === "Regular" ? "Season" : b}
+              </option>
+            ))}
+          </select>
+        </div>
+      </FilterBar>
+
+      <div className="lr-cols">
+        {shown.map(({ team: t, players, total }) => (
+          <RosterCard
+            key={t.id}
+            team={t}
+            players={players}
+            total={total}
+            valueCol={valueCol}
+            layout={layout}
+            record={recordByTeam.get(t.id)}
+          />
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -131,12 +218,15 @@ function RosterCard({
   team,
   players,
   total,
+  valueCol,
   layout,
   record,
 }: {
   team: Team;
   players: PoolPlayer[];
   total: number;
+  /** Which of the pool's three value columns the picker selected. */
+  valueCol: "value" | "recent" | "recent15";
   layout: string[];
   record?: { wins: number; losses: number; ties: number };
 }) {
@@ -147,6 +237,8 @@ function RosterCard({
 
   return (
     <section className="lr-card">
+      {/* No rank here: the team picker already reads "2. VJ Maxx", so the card would be
+          repeating the one thing you just selected it by. Back to the original row. */}
       <header className="lr-card-h">
         <h2 className="lr-team">{team.name}</h2>
         <span className="lr-record mono">
@@ -179,7 +271,7 @@ function RosterCard({
                       <span className="lr-player-t">
                         <span className="lr-player-n">
                           <PlayerLink name={player.name} className="lr-link" />
-                          <Badge status={player.status} />
+                          <StatusBadge status={player.status} />
                         </span>
                         <span className="lr-player-sub">
                           {player.nbaTeam}
@@ -197,7 +289,7 @@ function RosterCard({
                 <td className="lr-acq">{player?.acquisitionType || ""}</td>
                 <td className="num">
                   {player
-                    ? `${(player.value ?? 0) >= 0 ? "+" : ""}${(player.value ?? 0).toFixed(1)}`
+                    ? `${(player[valueCol] ?? 0) >= 0 ? "+" : ""}${(player[valueCol] ?? 0).toFixed(1)}`
                     : ""}
                 </td>
               </tr>
@@ -219,8 +311,3 @@ function Shot({ id }: { id: number | null }) {
 }
 
 /** ESPN's small red mark next to an unavailable player. Never dims the row. */
-function Badge({ status }: { status: string }) {
-  const [code, sev] = playerStatus(status);
-  if (!code) return null;
-  return <span className={`pv-badge ${sev}`}>{code}</span>;
-}

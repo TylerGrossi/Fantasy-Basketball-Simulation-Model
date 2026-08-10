@@ -10,6 +10,19 @@
  *
  * The desktop header reads: Season Summary · Current Matchup · League · Tools · History ·
  * Agent, then the Settings gear (rendered separately in Nav.tsx, not from this list).
+ *
+ * MOBILE IS INDEX-AND-DRILL. The bottom icons for This Week, Season and Tools do not open
+ * a page — they open that section's INDEX (`/browse/<key>`), a list where every row names
+ * a page, says what it answers, and carries the number you would have opened it for. A
+ * page then opens with a back row to its index.
+ *
+ * That replaced a fixed top strip of text links which scrolled sideways: it held twelve
+ * items on Season and showed about five, so History's last three pages were unreachable
+ * without a swipe nothing prompted. The strip is gone, not shrunk — see `.crumb` and
+ * `.idx` in globals.css, and SectionIndex.tsx.
+ *
+ * Home and Agent keep their old behaviour: Home is already a launcher and Agent is a
+ * single page, so neither has anything to index.
  */
 
 export interface NavLink {
@@ -26,26 +39,47 @@ export interface NavMenu {
 
 export type NavEntry = NavLink | NavMenu;
 
+/**
+ * A page as the mobile index lists it.
+ *
+ * `blurb` is what the row answers, in a few words — the index has room for it and the old
+ * strip did not, which is why "Season Stats" and "League Stats" used to be tellable apart
+ * only by opening them. Kept short enough to sit on one line at 390px.
+ *
+ * `group` puts the row under a sub-heading. It is what let History's labels go back to
+ * "Players" and "Managers": the group says which section they belong to, so the label
+ * doesn't have to carry a "History: " prefix any more.
+ */
+export interface NavPage {
+  label: string;
+  href: string;
+  blurb?: string;
+  group?: string;
+}
+
 /** Pages reached from the "This Week" menu. */
-export const WEEK_PAGES = [
-  { label: "Scoreboard", href: "/scoreboard" },
-  { label: "Matchup", href: "/matchup" },
-  { label: "Streamers", href: "/streamers" },
-  { label: "Bench", href: "/bench" },
-  { label: "Roster", href: "/roster" },
+export const WEEK_PAGES: NavPage[] = [
+  { label: "Scoreboard", href: "/scoreboard", blurb: "Category totals, live from ESPN" },
+  { label: "Matchup", href: "/matchup", blurb: "Win probability and the model behind it" },
+  { label: "Streamers", href: "/streamers", blurb: "Every pickup scored against this week" },
+  { label: "Bench", href: "/bench", blurb: "Who to play, and what sitting costs" },
+  { label: "Roster", href: "/roster", blurb: "Your players, games left, averages" },
 ];
 
 
 /**
  * The History section. `/history` leads and carries the career totals, so the menu's first
  * item is the page you land on rather than one you have to come back to.
+ *
+ * Labels are BARE here and prefixed only where the context needs it (see SEASON_PAGES,
+ * which used to prefix all five and now sets `group` instead).
  */
-export const HISTORY_PAGES = [
-  { label: "Seasons", href: "/history" },
-  { label: "Players", href: "/history/players" },
-  { label: "Head to Head", href: "/history/head-to-head" },
-  { label: "Managers", href: "/history/managers" },
-  { label: "Matchups", href: "/history/matchups" },
+export const HISTORY_PAGES: NavPage[] = [
+  { label: "Seasons", href: "/history", blurb: "Every season you have played" },
+  { label: "Players", href: "/history/players", blurb: "Career totals, all leagues" },
+  { label: "Head to Head", href: "/history/head-to-head", blurb: "Your record against each manager" },
+  { label: "Managers", href: "/history/managers", blurb: "All-time by manager" },
+  { label: "Matchups", href: "/history/matchups", blurb: "Every week ever played" },
 ];
 
 /** Desktop header: brand, then these, then the Settings gear. */
@@ -125,65 +159,109 @@ export const FLAT_NAV: NavEntry[] = [
   { kind: "link", label: "Agent", href: "/agent" },
 ];
 
-export const SEASON_PAGES = [
-  { label: "Summary", href: "/season" },
-  { label: "Season Stats", href: "/season-stats" },
-  { label: "League Stats", href: "/league-stats" },
+/**
+ * The Season index, in two groups.
+ *
+ * The History five used to be prefixed ("History: Head to Head") because they sat in a
+ * flat strip that had no way to say where they came from. The index groups instead, so
+ * they get their own names back — the sub-heading carries the meaning the prefix was
+ * standing in for, and the labels stop being the longest thing on the screen.
+ */
+export const SEASON_PAGES: NavPage[] = [
+  // Schedule leads, matching the desktop League menu where it leads for the same reason:
+  // "what happened / what's next" is a more common question than any stat table under it.
+  { label: "Schedule", href: "/schedule", blurb: "Week by week results" },
+  { label: "Summary", href: "/season", blurb: "Standings, champion, schedule luck" },
+  { label: "Season Stats", href: "/season-stats", blurb: "Category leaders and every player's line" },
+  { label: "League Stats", href: "/league-stats", blurb: "Every team's totals and where they rank" },
   // Follows the desktop move of Power Rankings out of Tools and into the stats group.
-  { label: "Rankings", href: "/rankings" },
-  { label: "Rosters", href: "/league-rosters" },
-  { label: "Recent Moves", href: "/recent-moves" },
-  { label: "Schedule", href: "/schedule" },
-  ...HISTORY_PAGES.map((p) => ({
-    // Prefixed on mobile, where this row sits among Season pages and a bare "Players"
-    // or "Managers" would not say which section it belongs to.
-    label: p.href === "/history" ? "History" : `History: ${p.label}`,
-    href: p.href,
-  })),
+  { label: "Rankings", href: "/rankings", blurb: "All-play strength and form" },
+  // No longer promises "how they got it": the Acq column is hidden on a phone, which is
+  // where this blurb is read.
+  { label: "Rosters", href: "/league-rosters", blurb: "Every team's roster" },
+  { label: "Recent Moves", href: "/recent-moves", blurb: "Adds, drops and trades, newest first" },
 ];
 
 /**
- * Mobile Tools sub-row, in owner-specified order. The FIRST entry is what the Tools icon
- * opens to (see SECTIONS below) — keep `landing` pointing at it. Lineup and Playoff Odds
- * weren't in that ordering, so they keep the tail; Playoff Odds is dropped entirely in the
- * offseason by navFor. Agent used to lead this row, but it earns its own bottom-bar icon
- * now (see SECTIONS) — Settings lives on the Home tile grid instead of here.
+ * The Tools index, in owner-specified order. Lineup and Playoff Odds weren't in that
+ * ordering, so they keep the tail; Playoff Odds is dropped entirely in the offseason by
+ * navFor. Agent is not here — it earns its own bottom-bar icon (see SECTIONS) — and
+ * Settings lives on the Home tile grid instead.
  */
-export const TOOLS_PAGES = [
-  { label: "Player Card", href: "/player" },
-  { label: "Player Value", href: "/player-value" },
-  { label: "Trade", href: "/trade" },
-  { label: "Compare", href: "/compare" },
-  { label: "Lineup", href: "/lineup" },
-  { label: "Cheat Sheets", href: "/cheat-sheets" },
-  { label: "Draft", href: "/draft" },
-  { label: "Playoff Odds", href: "/playoffs" },
+export const TOOLS_PAGES: NavPage[] = [
+  { label: "Player Card", href: "/player", blurb: "Profile, value, form, last ten games" },
+  { label: "Player Value", href: "/player-value", blurb: "Rostered and free agents by 9-cat value" },
+  { label: "Trade", href: "/trade", blurb: "What a deal does to each category" },
+  { label: "Compare", href: "/compare", blurb: "Two players side by side" },
+  { label: "Lineup", href: "/lineup", blurb: "Who to start, and what each swap costs" },
+  { label: "Cheat Sheets", href: "/cheat-sheets", blurb: "Ranked columns per position" },
+  { label: "Draft", href: "/draft", blurb: "The board, by projected value" },
+  { label: "Playoff Odds", href: "/playoffs", blurb: "Championship odds from a simulated bracket" },
 ];
 
-export type SectionKey = "home" | "week" | "season" | "tools" | "agent";
+/**
+ * The MORE section: the three things that are not "this week", "the season" or "a tool".
+ *
+ * History moved here out of Season, where it never belonged — Season means *this* season
+ * and everyone in it, History means one manager across every season and every league they
+ * have played in. They were only together because Season had the spare room.
+ *
+ * Agent and Settings join it because neither justifies a fifth bottom-bar slot on its own:
+ * Agent is one page and Settings is visited rarely, and between them they left the fifth
+ * icon doing less work than any of the other four.
+ */
+export const MORE_PAGES: NavPage[] = [
+  { label: "Agent", href: "/agent", blurb: "Ask about the league in plain English" },
+  { label: "Settings", href: "/settings", blurb: "Your team, protected players, display" },
+  ...HISTORY_PAGES.map((p) => ({ ...p, group: "History" })),
+];
+
+export type SectionKey = "home" | "week" | "season" | "tools" | "more";
+
+/**
+ * Sections that open an INDEX rather than a page on mobile — the three with more than one
+ * page to their name. `/browse/[section]` renders them all; see app/browse.
+ *
+ * Home is deliberately absent: it already IS an index (the tile grid), so an index in
+ * front of it would be a screen you tap through to reach another screen of links.
+ */
+export const INDEXED_SECTIONS = ["week", "season", "tools", "more"] as const;
+export type IndexedSection = (typeof INDEXED_SECTIONS)[number];
+
+export function indexHref(key: SectionKey): string {
+  return `/browse/${key}`;
+}
+
+export function isIndexed(key: SectionKey): key is IndexedSection {
+  return (INDEXED_SECTIONS as readonly string[]).includes(key);
+}
 
 export interface Section {
   key: SectionKey;
   label: string;
-  /** Where the section's icon navigates to. */
+  /**
+   * Where the section's icon navigates to. For the three indexed sections this is their
+   * index, NOT a page — that is the whole of the index-and-drill change at this level.
+   */
   landing: string;
-  pages: Array<{ label: string; href: string }>;
+  pages: NavPage[];
 }
 
 /** Mobile bottom bar: one icon per section. */
 export const SECTIONS: Section[] = [
   { key: "home", label: "Home", landing: "/", pages: [{ label: "Home", href: "/" }] },
-  // This Week opens on the Scoreboard — the fast "current numbers" view.
-  { key: "week", label: "This Week", landing: "/scoreboard", pages: WEEK_PAGES },
-  { key: "season", label: "Season", landing: "/season", pages: SEASON_PAGES },
-  // Opens on Player Card — the first entry of TOOLS_PAGES, so the sub-row's first tab is
-  // the one already showing rather than a tab you have to go back to. Keep the two in
-  // step if that order changes again.
-  { key: "tools", label: "Tools", landing: "/player", pages: TOOLS_PAGES },
-  // Agent gets the 5th icon rather than sharing a row with Tools or Settings — it's the
-  // page you go to with a question, not one you browse to among others. Settings, which
-  // used to hold this slot, moved to a tile on the Home launcher instead (app/page.tsx).
-  { key: "agent", label: "Agent", landing: "/agent", pages: [{ label: "Agent", href: "/agent" }] },
+  /*
+   * The three indexed sections open their index, not a page. Each used to land on a
+   * chosen "first" page (Scoreboard, Season Summary, Player Card) with the rest of the
+   * section in a strip above it; the index shows all of them at once instead, so there
+   * is no first page to choose and no strip to keep in step with it.
+   */
+  { key: "week", label: "This Week", landing: indexHref("week"), pages: WEEK_PAGES },
+  { key: "season", label: "Season", landing: indexHref("season"), pages: SEASON_PAGES },
+  { key: "tools", label: "Tools", landing: indexHref("tools"), pages: TOOLS_PAGES },
+  // The fifth icon is MORE: Agent, Settings and the five History pages. It used to be
+  // Agent alone, which spent a permanent slot on a single page.
+  { key: "more", label: "More", landing: indexHref("more"), pages: MORE_PAGES },
 ];
 
 /**
@@ -231,8 +309,11 @@ export const HIDDEN_FROM_NAV = ["/draft"];
  * Same contract as HIDDEN_FROM_NAV: the routes stay live and `sectionFor` still resolves
  * them, so a link or bookmark works on a phone; they just aren't advertised there.
  *
+ * /season came OFF this list: Season Summary is back in the mobile Season index. Only the
+ * Lineup board is still desktop-only, and that one is a drag-and-drop surface rather than
+ * a layout problem.
  */
-export const HIDDEN_ON_MOBILE = ["/season", "/lineup"];
+export const HIDDEN_ON_MOBILE = ["/lineup"];
 
 /**
  * The mirror image of IN_SEASON_ONLY: pages the offseason should lead with rather than
@@ -242,8 +323,10 @@ export const HIDDEN_ON_MOBILE = ["/season", "/lineup"];
  * page is the one about this week.
  *
  * DESKTOP ONLY in practice, since /draft is in HIDDEN_ON_MOBILE: the promotion runs over
- * whatever survived filtering, and on mobile the draft board is already gone by then. The
- * `landing` rule below is written to notice that rather than assume the promotion took.
+ * whatever survived filtering, and on mobile the draft board is already gone by then. On
+ * mobile it only ever decides the ORDER of the Tools index now — the section's landing is
+ * the index itself, so an un-hidden draft board would lead the list rather than replace
+ * the screen the Tools icon opens.
  */
 const OFFSEASON_FIRST = "/draft";
 
@@ -276,33 +359,75 @@ export function navFor(seasonOver: boolean): { flat: NavEntry[]; sections: Secti
       const items = e.items.filter((i) => keep(i.href));
       return items.length ? [{ ...e, items: first(items) }] : [];
     }),
-    // `sections` drive the MOBILE bottom bar and sub-rows only, so HIDDEN_ON_MOBILE is
+    // `sections` drive the MOBILE bottom bar and the indexes only, so HIDDEN_ON_MOBILE is
     // applied here and nowhere else — the desktop `flat` menus above keep every page.
     sections: SECTIONS.map((s) => {
       const pages = first(
         s.pages.filter((p) => keep(p.href) && !HIDDEN_ON_MOBILE.includes(p.href))
       );
-      // The landing has to follow the filter/reorder, or a section icon opens a page that
-      // is no longer in the row it just opened — which is what would happen to Season,
-      // whose landing was the now-hidden /season.
-      const landing =
-        s.key === "tools" && pages[0]?.href === OFFSEASON_FIRST
-          ? OFFSEASON_FIRST
-          : pages.some((p) => p.href === s.landing)
-            ? s.landing
-            : (pages[0]?.href ?? s.landing);
+      /*
+       * An indexed section's landing is its INDEX, which exists whatever survives the
+       * filter — so the rule that used to chase the first surviving page (and get it
+       * wrong for Season, whose /season landing is hidden on mobile) is gone. `first()`
+       * still runs, because it decides the ORDER the index lists them in.
+       */
+      const landing = isIndexed(s.key)
+        ? indexHref(s.key)
+        : pages.some((p) => p.href === s.landing)
+          ? s.landing
+          : (pages[0]?.href ?? s.landing);
       return { ...s, pages, landing };
     }),
   };
 }
 
-/** Which section owns a path (defaults to home). */
+/**
+ * Which section owns a path (defaults to home).
+ *
+ * Uses the UNFILTERED sections on purpose: a hidden or out-of-season page opened directly
+ * still resolves to its section, so its back row points somewhere real.
+ */
 export function sectionFor(pathname: string): SectionKey {
+  // An index belongs to its own section — otherwise /browse/season resolves to "home"
+  // and the Season icon fails to light up on the screen it just opened.
+  const indexed = INDEXED_SECTIONS.find((k) => pathname === indexHref(k));
+  if (indexed) return indexed;
   for (const s of SECTIONS) {
     if (s.key === "home") continue;
     if (s.pages.some((p) => p.href === pathname)) return s.key;
   }
   return "home";
+}
+
+/**
+ * The name of the page at `pathname`, for the mobile back row.
+ *
+ * Read from the unfiltered SECTIONS for the same reason `sectionFor` is: a page reached
+ * by link or bookmark while hidden from the menus still has a name, and a back row that
+ * silently rendered without one would look like a bug on exactly those pages.
+ */
+export function pageLabelFor(pathname: string): string | null {
+  for (const s of SECTIONS) {
+    const hit = s.pages.find((p) => p.href === pathname);
+    if (hit) return hit.label;
+  }
+  return null;
+}
+
+/**
+ * A name for ANY in-app path, for the "back to where you were" row.
+ *
+ * Falls through page names, then the section indexes, then Home — so a back row always has
+ * something to say. Returns null only for a path this nav has never heard of, and the
+ * caller then falls back to the section index rather than printing a bare chevron.
+ */
+export function labelForPath(pathname: string): string | null {
+  const page = pageLabelFor(pathname);
+  if (page) return page;
+  const indexed = INDEXED_SECTIONS.find((k) => pathname === indexHref(k));
+  if (indexed) return SECTIONS.find((s) => s.key === indexed)?.label ?? null;
+  if (pathname === "/") return "Home";
+  return null;
 }
 
 /** True when a desktop nav entry should show as active. */

@@ -21,9 +21,6 @@ export default async function Page() {
   return (
     <>
       <h1>Rosters</h1>
-      <p className="caption">
-        Per-game averages (season blended with last 30 days) and games remaining.
-      </p>
       <RosterView
         league={league}
         you={you}

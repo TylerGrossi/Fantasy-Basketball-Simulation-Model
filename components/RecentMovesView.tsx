@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { RecentMoveRow } from "@/lib/league";
+import { groupByDay, groupMoves, timeLabel, type MoveGroup, type MoveRow } from "@/lib/moves";
+import FilterBar from "./FilterBar";
 import MultiSelect from "./MultiSelect";
 import PlayerLink from "./PlayerLink";
 
@@ -30,9 +32,9 @@ function badgeClass(action: string) {
   return "moved";
 }
 
-/** A move plus the player's 9-cat value, joined by the page. `null` when that player is
- *  no longer in the exported pool. */
-export type MoveRow = RecentMoveRow & { value?: number | null };
+/** A move plus the player's 9-cat value, joined by the page. Defined in lib/moves.ts,
+ *  re-exported here because the page imports it from this module. */
+export type { MoveRow } from "@/lib/moves";
 
 export default function RecentMovesView({ rows }: { rows: MoveRow[] }) {
   const [player, setPlayer] = useState("");
@@ -72,9 +74,13 @@ export default function RecentMovesView({ rows }: { rows: MoveRow[] }) {
     });
   }, [rows, player, teams, actions, days]);
 
+  // Transactions, then day headings — computed once per filter change and shared by the
+  // mobile feed. The table below renders the ungrouped rows exactly as before.
+  const feed = useMemo(() => groupByDay(groupMoves(filtered)), [filtered]);
+
   return (
     <>
-      <div className="controls rm-filters">
+      <FilterBar className="controls rm-filters">
         <div className="ms rm-f-player">
           <div className="ms-label">Player</div>
           <input
@@ -115,12 +121,33 @@ export default function RecentMovesView({ rows }: { rows: MoveRow[] }) {
             ))}
           </select>
         </div>
-      </div>
+      </FilterBar>
 
       {filtered.length === 0 ? (
         <p className="caption">No moves match those filters.</p>
       ) : (
-        <div className="table-scroll">
+        <>
+        {/*
+          MOBILE: the same rows as one card per transaction, under a day heading.
+
+          Both are rendered and switched by CSS at 767px — no width detection and no flash
+          of the wrong one, the pattern the nav and the rest of the app already use. The
+          grouping runs over `filtered`, so a filter narrows the cards exactly as it
+          narrows the table; filtering to "Drop" leaves a card holding only its drop, which
+          is the truth about what survived the filter.
+        */}
+        <div className="rm-feed">
+          {feed.map((d) => (
+            <section className="rm-day" key={d.key}>
+              <h2 className="rm-day-h">{d.label}</h2>
+              {d.groups.map((g) => (
+                <MoveCard key={g.key} g={g} />
+              ))}
+            </section>
+          ))}
+        </div>
+
+        <div className="table-scroll rm-table-wrap">
           <table className="sheet rm-table">
             <thead>
               <tr>
@@ -162,7 +189,50 @@ export default function RecentMovesView({ rows }: { rows: MoveRow[] }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </>
+  );
+}
+
+/**
+ * One transaction: who did it, when, and every player it moved.
+ *
+ * Adds lead, drops follow, because that is the order the decision was made in — you pick
+ * someone up and drop to make room. The sign carries the meaning (green +, red −) so the
+ * word "Added" does not have to appear on every line.
+ */
+function MoveCard({ g }: { g: MoveGroup }) {
+  const lines: Array<{ row: MoveRow; sign: "+" | "−"; kind: string }> = [
+    ...g.adds.map((row) => ({ row, sign: "+" as const, kind: "add" })),
+    ...g.drafted.map((row) => ({ row, sign: "+" as const, kind: "draft" })),
+    ...g.other.map((row) => ({ row, sign: "+" as const, kind: "moved" })),
+    ...g.drops.map((row) => ({ row, sign: "−" as const, kind: "drop" })),
+  ];
+
+  return (
+    <article className="rm-card">
+      <header className="rm-card-h">
+        <span className="rm-card-team">{g.team}</span>
+        <span className="rm-card-when">{timeLabel(g.date)}</span>
+      </header>
+      <div className="rm-card-b">
+        <div className="rm-card-label">{g.label}</div>
+        {lines.map(({ row, sign, kind }, i) => (
+          <div className={`rm-line rm-${kind}`} key={`${row.player}-${i}`}>
+            <span className="rm-sign" aria-hidden="true">
+              {sign}
+            </span>
+            <span className="rm-who">
+              <PlayerLink name={row.player} />
+              {row.position && <span className="rm-pos"> {row.position}</span>}
+            </span>
+            <span className="rm-val">
+              {row.value == null ? "" : `${row.value >= 0 ? "+" : ""}${row.value.toFixed(1)}`}
+            </span>
+          </div>
+        ))}
+      </div>
+    </article>
   );
 }

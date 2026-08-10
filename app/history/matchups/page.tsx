@@ -1,10 +1,10 @@
 import HistoryShell from "@/components/HistoryShell";
-import { MatchupsTable } from "@/components/CareerHistoryView";
+import { MatchupFeed } from "@/components/MatchupFeed";
 
 export default function Page() {
   return (
-    <HistoryShell title="Matchups" intro="Every matchup you've ever played, newest first.">
-      {(log) => <MatchupsTable log={log} />}
+    <HistoryShell title="Matchups">
+      {(log) => <MatchupFeed log={log} />}
     </HistoryShell>
   );
 }

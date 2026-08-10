@@ -17,7 +17,18 @@ export default function StarterRankingsView({
 }) {
   return (
     <section className="sr-card">
-      <h2 className="sr-title">Starter Rankings Within Your League for: {team}</h2>
+      {/*
+        Two spellings, swapped by breakpoint rather than by width detection — the long one
+        wrapped to three lines on a phone and pushed the chart it titles below the fold.
+        The team name is dropped rather than truncated: on mobile you reach this from your
+        own team's page, so "for: Hustle and Hart" is answering a question nobody asked.
+      */}
+      <h2 className="sr-title">
+        <span className="sr-title-full">
+          Starter Rankings Within Your League for: {team}
+        </span>
+        <span className="sr-title-short">Starter Rankings</span>
+      </h2>
 
       <div className="sr-shots">
         {ranks.map((r) => {

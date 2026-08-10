@@ -9,7 +9,7 @@ import {
   GraphUpIcon,
   PersonBadgeIcon,
   ShuffleIcon,
-  SettingsIcon,
+  BracketIcon,
 } from "@/components/Icons";
 
 /**
@@ -44,22 +44,21 @@ import {
  * the kind of standing link that gets a 50/50 number read as a verdict on a finished
  * bracket.
  *
- * Agent has no tile here — it leads the bottom nav instead (see SECTIONS in lib/nav.ts),
- * so it's one tap from anywhere rather than a launcher stop. Settings took its old slot:
- * giving Settings a whole bottom-bar icon spent one of five precious slots on a page
- * visited rarely, and folding it into Tools buried it a level deep. A tile costs nothing
- * extra and puts it one tap from Home like everything else here.
+ * Agent and Settings have no tile: both live in the MORE section on the bottom bar, which
+ * is one tap from anywhere. Season Summary took the freed slot and leads the grid.
  */
 const TILES = [
+  // Season Summary leads: it is the "how did it go" page, and in the offseason it is the
+  // first thing anyone opens the app for.
+  { href: "/season", label: "Season Summary", Icon: TrophyIcon },
   { href: "/scoreboard", label: "Current Matchup", Icon: ChartIcon },
   { href: "/schedule", label: "Schedule", Icon: CalendarIcon },
   { href: "/season-stats", label: "Season Stats", Icon: ClipboardDataIcon },
   { href: "/league-stats", label: "League Stats", Icon: TableIcon },
-  { href: "/rankings", label: "Power Rankings", Icon: GraphUpIcon },
-  { href: "/player", label: "Player Card", Icon: TrophyIcon },
-  { href: "/player-value", label: "Player Value", Icon: PersonBadgeIcon },
+  { href: "/rankings", label: "Power Rankings", Icon: BracketIcon },
+  { href: "/player", label: "Player Card", Icon: PersonBadgeIcon },
+  { href: "/player-value", label: "Player Value", Icon: GraphUpIcon },
   { href: "/trade", label: "Trade Simulator", Icon: ShuffleIcon },
-  { href: "/settings", label: "Settings", Icon: SettingsIcon },
 ];
 
 /**
