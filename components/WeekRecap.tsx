@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { AcquisitionLine, CategorySheet, PlayerBoxTable, tally } from "./BoxScoreSheet";
+import Board from "./Board";
 import { type LeagueData } from "@/lib/league";
 import type { BoxScores } from "@/lib/loadLeague";
 
@@ -46,7 +47,14 @@ export function buildWeekRecap({
   myTeamId: number;
   /** Per-player lines, or null when the export predates them. */
   box: BoxScores | null;
-}): { oppId: number; matchup: ReactNode; mine: ReactNode; opp: ReactNode } | null {
+}): {
+  oppId: number;
+  /** The scoreline on its own, for the mobile slot above the tabs — see Board.tsx. */
+  board: ReactNode;
+  matchup: ReactNode;
+  mine: ReactNode;
+  opp: ReactNode;
+} | null {
   const result = (league.periodResults ?? []).find((p) => p.period === period);
   const mine = result?.games.find((g) => g.homeId === teamId || g.awayId === teamId);
   if (!result || !mine) return null;
@@ -66,10 +74,22 @@ export function buildWeekRecap({
   const oppAcq = isHome ? mine.awayAcq : mine.homeAcq;
 
   const score = tally(league, you, opp);
-  const oppScore = { win: score.loss, loss: score.win, tie: score.tie };
 
   const linesFor = (id: number) => box?.periods[String(period)]?.[String(id)] ?? [];
   const gp = (id: number) => linesFor(id).reduce((a, l) => a + (l.gp || 0), 0);
+
+  const board = (
+    <Board
+      youName={name(teamId)}
+      oppName={name(oppId)}
+      youScore={score.win}
+      oppScore={score.loss}
+      tie={score.tie}
+      status="Final"
+      youMeta={record(teamId)}
+      oppMeta={record(oppId)}
+    />
+  );
 
   const matchup = (
     <>
@@ -114,30 +134,7 @@ export function buildWeekRecap({
           Board, acquisition/GP line and category sheet share ONE panel on desktop — see
           the note in Scoreboard.tsx. */}
       <div className="sb-panel">
-      <div className="board">
-        <div className="board-side">
-          <span className="board-team board-you">{name(teamId)}</span>
-          <span className="rc-meta">{record(teamId)}</span>
-        </div>
-        <div className={`board-score ${score.win >= score.loss ? "sb-win" : "sb-lose"}`}>
-          {score.win}
-        </div>
-        <div className="board-center">
-          <span className="board-status">Final</span>
-          {score.tie > 0 && (
-            <span className="board-ties">
-              {score.tie} {score.tie === 1 ? "tie" : "ties"}
-            </span>
-          )}
-        </div>
-        <div className={`board-score ${oppScore.win >= oppScore.loss ? "sb-win" : "sb-lose"}`}>
-          {score.loss}
-        </div>
-        <div className="board-side board-side-right">
-          <span className="board-team board-opp">{name(oppId)}</span>
-          <span className="rc-meta">{record(oppId)}</span>
-        </div>
-      </div>
+      {board}
 
       <CategorySheet
         league={league}
@@ -165,6 +162,7 @@ export function buildWeekRecap({
 
   return {
     oppId,
+    board,
     matchup,
     mine: (
       <PlayerBoxTable

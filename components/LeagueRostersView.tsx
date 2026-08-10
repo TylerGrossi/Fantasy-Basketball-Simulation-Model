@@ -67,11 +67,18 @@ export default function LeagueRostersView({
   const layout = league.rosterSlots?.length ? league.rosterSlots : DEFAULT_SLOTS;
 
   /*
-   * ONE TEAM AT A TIME, defaulting to yours.
+   * ONE TEAM AT A TIME, defaulting to yours — ON A PHONE ONLY.
    *
-   * Ten cards of sixteen rows is 160 rows of continuous scroll, and nine of them are
-   * somebody else's roster. The picker makes the page answer "who is on this team"
-   * directly; "All teams" restores the full value board for anyone using it that way.
+   * Ten cards of sixteen rows is 160 rows of continuous scroll on a 390px screen, and nine
+   * of them are somebody else's roster. The picker makes the page answer "who is on this
+   * team" directly; "All teams" restores the full board for anyone using it that way.
+   *
+   * A laptop has no such problem: `.lr-cols` is a two-column grid there, so the board is
+   * five rows of two cards that you SCAN, and scanning ten rosters at once is the entire
+   * point of a league-wide roster page. The desktop tree below is that board, unfiltered
+   * and on the season value column — see the `.only-app` / `.only-web` block in
+   * globals.css. Both filter controls are inside the phone tree, because both exist to
+   * cut something down that is only too big there.
    */
   const [team, setTeam] = useState<string>(myTeam || ALL_TEAMS);
   /*
@@ -96,72 +103,90 @@ export default function LeagueRostersView({
    * the league, not its place among whatever the picker left showing. Filtering first
    * would make every selected team "1st".
    */
-  const ranked = useMemo(() => {
-    return league.teams
+  const rank = (col: "value" | "recent" | "recent15") =>
+    league.teams
       .map((t) => {
         const players = byOwner.get(t.name) ?? [];
         return {
           team: t,
           players,
-          total: players.reduce((a, p) => a + (p[valueCol] ?? 0), 0),
+          total: players.reduce((a, p) => a + (p[col] ?? 0), 0),
         };
       })
       .sort((a, b) => b.total - a.total)
       .map((c, i) => ({ ...c, rank: i + 1 }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [league.teams, pool, valueCol]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ranked = useMemo(() => rank(valueCol), [league.teams, pool, valueCol]);
+  /* The desktop board is always on the SEASON column — it has no basis control, so there
+     is nothing to say which of the three it is showing, and a value board with an unstated
+     basis is a board you can misread. When the phone control is on Season (its default)
+     this is the same array; `useMemo` on both keeps the extra pass off every re-render. */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const rankedSeason = useMemo(() => rank("value"), [league.teams, pool]);
 
   const shown = team === ALL_TEAMS ? ranked : ranked.filter((c) => c.team.name === team);
 
+  const card = (
+    c: { team: Team; players: PoolPlayer[]; total: number },
+    col: "value" | "recent" | "recent15"
+  ) => (
+    <RosterCard
+      key={c.team.id}
+      team={c.team}
+      players={c.players}
+      total={c.total}
+      valueCol={col}
+      layout={layout}
+      record={recordByTeam.get(c.team.id)}
+    />
+  );
+
   return (
     <>
-      <FilterBar className="controls">
-        <div className="ms lr-f-team">
-          <div className="ms-label">Team</div>
-          <select
-            className="field field-select"
-            value={team}
-            onChange={(e) => setTeam(e.target.value)}
-            aria-label="Team"
-          >
-            {/* Ranked order, so the picker reads as the value board it is filtering. */}
-            {ranked.map((c) => (
-              <option key={c.team.id} value={c.team.name}>
-                {c.rank}. {c.team.name}
-              </option>
-            ))}
-            <option value={ALL_TEAMS}>All teams</option>
-          </select>
-        </div>
-        <div className="ms lr-f-basis">
-          <div className="ms-label">Value</div>
-          <select
-            className="field field-select"
-            value={basis}
-            onChange={(e) => setBasis(e.target.value as ValueBasis)}
-            aria-label="Value basis"
-          >
-            {VALUE_BASES.map((b) => (
-              <option key={b} value={b}>
-                {b === "Regular" ? "Season" : b}
-              </option>
-            ))}
-          </select>
-        </div>
-      </FilterBar>
+      {/* PHONE: pick a team, pick a basis, read one card. */}
+      <div className="only-app">
+        <FilterBar className="controls">
+          <div className="ms lr-f-team">
+            <div className="ms-label">Team</div>
+            <select
+              className="field field-select"
+              value={team}
+              onChange={(e) => setTeam(e.target.value)}
+              aria-label="Team"
+            >
+              {/* Ranked order, so the picker reads as the value board it is filtering. */}
+              {ranked.map((c) => (
+                <option key={c.team.id} value={c.team.name}>
+                  {c.rank}. {c.team.name}
+                </option>
+              ))}
+              <option value={ALL_TEAMS}>All teams</option>
+            </select>
+          </div>
+          <div className="ms lr-f-basis">
+            <div className="ms-label">Value</div>
+            <select
+              className="field field-select"
+              value={basis}
+              onChange={(e) => setBasis(e.target.value as ValueBasis)}
+              aria-label="Value basis"
+            >
+              {VALUE_BASES.map((b) => (
+                <option key={b} value={b}>
+                  {b === "Regular" ? "Season" : b}
+                </option>
+              ))}
+            </select>
+          </div>
+        </FilterBar>
 
-      <div className="lr-cols">
-        {shown.map(({ team: t, players, total }) => (
-          <RosterCard
-            key={t.id}
-            team={t}
-            players={players}
-            total={total}
-            valueCol={valueCol}
-            layout={layout}
-            record={recordByTeam.get(t.id)}
-          />
-        ))}
+        <div className="lr-cols">{shown.map((c) => card(c, valueCol))}</div>
+      </div>
+
+      {/* LAPTOP: every roster, best team first, no controls. */}
+      <div className="only-web">
+        <div className="lr-cols">{rankedSeason.map((c) => card(c, "value"))}</div>
       </div>
     </>
   );

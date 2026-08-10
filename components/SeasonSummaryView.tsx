@@ -45,6 +45,10 @@ export default function SeasonSummaryView({
   const [teamId, setTeamId] = useState(myTeamId);
   const champ = rows[0];
   const team = rows.find((r) => r.teamId === teamId) ?? rows[0];
+  /* The desktop header never moves off your own team, so it reads the row directly rather
+     than the selection. Falls back to the leader for the case the standings carry no row
+     for the configured team at all — a mid-import export, or a team that was removed. */
+  const mine = rows.find((r) => r.teamId === myTeamId) ?? rows[0];
 
   return (
     <>
@@ -57,22 +61,52 @@ export default function SeasonSummaryView({
       </div>
 
       {/*
-        THE LADDER IS THE PICKER. There was a dropdown here; it did the same job as tapping
-        a row and meant the page carried two controls for one choice. Tapping a team is the
-        obvious gesture on a list of teams, so the dropdown went.
+        PHONE — THE LADDER IS THE PICKER. There was a dropdown here; it did the same job as
+        tapping a row and meant the page carried two controls for one choice. Tapping a
+        team is the obvious gesture on a list of teams, so the dropdown went.
 
         Three KPIs, not four: All-Play % is already the figure on every ladder row and the
         rank is the row's own number, so repeating either here would be the same fact
-        twice on one screen.
+        twice on one screen — and one screen is all there is.
       */}
-      <p className="ss-finish">
-        <strong>{team.teamName}</strong> finished{" "}
-        <strong className="ss-place">{ordinal(team.rank)}</strong>.
-      </p>
-      <div className="metrics ss-metrics">
-        <Metric label="Record" value={team.record} />
-        <Metric label="Win %" value={pct(team.winPct)} />
-        <Metric label="Luck" value={signed(team.luck)} tone={team.luck} />
+      <div className="only-app">
+        <p className="ss-finish">
+          <strong>{team.teamName}</strong> finished{" "}
+          <strong className="ss-place">{ordinal(team.rank)}</strong>.
+        </p>
+        <div className="metrics ss-metrics">
+          <Metric label="Record" value={team.record} />
+          <Metric label="Win %" value={pct(team.winPct)} />
+          <Metric label="Luck" value={signed(team.luck)} tone={team.luck} />
+        </div>
+      </div>
+
+      {/*
+        LAPTOP — YOUR team, all four figures, and nothing to select.
+
+        The re-pointing KPIs answer "how did HE do?" on a phone because the phone cannot
+        show you: the ladder row carries a name and one percentage, so the only way to see
+        a rival's four numbers is to tap them up here. On desktop the six-column table
+        below already prints all four for all ten teams at once, so a tap-to-re-point
+        header would move numbers that are also sitting three inches lower, unmoved — two
+        readings of the same fact on one screen, which is worse than none. Fixed on your
+        team, these are a summary of YOUR season, which is what the page is titled.
+
+        Four tiles here and three there for the same reason: All-Play % is on the ladder
+        row on a phone, and is a table column that this block does not otherwise summarise
+        on a laptop.
+      */}
+      <div className="only-web">
+        <p className="ss-finish">
+          <strong>{mine.teamName}</strong> finished{" "}
+          <strong className="ss-place">{ordinal(mine.rank)}</strong>.
+        </p>
+        <div className="metrics ss-metrics">
+          <Metric label="Category Record" value={mine.record} />
+          <Metric label="Win %" value={pct(mine.winPct)} />
+          <Metric label="All-Play Win %" value={pct(mine.allPlayPct)} />
+          <Metric label="Luck" value={signed(mine.luck)} />
+        </div>
       </div>
 
       <h2 className="pr-title">Final Standings</h2>

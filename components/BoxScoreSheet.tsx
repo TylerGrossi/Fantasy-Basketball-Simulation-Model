@@ -106,8 +106,11 @@ export function CategorySheet({
           const b = categoryValue(league.stats, oppVec, c);
           const youWins = lower.has(c) ? a < b : a > b;
           const oppWins = lower.has(c) ? b < a : b > a;
+          // Which SIDE won is a property of the row, not just of a cell: it drives the
+          // caret that ESPN puts beside the category label, pointing at the winner.
+          const side = youWins ? "cs-vert-left" : oppWins ? "cs-vert-right" : "";
           return (
-            <div className="cs-vert-row" key={c}>
+            <div className={`cs-vert-row ${side}`} key={c}>
               <span className={`cs-vert-v mono ${youWins ? "cs-vert-win" : ""}`}>
                 {formatValue(c, a)}
               </span>

@@ -17,12 +17,20 @@ import { useState, type ReactNode } from "react";
 export default function ScoreboardTabs({
   mineLabel,
   oppLabel,
+  board,
   mine,
   matchup,
   opp,
 }: {
   mineLabel: string;
   oppLabel: string;
+  /**
+   * The scoreline, pinned ABOVE the tabs on mobile — the score is the thing you opened
+   * the page for, and it shouldn't disappear when you tab over to a box score. Desktop
+   * hides this copy (`.sbx-board`) and keeps the board inside the matchup panel, where it
+   * shares a frame with the category sheet.
+   */
+  board?: ReactNode;
   mine: ReactNode;
   matchup: ReactNode;
   opp: ReactNode;
@@ -36,6 +44,7 @@ export default function ScoreboardTabs({
 
   return (
     <div className="sbx">
+      {board && <div className="sbx-board">{board}</div>}
       <div className="sbx-tabs" role="tablist">
         {tabs.map((t) => (
           <button

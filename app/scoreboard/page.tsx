@@ -86,6 +86,7 @@ export default async function Page({
           key={focusId}
           mineLabel={abbrev(focusId)}
           oppLabel={abbrev(recap.oppId)}
+          board={recap.board}
           mine={recap.mine}
           matchup={recap.matchup}
           opp={recap.opp}
@@ -136,7 +137,23 @@ export default async function Page({
   return (
     <>
       <WeekSelect weeks={weeks} selected={league.period} current={league.period} />
-      <ScoreboardTabs
+      {/* Unlike the recap above, the live week composes the tabs from INSIDE `Scoreboard`
+          — the board renders twice (above the tabs on mobile, in the panel on desktop) and
+          both copies have to come from its one `useLiveTotals`. The box tables are still
+          built here, on the server, and handed down. */}
+      <Scoreboard
+        key={league.period}
+        live={!demo}
+        league={slim}
+        matchup={r.matchup}
+        isHome={r.isHome}
+        teamId={me.id}
+        youName={r.youName}
+        oppName={r.oppName}
+        youAcq={youAcq}
+        oppAcq={oppAcq}
+        youGp={gp(me.id)}
+        oppGp={gp(r.oppId)}
         mineLabel={abbrev(me.id)}
         oppLabel={abbrev(r.oppId)}
         mine={
@@ -144,22 +161,6 @@ export default async function Page({
             title={`${r.youName} box score`}
             stats={box?.stats ?? league.stats}
             lines={lines(me.id)}
-          />
-        }
-        matchup={
-          <Scoreboard
-            key={league.period}
-            live={!demo}
-            league={slim}
-            matchup={r.matchup}
-            isHome={r.isHome}
-            teamId={me.id}
-            youName={r.youName}
-            oppName={r.oppName}
-            youAcq={youAcq}
-            oppAcq={oppAcq}
-            youGp={gp(me.id)}
-            oppGp={gp(r.oppId)}
           />
         }
         opp={

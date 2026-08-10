@@ -4781,12 +4781,13 @@ table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
     border-bottom: 3.5px solid transparent;
   }
   .cs-vert-left .cs-vert-cat::before {
-    border-right: 5px solid var(--good);
+    border-right: 5px solid var(--cobalt);
   }
   .cs-vert-right .cs-vert-cat::after {
-    border-left: 5px solid var(--good);
+    border-left: 5px solid var(--cobalt);
   }
   .cs-vert-v {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4799,21 +4800,35 @@ table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
     padding: 0.5rem 0.35rem;
   }
   /*
-   * The won half: a filled green band with a solid edge bar on the OUTER side of the row,
-   * where ESPN puts its accent. Bar via an inset shadow rather than a border so it costs
-   * the cell no width and the two halves stay exactly symmetric.
+   * The won half: a light blue band, the number in plain bold ink, and a solid blue edge
+   * bar on the OUTER side of the row where ESPN puts its accent. The figure is NOT
+   * coloured — the band and the bar already say "won", and a coloured number on a tinted
+   * band makes the value harder to read, not easier.
    */
   .cs-vert .cs-vert-win {
-    background: rgba(46, 125, 70, 0.14);
-    color: var(--good);
+    background: var(--cobalt-soft);
+    color: var(--ink);
     font-weight: 700;
   }
-  .cs-vert-row > .cs-vert-win:first-child {
-    box-shadow: inset 4px 0 0 var(--good);
+  /*
+   * The bar runs UNBROKEN down a run of won rows. As an inset shadow on the cell it stopped
+   * at each row's 1px top border, which printed a white nick every row and made one band
+   * read as a stack of separate chips. An absolutely-positioned bar can cover that border
+   * (`top: -1px`), while the divider still shows across the rest of the row.
+   */
+  .cs-vert-row > .cs-vert-win::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    bottom: 0;
+    width: 4px;
+    background: var(--cobalt);
   }
-  .cs-vert-row > .cs-vert-win:last-child {
-    box-shadow: inset -4px 0 0 var(--good);
-  }
+  .cs-vert-row > .cs-vert-win:first-child::before { left: 0; }
+  .cs-vert-row > .cs-vert-win:last-child::before { right: 0; }
+  /* The first row's bar has no border above it to cover, and `-1px` would push it under
+     the header's own bottom rule. */
+  .cs-vert-row:nth-child(2) > .cs-vert-win::before { top: 0; }
 }
 /* A won category. Tinted rather than coloured text: fifteen green numbers in a row reads
    as decoration, a shaded cell reads as a result. */

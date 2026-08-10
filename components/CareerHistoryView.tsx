@@ -2,6 +2,8 @@ import SortableTable, { type SortCol, type SortRow } from "./SortableTable";
 import CareerPlayersTable, { type CareerPlayerRow } from "./CareerPlayersTable";
 import {
   RATE_MIN_GP,
+  careerTotals,
+  gameLog,
   hallOfFame,
   headToHead,
   managerTable,
@@ -42,11 +44,84 @@ function ordinal(n: number): string {
   return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Seasons — the landing page, DESKTOP                                         */
+/* -------------------------------------------------------------------------- */
+
 /*
- * The landing page's own two components — a 4-tile career strip and an eight-column
- * seasons table — used to live here. They are now `components/SeasonShelf.tsx`, which
- * says why the table became a shelf.
+ * The wide half of /history. `components/SeasonShelf.tsx` is the phone half, and its
+ * header comment says why a shelf reads better there — everything it argues is true of a
+ * 390px screen and none of it is true of a 1180px one. A laptop has the width to put
+ * eight columns side by side, and side by side is the only way one season gets COMPARED
+ * to another. Both are rendered; `.only-web` / `.only-app` in globals.css pick.
  */
+
+/** Career totals, as five tiles. The shelf's strip is the same figures cut to two. */
+export function CareerStrip({ log }: { log: CareerLog }) {
+  const t = careerTotals(log);
+  const [w, l, ti] = t.record;
+  /*
+   * Five tiles, no sub-line.
+   *
+   * The win rate was the record tile's caption, which buried the one number most likely
+   * to be looked up on a page of career totals. Promoting it to its own tile is also what
+   * made the sub-row removable: of the four captions, it was the only one carrying a
+   * figure rather than restating its label ("2017-26" under Seasons, "finished 1st" under
+   * Titles), and a row of tiles reads faster when every tile is one number.
+   *
+   * "Category" is in the label rather than under it because the record beside it is in
+   * categories too — 814-496-25 is categories won across six seasons, not matchups, and
+   * an unqualified "Win %" next to it would invite reading both as a matchup record.
+   *
+   * No tile colours its value. Green is the app's "this is good" signal and it was firing
+   * on two of five here — a career win rate and a title count are the subject of the page,
+   * not a warning, and colouring some tiles and not others made the plain ones read as
+   * though something were wrong with them.
+   */
+  return (
+    <div className="metrics metrics-5">
+      <Tile label="Seasons" value={String(t.seasons)} />
+      <Tile label="All-time record" value={`${w}-${l}${ti ? `-${ti}` : ""}`} />
+      <Tile label="Category win %" value={pct(t.winPct)} />
+      <Tile label="Titles" value={String(t.titles)} />
+      <Tile label="Players rostered" value={String(t.distinctPlayers)} />
+    </div>
+  );
+}
+
+export function SeasonsTable({ log }: { log: CareerLog }) {
+  const cols: SortCol[] = [
+    { key: "season", label: "Season" },
+    { key: "team", label: "Team" },
+    { key: "league", label: "League" },
+    { key: "record", label: "Record", num: true },
+    { key: "winPct", label: "Win %", num: true },
+    { key: "finish", label: "Finish", num: true },
+    { key: "players", label: "Players used", num: true },
+  ];
+  const rows: SortRow[] = log.seasons.map((s) => {
+    const [w, l, t] = s.record;
+    const decided = w + l;
+    const wp = decided > 0 ? w / decided : 0;
+    return {
+      id: `${s.leagueId}-${s.season}`,
+      cells: {
+        season: { sort: s.season, text: seasonLabel(s.season) },
+        team: { sort: s.teamName, text: s.teamName },
+        league: { sort: s.leagueName || "", text: s.leagueName || "—" },
+        record: { sort: wp, text: `${w}-${l}${t ? `-${t}` : ""}` },
+        winPct: { sort: wp, text: pct(wp) },
+        finish: {
+          sort: s.finalStanding || s.standing || 99,
+          text: s.finalStanding ? ordinal(s.finalStanding) : "—",
+          color: s.finalStanding === 1 ? "var(--good)" : undefined,
+        },
+        players: { sort: s.players.length, text: String(s.players.length) },
+      },
+    };
+  });
+  return <SortableTable cols={cols} rows={rows} defaultKey="season" defaultDesc />;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Players                                                                     */
@@ -217,10 +292,80 @@ export function ManagersTable({ log }: { log: CareerLog }) {
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Matchups — DESKTOP                                                          */
+/* -------------------------------------------------------------------------- */
+
 /*
- * The matchup log used to be a nine-column table here. It is now the scores feed in
- * `components/MatchupFeed.tsx` — two scores on the outside, the result in the middle.
+ * The wide half of /history/matchups; `components/MatchupFeed.tsx` is the phone half.
+ *
+ * The feed's case against this table — nine columns, three of them repeating the season
+ * down 128 rows — is a case about a 390px screen. On a laptop those columns are the
+ * feature: this is the only view of the log you can SORT, so "my worst week ever" and
+ * "every game against Ronnie" are one header click away, and the feed cannot answer
+ * either. Sorted, the repeated Season and Type columns stop being repetition.
  */
+
+export function MatchupsTable({ log }: { log: CareerLog }) {
+  const games = gameLog(log);
+  const cols: SortCol[] = [
+    { key: "when", label: "Season" },
+    { key: "week", label: "Week", num: true },
+    { key: "team", label: "Your team" },
+    { key: "opp", label: "Opponent" },
+    { key: "cats", label: "Score", num: true },
+    { key: "oppCats", label: "Opp", num: true },
+    { key: "type", label: "Type" },
+    { key: "diff", label: "Diff", num: true },
+    { key: "result", label: "Result" },
+  ];
+  const rows: SortRow[] = games.map((g, i) => {
+    const d = g.scoreFor - g.scoreAgainst;
+    // A points week prints 1,643.0; a category week prints 9. Same column, different
+    // units — which is why the header says "Score" and the Type column names the format.
+    const fmt = (v: number) =>
+      g.scoring === "points" ? v.toFixed(1) : String(v);
+    /* A first-round playoff bye. ESPN files it as a 0-0 entry with no opponent, so every
+       score column here would otherwise print a zero that looks like a shutout. The row
+       stays — earning a bye is worth seeing — but as dashes. */
+    const bye = g.bye || g.result === "BYE";
+    return {
+      id: `${g.season}-${g.week}-${i}`,
+      cells: {
+        // Sorted on a composite so "newest first" holds ACROSS seasons — sorting on the
+        // week alone would interleave every season's week 1.
+        when: { sort: g.season * 100 + (g.week ?? 0), text: seasonLabel(g.season) },
+        week: {
+          sort: g.week ?? 0,
+          text: g.playoff ? `${g.week} (PO)` : String(g.week ?? "—"),
+        },
+        team: { sort: g.teamName, text: g.teamName },
+        opp: { sort: g.oppOwner, text: bye ? "—" : g.oppOwner },
+        cats: { sort: g.scoreFor, text: bye ? "—" : fmt(g.scoreFor) },
+        oppCats: { sort: g.scoreAgainst, text: bye ? "—" : fmt(g.scoreAgainst) },
+        type: {
+          sort: g.scoring,
+          text: bye ? "—" : g.scoring === "points" ? "Points" : "Cats",
+        },
+        diff: {
+          sort: d,
+          text: bye ? "—" : `${d > 0 ? "+" : ""}${fmt(d)}`,
+          color: bye ? undefined : d > 0 ? "var(--good)" : d < 0 ? "var(--bad)" : undefined,
+        },
+        result: {
+          sort: g.result,
+          text: bye ? "Bye" : g.result === "W" ? "Won" : g.result === "L" ? "Lost" : "Tied",
+          color:
+            bye ? "var(--ink-3)"
+              : g.result === "W" ? "var(--good)"
+                : g.result === "L" ? "var(--bad)"
+                  : undefined,
+        },
+      },
+    };
+  });
+  return <SortableTable cols={cols} rows={rows} defaultKey="when" defaultDesc />;
+}
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
