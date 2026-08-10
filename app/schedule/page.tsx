@@ -44,6 +44,25 @@ export default async function Page() {
    */
   const dates = (matchup: string) => /\(([^)]+)\)/.exec(matchup ?? "")?.[1] ?? "";
 
+  /**
+   * `"@ Bryant's Brilliant Team (99-179-7)"` -> away flag, name, and nothing else.
+   *
+   * The export packs three facts into one string. The wide table prints it whole because
+   * it has the room; the phone list needs them apart, so the away marker can read as
+   * "at" the way every schedule screen writes it, and the season record — which belongs
+   * to the opponent, not to this matchup — can be left off a row that is already three
+   * columns wide.
+   */
+  const splitOpponent = (raw: string) => {
+    const text = (raw ?? "").trim();
+    const away = text.startsWith("@");
+    const name = text
+      .replace(/^@\s*/, "")
+      .replace(/\s*\([^)]*\)\s*$/, "")
+      .trim();
+    return { away, name: name || text };
+  };
+
   const w = rows.filter((r) => r.result === "W").length;
   const l = rows.filter((r) => r.result === "L").length;
   const t = rows.filter((r) => r.result === "T").length;
@@ -64,7 +83,7 @@ export default async function Page() {
     <>
       <h1>Schedule</h1>
 
-      <div className="metrics">
+      <div className="metrics sched-desk">
         <Metric label="Total record" value={cats.join("-")} />
         <Metric label="Record" value={`${w}-${l}-${t}`} />
         <Metric
@@ -88,7 +107,7 @@ export default async function Page() {
       </div>
 
       {(history.luckyWeeks.length > 0 || history.unluckyWeeks.length > 0) && (
-        <p className="caption">
+        <p className="caption sched-desk">
           {history.unluckyWeeks.length > 0 && (
             <>
               <strong>{history.unluckyWeeks.length}</strong>{" "}
@@ -107,7 +126,53 @@ export default async function Page() {
         </p>
       )}
 
-      <div className="table-scroll">
+      {/*
+        PHONE: the same season as a three-column list — week, score, opponent.
+        Modelled on ESPN's own League Schedule screen, which is what this page is for.
+
+        The nine-column table is 923px wide in a 356px box, so on a phone the whole
+        right-hand half of it — including the score — is behind a sideways scroll that is
+        easy to miss entirely. The all-play columns are dropped here rather than squeezed:
+        they are the reason the table exists on desktop, and a bar chart 40px wide says
+        nothing. Both layouts are rendered and CSS picks one, so there is no width probe
+        and no flash of the wrong one.
+      */}
+      <div className="msched" aria-hidden="false">
+        <div className="msched-head">
+          <span>Week</span>
+          <span>Score</span>
+          <span>Opponent</span>
+        </div>
+        {rows.map((r) => {
+          // A week with no result has not been played: ESPN offers a preview there, and
+          // our equivalent is the same scoreboard page showing the projection.
+          const played = Boolean(r.result);
+          const tone =
+            r.result === "W" ? "msched-w" : r.result === "L" ? "msched-l" : "msched-t";
+          const opp = splitOpponent(r.opponent);
+          return (
+            <Link
+              key={r.period}
+              href={`/scoreboard?period=${r.period}`}
+              className="msched-row"
+            >
+              <span className="msched-wk">{weekTag(r.period)}</span>
+              <span className={played ? `msched-score ${tone}` : "msched-preview"}>
+                {played ? r.score || r.winPct || "—" : "Preview"}
+              </span>
+              <span className="msched-opp">
+                <span className="msched-team">
+                  {opp.away && <span className="msched-at">at </span>}
+                  {opp.name}
+                </span>
+                {r.manager && <span className="msched-mgr">{r.manager}</span>}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="table-scroll sched-wide">
         <table className="sheet">
           <thead>
             <tr>

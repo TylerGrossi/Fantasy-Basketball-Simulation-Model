@@ -176,7 +176,7 @@ export default async function Page() {
         rows={catRows}
         defaultKey="rank"
         defaultDesc={false}
-        className="sticky-2"
+        className="sticky-2 ls-cats"
       />
 
       {hasTxnCounter && (

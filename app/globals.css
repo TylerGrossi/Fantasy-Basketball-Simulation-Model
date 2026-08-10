@@ -382,6 +382,30 @@ body {
 .crumb,
 .bottom-nav { display: none; }
 
+/* -------- the app / web split --------
+
+   Four pages render BOTH layouts and let the breakpoint pick one: History, History >
+   Matchups, League Rosters and Season Summary. On each, the phone-shaped layout — the
+   season shelf, the scores feed, the one-team roster picker, the tap-to-re-point KPIs —
+   is the one the owner wants ON A PHONE, and the table or full board it replaced is the
+   one they want ON A LAPTOP. Neither is "the old version": they are both current, and
+   which one is right depends entirely on the width available. "A website is not a phone
+   app" — the same rule the navigation already follows.
+
+   Both trees ship in the HTML, which is the point: no width detection on the server and
+   no client remeasure, so neither layout can flash before the right one wins. It costs a
+   duplicate DOM on four pages, all of them static reads.
+
+   PUT THESE ON A BARE WRAPPER DIV, never on an element that carries its own `display`.
+   Both rules live here near the top of the file, so at equal specificity a later
+   `.lr-cols { display: grid }` would beat `.only-app { display: none }` on source order
+   and leak the phone layout onto the desktop. A wrapper has nothing to lose. */
+.only-app { display: none; }
+@media (max-width: 767px) {
+  .only-app { display: block; }
+  .only-web { display: none; }
+}
+
 /* ---------------------------------------------------------------- typography */
 
 h1,
@@ -605,6 +629,12 @@ h2 {
   .board-team {
     font-size: 1.05rem;
     white-space: normal;
+    /* No cobalt/clay rule under the names here. On desktop the underline keys each side to
+       the coloured category bars further down the page; on a phone those bars aren't
+       rendered (the vertical head-to-head has no colour but the green win band), so the
+       two lines were decoration keyed to nothing. */
+    border-bottom: 0;
+    padding-bottom: 0;
   }
   .board-score {
     font-size: 2rem;
@@ -4691,14 +4721,20 @@ table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
     overflow: hidden;
     margin: 0.6rem 0;
   }
+  /*
+   * ESPN's app layout: the two values are FULL-BLEED halves of the row, not padded pills
+   * floating inside it, with the category label in a narrow lane between them. That is
+   * what makes the winning side read as a filled band rather than as a highlighted word —
+   * so the row has no side padding and no column gap, and each half carries its own.
+   */
   .cs-vert-row {
     display: grid;
     /* The middle column is sized to the label, so both numbers get equal room and the
        two value columns stay symmetric about it. */
     grid-template-columns: 1fr 5.2rem 1fr;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.45rem 0.7rem;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
     background: var(--card);
     border-top: 1px solid var(--line-2);
   }
@@ -4706,16 +4742,22 @@ table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
   .cs-vert-head {
     background: var(--surface-2);
     border-bottom: 1px solid var(--line);
+    padding: 0.4rem 0;
   }
   .cs-vert-team {
     font-size: 0.72rem;
     font-weight: 700;
     text-align: center;
+    padding: 0 0.4rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .cs-vert-cat {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.28rem;
     font-size: 0.66rem;
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -4723,21 +4765,54 @@ table.sheet.rc-sheet .rc-team { font-weight: 600; white-space: nowrap; }
     color: var(--ink-3);
     text-align: center;
   }
+  /*
+   * The caret beside the label, pointing at whichever side won — ESPN's cue, and the one
+   * thing that lets you read the winner at a glance without comparing two numbers. It is
+   * drawn from the ROW's class, so no extra markup per cell: an empty ::before holds the
+   * left slot and ::after the right, and only the winning side's is given a triangle, so
+   * the label itself never shifts between rows.
+   */
+  .cs-vert-cat::before,
+  .cs-vert-cat::after {
+    content: "";
+    width: 0;
+    height: 0;
+    border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent;
+  }
+  .cs-vert-left .cs-vert-cat::before {
+    border-right: 5px solid var(--good);
+  }
+  .cs-vert-right .cs-vert-cat::after {
+    border-left: 5px solid var(--good);
+  }
   .cs-vert-v {
-    font-size: 0.88rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
     font-weight: 600;
     text-align: center;
-    /* Shading is a cell state, so it needs the cell's own padding to sit in. */
-    padding: 0.2rem 0.35rem;
-    border-radius: 4px;
+    /* The losing side recedes rather than the winner shouting — same trick ESPN uses,
+       where the beaten number is simply grey. */
+    color: var(--ink-3);
+    padding: 0.5rem 0.35rem;
   }
-  /* Same tint as the desktop sheet's .rc-win, not the grey chip this used to be — that
-     read as a heavy tan block on a phone-width row where it's most of the row's width.
-     A light green tint reads as "won" without turning the cell into a slab. */
+  /*
+   * The won half: a filled green band with a solid edge bar on the OUTER side of the row,
+   * where ESPN puts its accent. Bar via an inset shadow rather than a border so it costs
+   * the cell no width and the two halves stay exactly symmetric.
+   */
   .cs-vert .cs-vert-win {
-    background: rgba(46, 125, 70, 0.12);
+    background: rgba(46, 125, 70, 0.14);
     color: var(--good);
     font-weight: 700;
+  }
+  .cs-vert-row > .cs-vert-win:first-child {
+    box-shadow: inset 4px 0 0 var(--good);
+  }
+  .cs-vert-row > .cs-vert-win:last-child {
+    box-shadow: inset -4px 0 0 var(--good);
   }
 }
 /* A won category. Tinted rather than coloured text: fifteen green numbers in a row reads
@@ -4862,6 +4937,18 @@ table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
    Mobile: a segmented control, one panel visible. Desktop: the pills disappear and
    every panel renders stacked — the same content, just not tabbed, matching ESPN's own
    continuous box-score page. */
+/*
+ * The scoreline pinned above the tabs, MOBILE ONLY.
+ *
+ * The board is in the DOM twice — here and inside the matchup panel — and exactly one copy
+ * is ever displayed: desktop keeps the in-panel one, where board / category sheet /
+ * acquisition line share a single frame, and hides this; mobile does the reverse, so the
+ * score stays on screen while you tab between the two box scores. Duplicating the markup
+ * rather than moving it is what keeps the desktop layout untouched, and it costs nothing —
+ * both copies render from one `useLiveTotals` (see Scoreboard.tsx).
+ */
+.sbx-board { display: none; }
+
 .sbx-tabs {
   /* Desktop-first, matching .sbx-panel below: hidden by default, shown only under the
      mobile media query. */
@@ -4930,6 +5017,12 @@ table.sheet.rc-box .rc-totals td:first-child { background: var(--surface-2); }
   .sbx-panels { display: block; }
   .sbx-panel { display: none; }
   .sbx-panel-active { display: block; }
+
+  /* The board leads the page and the tabs sit under it, so the copy still inside the
+     matchup panel would be the same scoreline printed twice. */
+  .sbx-board { display: block; }
+  .sbx-board .board { margin-top: 0; }
+  .sbx-panels .board { display: none; }
 }
 
 /* ===================== CHEAT SHEETS =====================
@@ -5447,6 +5540,20 @@ table.sheet.sticky-1 td:first-child,
 table.sheet.sticky-2 th:nth-child(2),
 table.sheet.sticky-2 td:nth-child(2) {
   box-shadow: inset -1px 0 0 var(--line-2);
+}
+
+/*
+ * Season Category Totals: room for a five-figure PTS total.
+ *
+ * The table is auto-layout, so every column is sized to exactly the widest thing in it —
+ * and PTS, the last column, held "17,594" in a 60px box that needed all 60. Zero slack
+ * survives an emulator and clips on a real phone, where the mono face measures a hair
+ * wider; that is what "the points are cut off" was. A min-width gives the season's
+ * largest number somewhere to sit on any device.
+ */
+table.sheet.ls-cats th:last-child,
+table.sheet.ls-cats td:last-child {
+  min-width: 4.4rem;
 }
 
 /* ===================== TEAM LADDER (mobile) ==================================
@@ -6949,4 +7056,111 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
   .msf-side em { font-size: 0.66rem; }
   .msf-mid b { font-size: 0.76rem; }
   .msf-mid em { font-size: 0.62rem; }
+}
+
+/* ===================== SCHEDULE (mobile) =====================================
+   The season as a list instead of a nine-column table — week, score, opponent, the
+   three things the ESPN app puts on the same screen.
+
+   The table stays the desktop view and keeps the all-play columns; there is no room for
+   them here and no way to draw a meaningful bar at this width. Both are in the markup
+   and the media query picks one, which is the pattern every other switched layout in
+   this file uses: no width detection, no flash of the wrong layout.
+   ========================================================================== */
+
+.msched { display: none; }
+
+@media (max-width: 767px) {
+  .sched-wide { display: none; }
+
+  /* The KPI tiles and the lucky/unlucky sentence are desktop furniture: the phone view is
+     the schedule itself, and four tiles plus a paragraph pushed the first week off the
+     screen. Both still render on the wide layout, where there is room to read them. */
+  .sched-desk { display: none; }
+
+  .msched {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+    overflow: hidden;
+  }
+
+  /* Same three tracks for the header and every row, so the columns line up without a
+     table. `1fr` last: the opponent takes whatever the two fixed columns leave, and a
+     long team name ellipses rather than pushing the row sideways. */
+  .msched-head,
+  .msched-row {
+    display: grid;
+    grid-template-columns: 3.1rem 5.2rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.8rem;
+  }
+
+  .msched-head {
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .msched-row {
+    border-bottom: 1px solid var(--line-2);
+    text-decoration: none;
+    color: inherit;
+    /* Comfortably past the 44px tap target these rows are the only control for. */
+    min-height: 3.4rem;
+  }
+  .msched-row:last-child { border-bottom: 0; }
+  .msched-row:active { background: var(--surface-2); }
+
+  .msched-wk {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.72rem;
+    color: var(--ink-3);
+  }
+
+  .msched-score,
+  .msched-preview {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+  /* The result rides ON the score rather than in a column of its own — the desktop table
+     can afford both, a phone cannot, and the colour says the same thing the letter did. */
+  .msched-w { color: var(--good); }
+  .msched-l { color: var(--bad); }
+  .msched-t { color: var(--ink-2); }
+  .msched-preview {
+    color: var(--cobalt);
+    font-weight: 600;
+  }
+
+  .msched-opp { min-width: 0; }
+  .msched-team,
+  .msched-mgr {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .msched-team {
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+  /* Lower-case, unbolded: it is a preposition, not part of the team's name. */
+  .msched-at {
+    font-weight: 400;
+    color: var(--ink-3);
+  }
+  .msched-mgr {
+    font-size: 0.72rem;
+    color: var(--ink-3);
+    margin-top: 0.1rem;
+  }
 }
