@@ -128,7 +128,7 @@ export default async function Page() {
   // repeated here rather than derived from a different source, so it matches Full League
   // Standings above exactly.
   const txnCols: SortCol[] = [
-    { key: "team", label: "Team Name" },
+    { key: "team", label: "Team" },
     { key: "loss", label: "Loss", num: true },
     { key: "trade", label: "Trade", num: true },
     // "Acquisitions" is the widest header in the app and sets this column's width under
@@ -158,22 +158,40 @@ export default async function Page() {
       <h1>League Stats</h1>
 
       <h2>Full League Standings</h2>
+      {/* `sticky-2`: rank + team stay put while the figures scroll under them. Freezing
+          the team alone would leave the rank floating off to the left of a frozen name. */}
       <SortableTable
         cols={standingCols}
         rows={standingRows}
         defaultKey="rank"
         defaultDesc={false}
+        className="sticky-2"
       />
 
       <h2>Season Category Totals</h2>
-      <SortableTable cols={catCols} rows={catRows} defaultKey="PTS" />
+      {/* Opens on the standings rank, not on points: the table is read as "where does
+          each team sit", and sorting by PTS answered a question nobody had asked yet. */}
+      <SortableTable
+        cols={catCols}
+        rows={catRows}
+        defaultKey="rank"
+        defaultDesc={false}
+        className="sticky-2"
+      />
 
       {hasTxnCounter && (
         <>
           <h2>Transaction Counter</h2>
           {/* Opens on acquisitions, descending: the counter is read to see who worked
               the wire hardest, and alphabetical order answered nothing. */}
-          <SortableTable cols={txnCols} rows={txnRows} defaultKey="acq" defaultDesc />
+          {/* Only one to freeze here: this table leads with the team, not a rank. */}
+          <SortableTable
+            cols={txnCols}
+            rows={txnRows}
+            defaultKey="acq"
+            defaultDesc
+            className="sticky-1"
+          />
         </>
       )}
     </>

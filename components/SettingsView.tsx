@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import type { LeagueData } from "@/lib/league";
 import { useSettings } from "@/lib/useSettings";
 import { TEAM_COOKIE } from "@/lib/teamCookie";
+import { DEFAULT_TEAM_NAME } from "@/lib/defaultTeam";
 
 /**
  * Settings. Stored in localStorage, so they survive restarts and deploys — unlike the
@@ -50,7 +51,17 @@ export default function SettingsView({
         aria-label="Team"
         style={{ minWidth: 260 }}
       >
-        <option value="">Default ({league.teams[0]?.name ?? "—"})</option>
+        {/* The app's real default is DEFAULT_TEAM_NAME, not the first team in the export
+            — this said "Default (Born In The Darkness)" while every page was in fact
+            analysing VJ Maxx. Falls back to the first team only if that name is not in
+            this league, which is the same order resolveTeam uses. */}
+        <option value="">
+          Default (
+          {league.teams.find((t) => t.name.trim() === DEFAULT_TEAM_NAME)?.name.trim() ??
+            league.teams[0]?.name ??
+            "—"}
+          )
+        </option>
         {league.teams.map((t) => (
           <option key={t.id} value={t.name}>
             {t.name}
@@ -117,11 +128,6 @@ export default function SettingsView({
           </tbody>
         </table>
       </div>
-      <p className="caption">
-        Live category totals are fetched per request. Everything else comes from the
-        snapshot above — regenerate it with the data export.
-      </p>
-
       <h2>Reset</h2>
       <button
         type="button"

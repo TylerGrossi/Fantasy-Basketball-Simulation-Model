@@ -247,21 +247,6 @@ export default function ModelBar({
             );
           })}
 
-          {/* Say exactly what the count is, because it is not a balance. */}
-          <p className="modelbar-foot">
-            No quota balance is shown because Google publishes none — a rate-limit reply
-            is the only thing that reveals a cap. Google meters the <em>key</em>, so the
-            Streamlit app, other machines and earlier runs all count against it and are
-            invisible here;{" "}
-            <a
-              href="https://aistudio.google.com/usage"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              AI Studio
-            </a>{" "}
-            has the real usage.
-          </p>
         </div>
       )}
     </div>

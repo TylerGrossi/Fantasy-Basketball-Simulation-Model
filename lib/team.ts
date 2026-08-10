@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import type { LeagueData, Team } from "./league";
 import { TEAM_COOKIE } from "./teamCookie";
+import { DEFAULT_TEAM_NAME } from "./defaultTeam";
 
 /**
  * Which team the app analyses.
@@ -31,5 +32,6 @@ export async function resolveTeam(league: LeagueData): Promise<Team> {
   }
 }
 
-/** Mirrors DEFAULT_TEAM_NAME in legacy/config.py. */
-export const DEFAULT_TEAM_NAME = "VJ Maxx";
+// Defined in lib/defaultTeam.ts so client components can read it too — this module
+// imports next/headers and cannot be pulled into the client.
+export { DEFAULT_TEAM_NAME } from "./defaultTeam";

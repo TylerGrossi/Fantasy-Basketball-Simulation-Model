@@ -243,7 +243,9 @@ export default function AgentView({
         rows={2}
         placeholder={
           configured
-            ? "Ask anything about your team or the NBA…"
+            ? // Two words shorter than it reads: at 14px the old wording still wrapped on
+              // a 360px phone, and no size that fits there is large enough to read.
+              "Ask about your team or the NBA…"
             : "The assistant is not configured"
         }
         aria-label="Message"

@@ -1677,12 +1677,29 @@ table.sheet.ss-standings td {
   .ss-finish {
     font-size: 0.92rem;
   }
-  /* The KPI row is off on phones. Four figures wrapped 2-up filled most of a screen
-     before the standings table — which is the thing you actually came to read, and which
-     carries all four of these numbers per team anyway. Desktop keeps them. */
-  .ss-metrics {
-    display: none;
+  /*
+   * The KPI row used to be hidden here, back when it was FOUR tall tiles restating columns
+   * the standings table already carried. It is now THREE tiles that re-point when you tap
+   * a team — the reason this page is interactive at all — so hiding it removed the feature.
+   *
+   * 3-up and short: three figures on one line cost ~70px instead of the ~250px four
+   * wrapped tiles took, which is what made them worth hiding in the first place.
+   */
+  /* `.metrics.ss-metrics`, not `.ss-metrics`: a later block sets `.metrics` to 2-up for
+     the whole app, and at equal specificity that one wins on source order — the three
+     tiles wrapped to 2+1 and took 105px instead of 49. */
+  .metrics.ss-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+    margin: 0.6rem 0 0.7rem;
   }
+  .ss-metrics .metric {
+    min-height: 0;
+    padding: 0.45rem 0.3rem;
+    gap: 0.15rem;
+  }
+  .ss-metrics .eyebrow { font-size: 0.58rem; }
+  .ss-metrics .metric-value { font-size: 1.05rem; }
   table.sheet.ss-standings {
     font-size: 0.88rem;
   }
@@ -2645,6 +2662,29 @@ table.sheet.lu-table .lu-pos {
   min-width: 180px;
 }
 .field:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 1px; }
+
+/*
+ * NO AUTO-ZOOM ON FOCUS.
+ *
+ * iOS Safari zooms the page whenever you focus a text field whose font-size is under
+ * 16px, and every control here is 0.86rem (13.8px) — so tapping the player search threw
+ * the whole layout out of scale and left it there. 16px is the documented threshold, and
+ * raising it only on the FIELD keeps the labels and chrome around it at their own size.
+ *
+ * The alternative fix, `maximum-scale=1` in the viewport meta, works by disabling pinch
+ * zoom for everyone. That is an accessibility regression — deliberately not done.
+ *
+ * `select` is included: it does not zoom on focus, but a select 2px smaller than the
+ * input beside it in the same filter row reads as a mistake.
+ */
+@media (max-width: 767px) {
+  .field,
+  input.field,
+  select.field,
+  textarea.field {
+    font-size: 16px;
+  }
+}
 .field-select { cursor: pointer; }
 
 .segmented {
@@ -4312,14 +4352,6 @@ table.sheet.lu-table .lu-pos {
   color: var(--good);
 }
 .modelbar-meta { font-size: 0.68rem; color: var(--ink-3); white-space: nowrap; }
-.modelbar-foot {
-  font-size: 0.66rem;
-  line-height: 1.45;
-  color: var(--ink-3);
-  margin: 0.35rem 0 0.1rem;
-  padding: 0.35rem 0.45rem 0;
-  border-top: 1px solid var(--line-2);
-}
 
 /* -------- conversation -------- */
 /* Room so the last message clears the fixed composer. */
@@ -4403,7 +4435,19 @@ table.sheet.lu-table .lu-pos {
   .asst-empty { min-height: 62vh; }
   .asst-hero h1 { font-size: 1.3rem; }
   .asst-hero p { font-size: 0.9rem; }
-  .asst-input { font-size: 0.95rem; }
+  /*
+   * 16px on the FIELD, a smaller hint inside it.
+   *
+   * The composer leaves the textarea 259px at 390px wide, and the placeholder needed 307
+   * at 16px — so it wrapped to two lines and the box opened at double height before a
+   * word was typed. Shrinking the input itself would fix the wrap and reintroduce the
+   * iOS auto-zoom this file fixes for `.field` further up: this textarea was at 15.2px
+   * and zoomed on focus like the player search used to. `::placeholder` takes its own
+   * size and the zoom threshold ignores it, so the hint can shrink while the field the
+   * browser measures stays at 16.
+   */
+  .asst-input { font-size: 16px; }
+  .asst-input::placeholder { font-size: 0.875rem; }
   /* Clear the fixed bottom icon bar. */
   .asst:not(.asst-empty) .asst-composer-wrap {
     margin-bottom: calc(var(--bottomnav-h) + 0.5rem);
@@ -5347,6 +5391,62 @@ table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
   font-weight: 700;
   color: var(--cobalt);
   font-variant-numeric: tabular-nums;
+}
+
+/* ---- FROZEN LEADING COLUMNS -------------------------------------------------
+   `sticky-1` freezes the first column, `sticky-2` the first two. Used by the three League
+   Stats tables, which are eight to seventeen columns wide: scrolled sideways, every row
+   became an anonymous line of figures because the team name had left the screen.
+
+   The frozen cells need their own OPAQUE background — the default `.sheet` cell is
+   transparent, so the scrolling columns slide visibly underneath a see-through one. The
+   row-highlight and the header keep their own colours, which is why those are restated
+   rather than inherited.
+
+   `left` on the second column is a fixed 2.6rem because the first column is given that
+   width here: a sticky offset has to be a length, and a rank column is the one column
+   whose content width is knowable in advance (two digits).
+   ------------------------------------------------------------------------- */
+table.sheet.sticky-1 th:first-child,
+table.sheet.sticky-1 td:first-child,
+table.sheet.sticky-2 th:nth-child(-n + 2),
+table.sheet.sticky-2 td:nth-child(-n + 2) {
+  position: sticky;
+  z-index: 2;
+  background: var(--card);
+}
+table.sheet.sticky-1 thead th:first-child,
+table.sheet.sticky-2 thead th:nth-child(-n + 2) {
+  z-index: 3;
+  background: var(--surface-2);
+}
+table.sheet.sticky-1 tr.row-you td:first-child,
+table.sheet.sticky-2 tr.row-you td:nth-child(-n + 2) {
+  background: var(--row-highlight);
+}
+
+table.sheet.sticky-1 th:first-child,
+table.sheet.sticky-1 td:first-child,
+table.sheet.sticky-2 th:first-child,
+table.sheet.sticky-2 td:first-child {
+  left: 0;
+}
+table.sheet.sticky-2 th:first-child,
+table.sheet.sticky-2 td:first-child {
+  width: 2.6rem;
+  min-width: 2.6rem;
+}
+table.sheet.sticky-2 th:nth-child(2),
+table.sheet.sticky-2 td:nth-child(2) {
+  left: 2.6rem;
+}
+/* A hairline on the LAST frozen column, so the freeze reads as an edge rather than as
+   columns overlapping. */
+table.sheet.sticky-1 th:first-child,
+table.sheet.sticky-1 td:first-child,
+table.sheet.sticky-2 th:nth-child(2),
+table.sheet.sticky-2 td:nth-child(2) {
+  box-shadow: inset -1px 0 0 var(--line-2);
 }
 
 /* ===================== TEAM LADDER (mobile) ==================================

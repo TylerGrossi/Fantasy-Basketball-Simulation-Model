@@ -101,6 +101,23 @@ export default function PlayerCardView({
     window.history.replaceState(null, "", url);
   }, [name]);
 
+  /*
+   * FOLLOW `?name=` WHEN IT CHANGES.
+   *
+   * `useState(initialName)` seeds the player on first mount and ignores the prop ever
+   * after. That is fine arriving from another page, and wrong once you are already here:
+   * tapping a name in Similar Players is a client-side navigation to /player?name=… that
+   * re-renders this component with a NEW initialName, and the card carried on showing the
+   * player you tapped away from. Every player link on this page was a dead tap.
+   *
+   * Guarded on inequality so it cannot fight the replaceState above — that rewrites the
+   * URL without changing the prop, so this effect does not re-run for it.
+   */
+  useEffect(() => {
+    if (initialName && initialName !== name) setName(initialName);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialName]);
+
   if (!pool.length) {
     return <p className="caption">No player pool data — run the data export.</p>;
   }
