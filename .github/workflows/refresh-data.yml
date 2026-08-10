@@ -1,0 +1,88 @@
+# Regenerate the league snapshot and let Vercel deploy it.
+#
+# The app has no database: public/data/*.json is checked into git and shipped as part of
+# the build, so "fresh data" means "a new commit". That is what this does — export, and
+# push only if the numbers actually moved.
+#
+# Requires three repository secrets: ESPN_S2, ESPN_SWID, GEMINI_API_KEY.
+# legacy/config.py falls back to environment variables when config_secrets.py is absent
+# (which it is here — that file is gitignored), and it insists on all three being present
+# even though the export never calls Gemini.
+#
+# NOTE: pushing to main triggers a Vercel deploy. That is the entire point of this
+# workflow, but it does mean the site can change without anyone touching it.
+
+name: Refresh league snapshot
+
+on:
+  schedule:
+    # 06:00 and 18:00 UTC, October through April only — the NBA season. Outside those
+    # months the export would rewrite an identical finished season every run, and every
+    # rewrite is a commit and a deploy. GitHub's scheduler is UTC and best-effort: runs
+    # can be delayed by several minutes under load, and GitHub DISABLES cron entirely on
+    # a repo with no activity for 60 days, which in the offseason is easy to hit.
+    - cron: "0 6,18 * 10,11,12,1,2,3,4 *"
+  # Lets you run it by hand from the Actions tab — use this for the first run.
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-data
+  # Never cancel a half-finished export: it writes league.json and boxscores.json
+  # separately, and a killed run can leave the pair disagreeing with each other.
+  cancel-in-progress: false
+
+permissions:
+  # Needed to push the regenerated snapshot back to main.
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: legacy/requirements.txt
+
+      - name: Install the export's dependencies
+        run: pip install -r legacy/requirements.txt
+
+      # Writes public/data/league.json and boxscores.json. The script validates the
+      # export BEFORE writing it, so a bad ESPN response fails the job instead of
+      # overwriting a good snapshot.
+      - name: Export the league snapshot
+        env:
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/build_data.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install the Node toolchain
+        run: npm ci
+
+      # The Agent's spread baseline. It is derived from ~290 ESPN game logs and from the
+      # season values in the league.json written above, so during a live season it goes
+      # stale exactly as fast as the snapshot does. Takes ~2 minutes.
+      - name: Rebuild the consistency baseline
+        run: node scripts/build_consistency.mjs
+
+      - name: Commit and deploy, but only if the data moved
+        run: |
+          if [ -z "$(git status --porcelain -- public/data)" ]; then
+            echo "Snapshot is identical to the committed one — nothing to deploy."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data
+          git commit -m "chore(data): refresh league snapshot"
+          git push
