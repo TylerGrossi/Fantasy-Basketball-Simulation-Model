@@ -240,6 +240,8 @@ _NBA_ROSTER_URL = ("https://site.api.espn.com/apis/site/v2/sports/basketball/nba
                    "/teams/{team_id}/roster")
 _ATHLETE_STATS_URL = ("https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
                       "/athletes/{pid}/stats")
+_ATHLETE_GAMELOG_URL = ("https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
+                        "/athletes/{pid}/gamelog")
 
 # How many seasons of career history to carry, current included.
 HISTORY_SEASONS = 3
@@ -345,6 +347,119 @@ def fetch_player_history(player_ids, season_year, workers=8):
     return out
 
 
+def fetch_last_game_dates(player_ids, workers=8):
+    """
+    ``{playerId: date}`` — the last REGULAR-SEASON game each player actually appeared in.
+
+    WHY THIS IS NEEDED. ESPN's ``last_30`` / ``last_15`` stat sets do not return an empty
+    window for a player who has not played recently: they fall back to his most recent
+    appearance, however old. Anthony Davis last played 2026-01-09 and his last-30 set
+    still reported one game — his January line, presented on the Player Card as a 30-day
+    average and fed into ``Recent``/``Trend`` as if it were current form. 29 players were
+    affected on last-30 and 44 on last-15 in the 2026 export; Damian Lillard's window was
+    a game from the PREVIOUS season, 390 days before the season ended.
+
+    The tell is that every stale window has exactly one game, but a game count alone
+    cannot separate them from the handful of players who genuinely did play once inside
+    the window (Giannis, on last-30). Only a date can, which is what this fetches.
+
+    One request per player (~290), threaded, alongside the career-history pass — the same
+    cost and the same failure mode: a player we cannot date is simply left out of the map,
+    and `drop_stale_windows` then leaves his windows alone rather than guessing.
+    """
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    ids = [int(i) for i in player_ids if i]
+
+    def one(pid):
+        try:
+            data = D.HTTP.get(_ATHLETE_GAMELOG_URL.format(pid=pid), timeout=20).json()
+        except Exception:  # noqa: BLE001
+            return pid, None
+        events = data.get("events") or {}
+        # Only the regular season counts, and "Play In Regular Season" is ESPN's own
+        # label for the play-in, so it has to be excluded by name and not by substring.
+        wanted = set()
+        for st in data.get("seasonTypes") or []:
+            label = str(st.get("displayName") or "")
+            if "regular season" not in label.lower() or "play-in" in label.lower().replace(" ", "-"):
+                continue
+            for cat in st.get("categories") or []:
+                for ev in cat.get("events") or []:
+                    if ev.get("eventId"):
+                        wanted.add(str(ev["eventId"]))
+        latest = None
+        for event_id in wanted:
+            raw = (events.get(event_id) or {}).get("gameDate")
+            if not raw:
+                continue
+            try:
+                when = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date()
+            except (TypeError, ValueError):
+                continue
+            if latest is None or when > latest:
+                latest = when
+        return pid, latest
+
+    out = {}
+    failed = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for pid, when in ex.map(one, ids):
+            if when:
+                out[pid] = when
+            else:
+                failed += 1
+    if failed:
+        print(f"  ! last-game date missing for {failed}/{len(ids)} players")
+    return out
+
+
+def drop_stale_windows(pool, last_games, as_of):
+    """
+    Blank the recent windows ESPN backfilled with an out-of-window game.
+
+    A window is dropped when the player's last appearance predates it. Dropping means
+    clearing the ``L30_*``/``L15_*`` columns AND resetting ``Recent``/``Trend`` to the
+    season line — exactly what the pipeline already does for a player with no games in
+    the window at all, because that is what he in fact is. Leaving the z-score behind
+    while removing the categories would be worse than the bug: the Player Card would show
+    no 30-day line but the rankings would still sort him by one.
+
+    `as_of` is the last date any player in the pool played, not today's. Once the season
+    is over ESPN freezes these sets at its end, so measuring back from the current date
+    would call every window stale in the offseason.
+
+    Returns the number of (player, window) pairs cleared, for the build log.
+    """
+    windows = (("L30_", 30, "Recent", "Trend"), ("L15_", 15, "Recent15", "Trend15"))
+    cleared = 0
+    for p in pool:
+        pid = p.get("PlayerId")
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        played = last_games.get(pid)
+        # No date means the fetch failed for him; leave his data untouched rather than
+        # deleting a window on the strength of a missing request.
+        if not played:
+            continue
+        for prefix, days, recent_col, trend_col in windows:
+            if (as_of - played).days <= days:
+                continue
+            touched = False
+            for key in list(p.keys()):
+                if key.startswith(prefix):
+                    p[key] = float("nan")
+                    touched = True
+            if p.get(recent_col) is not None:
+                p[recent_col] = p.get("Value", 0)
+                p[trend_col] = 0.0
+            if touched:
+                cleared += 1
+    return cleared
+
+
 def fetch_player_ages():
     """
     ``{playerId: {"age": int, "exp": int}}`` for every player on an NBA roster.
@@ -422,6 +537,19 @@ def build_player_pool(app):
     history = fetch_player_history(hist_ids, config.ESPN_SEASON_YEAR)
     print(f"  career history: {len(history)} players ({time.perf_counter() - t_hist:.1f}s)",
           flush=True)
+    # When each player last actually played, so ESPN's backfilled recent windows can be
+    # thrown away before anything downstream reads them as current form — see
+    # fetch_last_game_dates. Must run BEFORE the rows are assembled below, because it
+    # rewrites Recent/Trend and the L30_/L15_ columns in place.
+    t_last = time.perf_counter()
+    last_games = fetch_last_game_dates(hist_ids)
+    if last_games:
+        # Measured from the last game ANYONE played, not today: ESPN freezes these sets
+        # at season end, so an offseason export dated from today would void every window.
+        as_of = max(last_games.values())
+        cleared = drop_stale_windows(pool, last_games, as_of)
+        print(f"  last-game dates: {len(last_games)} players, {cleared} stale windows "
+              f"cleared as of {as_of} ({time.perf_counter() - t_last:.1f}s)", flush=True)
     # ESPN's own rankings for NEXT season — the outside opinion the draft board is read
     # against. Empty until ESPN rolls the new season over.
     draft_ranks = fetch_draft_ranks(config.ESPN_SEASON_YEAR + 1)
