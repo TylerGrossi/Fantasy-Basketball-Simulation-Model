@@ -138,6 +138,27 @@ is mid-rebuild; see `docs/FEATURE-IDEAS.md` E1 for the three known defects), **P
 Odds** is in-season only, and **Season Summary** and **Lineup** are desktop-only. Hidden
 from the menus never means disabled: every one still renders at its URL.
 
+**Four pages ship BOTH layouts** (2026-08-10, owner request). The phone-shaped rebuilds of
+2026-08-09 were right on a phone and wrong on a laptop, so each of those pages now renders
+its app layout and its web layout and lets the 767px breakpoint pick — `.only-app` /
+`.only-web` in `globals.css`, whose comment block is the reference. Put the class on a
+**bare wrapper div**: the two rules sit near the top of the file, so a later
+`display: grid` on the same element would win on source order and leak the phone layout
+onto desktop.
+
+| Page | `.only-app` | `.only-web` |
+| --- | --- | --- |
+| `/history` | 2-tile strip + `SeasonShelf` | 5-tile strip + `SeasonsTable` |
+| `/history/matchups` | `MatchupFeed` (scores feed) | `MatchupsTable` (sortable, 9 cols) |
+| `/league-rosters` | `FilterBar` + the picked team | all ten cards, season value, no controls |
+| `/season` | 3 KPIs that follow the ladder tap | 4 KPIs, fixed on your team |
+
+The desktop halves live where they always did — `CareerHistoryView.tsx` for the two History
+tables, and inside `LeagueRostersView` / `SeasonSummaryView` for the other two. The chart
+on `/history`, the ladder-vs-table on `/season` (`.pr-ladder` / `.pr-table-wrap`, already
+switched) and everything else on those pages is rendered **once**; only the blocks in the
+table above are duplicated.
+
 **Export fields added 2026-08-04** (all in `lib/league.ts`): `playerPool[].lineupSlot` and
 `.acquisitionType` (League Rosters), `.history` — up to three seasons of per-game lines
 *including minutes*, which nothing else in the export carries — plus `rosterSlots`,
@@ -679,6 +700,22 @@ worth it; measure before changing.
    the live site, which is the owner's call and not an agent's. Committing locally is
    fine when asked; publishing never is. If a change only takes effect once deployed,
    say so and stop there.
+
+   **The rule is about the DEPLOY, not about the command** (added 2026-08-10, after two
+   new ways to trigger one appeared). `git push` is merely the obvious route. These
+   count the same and need the same explicit permission:
+
+   - **`gh` is installed and authenticated** on this machine now (as `TylerGrossi`, with
+     `repo` scope). `gh api -X PUT .../contents/...` writes a commit straight to `main`
+     without git ever running. So does anything that edits the repo through the API.
+   - **`gh workflow run refresh-data.yml`** starts a job whose last step commits the
+     regenerated export and pushes it. Triggering it is asking GitHub to push on your
+     behalf — treat it exactly like typing `git push`.
+   - Repository settings that widen what automation may do — Actions `contents: write`,
+     branch protection, deploy hooks — are the same class of change.
+
+   Setting up the machinery is fine when asked (secrets, permissions, writing the
+   workflow file). Firing it is not, unless the owner says so in the moment.
 
 ## Gotchas
 
