@@ -1,9 +1,9 @@
 # Keep the Python side out of the Vercel build.
 #
-# `legacy/` is the Streamlit app (deployed separately, on Render) and most of `scripts/`
-# only runs on your machine or in CI to regenerate public/data/league.json. Neither is
-# needed to build or serve the Next.js app, and excluding them keeps the upload small and
-# stops Vercel's framework detection from noticing Python it should not act on.
+# `engine/` (the calculation engine) and most of `scripts/` only run on your machine or
+# in CI to regenerate public/data/*.json. Neither is needed to build or serve the
+# Next.js app, and excluding them keeps the upload small and stops Vercel's framework
+# detection from noticing Python it should not act on.
 #
 # NOTE: public/data/league.json IS required at build time — do not exclude public/.
 #
@@ -13,7 +13,7 @@
 # `Cannot find module '/vercel/path0/scripts/ensure-dist.mjs'` — because npm tries to run
 # the hook before the build even starts. The script itself already no-ops off Windows
 # (`process.env.VERCEL` check), so shipping it costs nothing; it just has to be THERE.
-legacy/
+engine/
 scripts/*.py
 scripts/__pycache__/
 Old Models/

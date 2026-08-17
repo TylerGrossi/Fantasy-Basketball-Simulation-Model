@@ -5,28 +5,53 @@ before making changes. Human-facing setup lives in [README.md](README.md).
 
 ---
 
-## ⚠️ MIGRATION IN PROGRESS — read this first
+## The migration is COMPLETE — one app, one engine
 
-The repo now holds **two front ends**. Everything below this section describes the
-**Streamlit app, which now lives in [legacy/](legacy/)** — every path it mentions
-(`streamlit_app.py`, `styles.py`, `data.py`, …) is relative to `legacy/`, not the root.
+This project started as a Streamlit app. That app has been **retired and deleted**
+(2026-08-10): no more `legacy/`, no more `render.yaml`, no more Render deploy. What's
+here now:
 
 ```
-legacy/          the Streamlit app — STILL THE LIVE SITE (Render), do not break it
-app/             Next.js pages + app/api/live (the replacement)
+app/             Next.js pages + app/api/live, app/api/agent (the whole product)
 components/      React components
-lib/             probability.ts (the engine), league.ts, loadLeague.ts, useLiveTotals.ts
-scripts/         build_data.py — exports public/data/league.json from the legacy engine
+lib/             probability.ts (the client-side maths), league.ts, loadLeague.ts, …
+scripts/         build_data.py and friends — export public/data/*.json from engine/
+engine/          the calculation engine — no UI, importable by any script above:
+                   config.py    constants + ESPN credentials
+                   data.py      ESPN connection, NBA schedule, games-left counting
+                   simulation.py  the 9-cat simulation, streamers, bench, playoffs
+                   season.py    season-level functions (standings, power rankings,
+                                schedules, player pool) the export calls directly
 public/data/     generated JSON (checked in; regenerate with `npm run data`)
 ```
 
-**Why:** Streamlit Community Cloud's badge covers the mobile header, and Render's free
-tier is 0.1 CPU with a 15-minute spin-down. The Next.js version deploys to Vercel free,
-where a static page has no cold start and no CPU ceiling.
+**Why the Streamlit app is gone, not just superseded:** Streamlit Community Cloud's
+badge covered the mobile header, and Render's free tier was 0.1 CPU with a 15-minute
+spin-down. The Next.js app deploys to Vercel free, where a static page has no cold
+start and no CPU ceiling — and once it reached feature parity there was no reason to
+keep maintaining two front ends.
 
-**The Streamlit app moved as ONE unit, so no import changed** — the modules are still
-siblings of each other. `render.yaml` does `cd legacy` first. If you touch that folder,
-re-verify it boots (`cd legacy && streamlit run streamlit_app.py`).
+**`engine/` is an EXTRACTION, not a copy.** `config.py`, `data.py` and `simulation.py`
+moved out of the old Streamlit app verbatim (data.py had its three `@st.cache_data`
+decorators swapped for `functools.lru_cache` — Streamlit is no longer a dependency
+anywhere in this repo). `engine/season.py` is new: it holds the seven functions
+`scripts/build_data.py` actually calls (`get_player_pool`, `get_season_stats`, …), lifted
+out of the old `streamlit_app.py` after an AST scan proved every one of them was pure —
+zero `st.*` calls in their bodies. The extraction was verified by running the export
+before and after and diffing `league.json` byte-for-byte (every field but
+`generatedAt`, which always differs, and the small set of fields ESPN's own live feeds
+naturally drift on between two runs minutes apart — ADP, player ages, and the
+unseeded Monte Carlo's `championshipProb`). See `engine/season.py`'s module docstring.
+
+**A large chunk of this file (roughly "Layout shell" through "Gotchas", below) is an
+archival engineering log of the deleted Streamlit app** — CSS cascade traps in
+`styles.py`, `st.fragment` behavior, Streamlit's own DOM quirks. None of it describes
+`app/`, `components/`, `lib/`, or `engine/`. It's kept for institutional memory (some of
+the underlying lessons — no charting library, closed-form Monte Carlo over per-game
+draws, one pooled HTTP session — still hold and now live in `engine/simulation.py` and
+`engine/data.py`), but treat any `legacy/...` path inside it as **git history, not the
+working tree**. The **"Traps already hit here"** section right below this one is the
+current, working list for the app you're actually looking at.
 
 ### The architecture that makes the new version work
 
@@ -209,7 +234,7 @@ superstar — is carried over verbatim.
   has nowhere to keep a live chat object. Tool calls are not carried across turns, only
   the visible messages.
 - The key is `GEMINI_API_KEY` (server-only, written by `npm run env` from
-  `legacy/config_secrets.py`). Without it every other page still works and `/agent` says
+  `engine/config_secrets.py`). Without it every other page still works and `/agent` says
   what is missing rather than failing on send.
 - Replies render through `components/Markdown.tsx`, a small renderer that emits React
   **elements**. Do not swap in a markdown-to-HTML library: model output is untrusted, and
@@ -315,68 +340,69 @@ pulls data from ESPN via the `espn-api` package, projects the rest of a matchup 
 reports win probability, category breakdowns, streamer pickups, bench decisions, league
 standings, and playoff/championship odds.
 
-**Two front ends, mid-migration** — see the migration note at the top of this file. The
-**Next.js app** (`app/`, `components/`, `lib/`) is the live site and where new work goes;
-the **Streamlit app** (`legacy/`) is the original, still deployed on Render. New features
-belong in the Next.js app unless there is a specific reason otherwise.
+**One front end.** The **Next.js app** (`app/`, `components/`, `lib/`) is the whole
+product. New features belong there unless there is a specific reason otherwise.
 
 Single owner, single league. It is a personal tool, not a product — favor clarity
 and correctness over generality.
 
-## Repo map — the LEGACY Streamlit app (`legacy/`)
+## Repo map — `engine/`
 
-> **Paths below are relative to `legacy/`.** These files were at the repo root when this
-> table was written and have since moved; the links are written against their real
-> locations. For the Next.js app see the architecture section at the top of this file.
+The calculation engine: no UI, no Streamlit, importable by any script in `scripts/`
+via `sys.path.insert(0, ROOT / "engine")`. See the migration note at the top of this
+file for how it got this shape.
 
 | File | Role |
 |------|------|
-| [streamlit_app.py](legacy/streamlit_app.py) | UI entry point. `main()`, the section nav (`render_top_nav` + `NAV_SECTIONS`), the per-page `if active_page == …` bodies, the Home landing, Season Summary, and Settings. Orchestrates everything. |
-| [data.py](legacy/data.py) | ESPN connection, roster/matchup/box-score fetch, NBA schedule scraping, and **games-left counting** (injury-aware, IR-aware, 10-per-day cap). |
-| [simulation.py](legacy/simulation.py) | Simulation engine: per-team category sim, matchup comparison, streamer analysis, bench strategy, league stats, playoff bracket. |
-| [visualizations.py](legacy/visualizations.py) | **All charts, as inline SVG / HTML-CSS — no charting library.** Five charts (win-probability gauge, category analysis, score distribution, championship probability, rank trend) plus the scoreboard HTML. Each returns a **string** for `st.markdown(..., unsafe_allow_html=True)`. Colors come from the `var(--*)` custom properties in `styles.py`. |
-| [config.py](legacy/config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
-| [styles.py](legacy/styles.py) | The "Analyst Sheet" design system as one big CSS string (`CUSTOM_CSS`), including the fixed-header / centered-column layout shell. Light-only (no `DARK_CSS`). |
-| [assets/icon_font.py](legacy/assets/icon_font.py) | **Self-hosted Bootstrap Icons** — the font subset to the ~37 glyphs the app uses, base64-embedded as `@font-face` (`ICON_FONT_CSS`, imported as `from assets.icon_font import …`). Injected separately so it can never render-block the layout. Regenerate with [assets/build_icon_font.py](legacy/assets/build_icon_font.py) if the icon set changes. |
-| [assets/touch_icon.py](legacy/assets/touch_icon.py) | Base64 PNG of the basketball mark (`TOUCH_ICON_PNG_B64`), injected via `components.html` as an `apple-touch-icon` `<link>` so "Add to Home Screen" shows the app's logo instead of Streamlit's default. Regenerate the PNG with the Pillow snippet in its docstring/history if the mark changes. |
-| [.streamlit/config.toml](legacy/.streamlit/config.toml) | Streamlit's native light theme (must match `styles.py`). |
-| [.streamlit/secrets.toml](legacy/.streamlit/secrets.toml) | Template only — real creds are in `config.py`. |
-| `Old Models/` | The original single-file version. Historical reference; do not edit or import. |
+| [config.py](engine/config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
+| [data.py](engine/data.py) | ESPN connection, roster/matchup/box-score fetch, NBA schedule scraping, and **games-left counting** (injury-aware, IR-aware, 10-per-day cap). |
+| [simulation.py](engine/simulation.py) | Simulation engine: per-team category sim, matchup comparison, streamer analysis, bench strategy, league stats, playoff bracket. |
+| [season.py](engine/season.py) | Season-level functions `scripts/build_data.py` calls directly: player pool + 9-cat value, season stats, power rankings, team schedules, playoff probabilities. Extracted from the old Streamlit app — see its module docstring. |
+| `config_secrets.py` | Real ESPN cookies + Gemini key. Gitignored; copy `config_secrets.example.py` to make your own. |
+| `Old Models/` (repo root, not under `engine/`) | The original single-file version. Historical reference; do not edit or import. |
 
 ## Run & verify
 
 ```bash
-pip install -r requirements.txt
-streamlit run streamlit_app.py
+npm install
+npm run setup        # writes .env.local + generates public/data/*.json (needs engine/config_secrets.py)
+npm run dev          # http://localhost:3000
 ```
 
-Quick smoke test an agent can run (boots the app, checks health, then stops):
+**Never run `next dev` and `next build` against the same `.next` — see the OneDrive /
+stale-process trap in "Traps already hit here" above; it is the single most common way
+a verification session goes sideways.** The clean way to boot a production build for
+Selenium (what every layout change in this file was actually verified against):
 
 ```bash
-streamlit run streamlit_app.py --server.headless true --server.port 8599 &
-sleep 5 && curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8599/_stcore/health
+npm run build
+npx next start -p 3000 &
+sleep 8 && curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/
 # stop it — on Windows `pkill` is unavailable; use PowerShell:
-#   Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-#     ? { $_.CommandLine -like '*port 8599*' } | % { Stop-Process -Id $_.ProcessId -Force }
+#   Get-NetTCPConnection -LocalPort 3000 -State Listen |
+#     Select-Object -Expand OwningProcess -Unique |
+#     ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-`py_compile` every module you touch. **For anything visual — the fixed header,
-centered column, the left rail, table scroll, "does it fit without scrolling" —
-verify in a real browser: Selenium is installed (`webdriver.Edge`, headless).**
-Drive the running app, click nav buttons by text, and read geometry with
-`execute_script` (element `getBoundingClientRect`, computed styles) or
-`save_screenshot`; that is how the current layout was validated. Health 200 alone
-only proves it booted. Note: ESPN's data-backed pages (champion/standings/matchup)
-need the server-side fetch to succeed — in a sandbox without ESPN reachability the
-default **Home** page renders but data pages stay empty, so measure on the page you
-actually care about. The ESPN data path can also be exercised directly in a script
-via `data.connect_to_espn(...)` using the constants in `config.py`.
+`npm run typecheck` (tsc) and `npm run build` first, always — a change that doesn't
+compile fails loudly here rather than 40 tool calls later. **For anything visual — the
+header, the bottom nav, table scroll, "does it fit without scrolling" — verify in a
+real browser: Selenium is installed (`webdriver.Edge`, headless).** Drive the running
+app, click nav by text or `href`, and read geometry with `execute_script` (element
+`getBoundingClientRect`, computed styles) or `save_screenshot` — HTTP 200 alone only
+proves the page booted, not that it renders correctly. Use `mobileEmulation` device
+metrics (390×844 phone, 768×1024 iPad, 1400×950 desktop) rather than just resizing the
+window, since several layouts are CSS-switched on `@media (max-width: 767px)` and a
+plain resize doesn't always match what `deviceMetrics.mobile: true` triggers.
+
+The Python export can be exercised without touching `public/data/`:
+`python scripts/build_data.py --check` validates a full run and writes nothing.
 
 ## Configuration — creds stay in code, not the UI
 
 ESPN connection details (`ESPN_LEAGUE_ID`, `ESPN_S2`, `ESPN_SWID`,
 `ESPN_SEASON_YEAR`, `DEFAULT_TEAM_NAME`, `DEFAULT_TEAM_ID`) live in
-[config.py](legacy/config.py). **Do not add them back as UI inputs.** *Which team* is chosen
+[config.py](engine/config.py). **Do not add them back as UI inputs.** *Which team* is chosen
 on the **Settings** page and *which week* in the **This Week** left rail — never the
 creds. `DEFAULT_TEAM_NAME` is currently `"VJ Maxx"` (the league champion). Team names
 come from the API and are resolved to an id with `data.resolve_team_id`.
@@ -384,8 +410,10 @@ come from the API and are resolved to an id with `data.resolve_team_id`.
 ## Design system — "Analyst Sheet" (do not drift from this)
 
 Light, print-inspired, restrained. The owner explicitly dislikes flashy / "AI-slop"
-looks and **emoji** — use none (Bootstrap Icons are fine; they render via the
-self-hosted embedded font in [assets/icon_font.py](legacy/assets/icon_font.py), not a CDN). Keep it calm.
+looks and **emoji** — use none. Icons are inline SVG React components in
+`components/Icons.tsx`, not a font — the Streamlit app's self-hosted Bootstrap Icons
+font (`assets/icon_font.py`) did not survive the port; do not reintroduce a `bi-*`
+class or a CDN icon font here. Keep it calm.
 
 | Token | Value | Use |
 |-------|-------|-----|
@@ -691,8 +719,10 @@ worth it; measure before changing.
    visual/layout change — drive it in headless Selenium (Edge) and measure, don't
    eyeball. Say plainly what you could and couldn't test (ESPN data pages may be empty
    in a sandbox).
-5. Prefer **small, surgical edits**; this is a large single-file UI. Don't refactor
-   broadly without being asked.
+5. Prefer **small, surgical edits**. Don't refactor broadly without being asked — the
+   `engine/` extraction (2026-08-10) is the exception that proves the rule: it was
+   asked for, and it shipped with a byte-for-byte verification before anything old was
+   deleted.
 6. Don't touch `Old Models/`.
 7. **NEVER push to git.** Not `git push`, not a PR, not a branch — nothing that leaves
    the machine, and no exception for "the fix is verified" or "it's needed for the

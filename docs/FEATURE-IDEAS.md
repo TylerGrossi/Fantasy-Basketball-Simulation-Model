@@ -333,7 +333,7 @@ the work of removing them. It is a rewrite of the data layer, not a feature.
 
 **The big one — everything else is easy next to it.** Today
 [scripts/build_data.py](../scripts/build_data.py) runs on a schedule with the credentials
-in [config.py](../legacy/config.py) and writes ONE static `public/data/league.json`; every page
+in [config.py](../engine/config.py) and writes ONE static `public/data/league.json`; every page
 reads that file. There is no code path that fetches a league the build didn't know about.
 
 Multi-tenant means fetching and computing per league, at request time, with a cache —
@@ -377,9 +377,9 @@ Not a feature, but the thing that decides whether this ships:
 - **Gemini.** One shared server key on a free tier that is already rate-limited for one
   person (see the rate-limit handling in [ModelBar](../components/ModelBar.tsx)).
   Real users need per-user quotas, a paid key, or bring-your-own-key.
-- **Hosting.** [render.yaml](../render.yaml) is Render free — 0.1 CPU, 15-minute
-  spin-down. Vercel's free tier has an ephemeral filesystem, so nothing can be written
-  to disk and any persistence needs the database from H3 regardless.
+- **Hosting.** The app now deploys on Vercel only (the Render-hosted Streamlit app and
+  its `render.yaml` are retired). Vercel's free tier has an ephemeral filesystem, so
+  nothing can be written to disk and any persistence needs the database from H3 regardless.
 - **ESPN.** Many users means many crawls of an undocumented endpoint. Cache hard, and
   expect to be rate-limited eventually.
 

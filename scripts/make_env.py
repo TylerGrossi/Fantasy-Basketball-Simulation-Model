@@ -2,7 +2,7 @@
 Write .env.local for the Next.js app from the credentials the Python side already has.
 
 The web app reads ESPN_LEAGUE_ID / ESPN_SEASON_YEAR / ESPN_S2 / ESPN_SWID from the
-environment (app/api/live). Locally those already exist in legacy/config_secrets.py, so
+environment (app/api/live). Locally those already exist in engine/config_secrets.py, so
 generate the env file from there rather than making anyone copy cookies around by hand.
 
 .env.local is gitignored (`.env*.local`) and is never bundled into the client - only
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "legacy"))
+sys.path.insert(0, str(ROOT / "engine"))
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -30,8 +30,8 @@ def main() -> int:
     try:
         import config
     except Exception as exc:  # noqa: BLE001
-        print(f"Could not import legacy/config.py: {exc}")
-        print("Local dev needs legacy/config_secrets.py (copy config_secrets.example.py).")
+        print(f"Could not import engine/config.py: {exc}")
+        print("Local dev needs engine/config_secrets.py (copy config_secrets.example.py).")
         return 1
 
     values = {

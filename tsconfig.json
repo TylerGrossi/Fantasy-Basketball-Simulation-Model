@@ -37,7 +37,7 @@
   ],
   "exclude": [
     "node_modules",
-    "legacy",
+    "engine",
     "Old Models"
   ]
 }

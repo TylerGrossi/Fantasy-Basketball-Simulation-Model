@@ -76,7 +76,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "legacy"))
+sys.path.insert(0, str(ROOT / "engine"))
 
 for _stream in (sys.stdout, sys.stderr):
     try:

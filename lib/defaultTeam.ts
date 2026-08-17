@@ -7,6 +7,6 @@
  * It was labelling that option with `league.teams[0]` instead, which showed
  * "Default (Born In The Darkness)" while every page was in fact analysing VJ Maxx.
  *
- * Mirrors DEFAULT_TEAM_NAME in legacy/config.py.
+ * Mirrors DEFAULT_TEAM_NAME in engine/config.py.
  */
 export const DEFAULT_TEAM_NAME = "VJ Maxx";

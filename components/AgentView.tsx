@@ -328,7 +328,7 @@ export default function AgentView({
         {!configured && (
           <div className="notice" style={{ maxWidth: 680, margin: "0.8rem auto 0" }}>
             The assistant needs a <strong>GEMINI_API_KEY</strong> on the server. Put it in{" "}
-            <code>legacy/config_secrets.py</code> and run <code>npm run env</code>, or set
+            <code>engine/config_secrets.py</code> and run <code>npm run env</code>, or set
             it in the host&rsquo;s environment. Everything else in the app works without it.
           </div>
         )}

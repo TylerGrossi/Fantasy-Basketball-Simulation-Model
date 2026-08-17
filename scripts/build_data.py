@@ -32,10 +32,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
-# The engine still lives with the Streamlit app. Importing it here rather than copying it
-# keeps ONE source of truth while both front ends exist; it gets extracted into its own
-# package once the Streamlit app is retired.
-sys.path.insert(0, str(ROOT / "legacy"))
+# The calculation engine — config/data/simulation, plus the season-level functions in
+# season.py extracted from the retired Streamlit app. See engine/season.py's docstring
+# for how that extraction was verified.
+sys.path.insert(0, str(ROOT / "engine"))
 
 # Team names come from ESPN and contain emoji ("Brother Brunson <emoji>"). The default
 # Windows console codepage is cp1252 and raises UnicodeEncodeError on them, which killed
@@ -1137,9 +1137,9 @@ def build_period_results(
         return []
 
     try:
-        import streamlit_app as app  # noqa: PLC0415
+        import season as app  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
-        print(f"  ! could not import the legacy app for period windows: {exc}")
+        print(f"  ! could not import the engine's season module for period windows: {exc}")
         app = None
 
     acq_totals, acq_limit_per_day = ({}, None)
@@ -1270,13 +1270,13 @@ def _season_shape():
     """
     How many regular-season weeks and playoff rounds this league has.
 
-    Read from the legacy module (where REGULAR_SEASON_WEEKS / PLAYOFF_SCORING_DATES
-    live) so the two front ends can't disagree about where the playoffs start.
-    Guarded like every other legacy import here: if it fails the export still ships,
+    Read from engine/season.py (where REGULAR_SEASON_WEEKS / PLAYOFF_SCORING_DATES
+    live) so nothing here can disagree with the export about where the playoffs start.
+    Guarded like every other engine import here: if it fails the export still ships,
     and the browser falls back to its own defaults.
     """
     try:
-        import streamlit_app as app  # noqa: PLC0415
+        import season as app  # noqa: PLC0415
 
         return {
             "regularSeasonWeeks": int(app.REGULAR_SEASON_WEEKS),
@@ -1291,18 +1291,17 @@ def build_season(league, injury_data, sims=8000):
     """
     Season-wide data: standings, power rankings, schedules, playoff odds.
 
-    These are computed by the legacy Streamlit module rather than reimplemented here —
+    These are computed by engine/season.py rather than reimplemented here —
     `calculate_league_stats`, the all-play maths, the rank history and the playoff bracket
     are hundreds of lines of already-verified logic, and a second copy would drift.
-    Importing `streamlit_app` outside a Streamlit runtime works (its `st.*` calls become
-    no-ops with warnings); it is done lazily and guarded so a failure here degrades to
-    "no season data" instead of losing the matchup export, which matters more.
+    Imported lazily and guarded so a failure here degrades to "no season data" instead
+    of losing the matchup export, which matters more.
     """
     out = {}
     try:
-        import streamlit_app as app  # noqa: PLC0415
+        import season as app  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
-        print(f"  ! could not import the legacy app for season data: {exc}")
+        print(f"  ! could not import the engine's season module for season data: {exc}")
         return out
 
     lid, yr = config.ESPN_LEAGUE_ID, config.ESPN_SEASON_YEAR

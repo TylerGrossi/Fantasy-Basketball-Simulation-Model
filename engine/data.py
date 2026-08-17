@@ -2,9 +2,9 @@
 Fantasy Basketball Simulator - Data loading, ESPN API, and schedule utilities.
 """
 
+import functools
 import pandas as pd
 import requests
-import streamlit as st
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
@@ -704,7 +704,7 @@ def blend_season_last30(season_df, last30_df, blend_weight, merge_on=None):
 # Games left / schedule
 # -----------------------------------------------------------------------------
 
-@st.cache_data(ttl=3600)
+@functools.lru_cache(maxsize=None)
 def get_team_schedule_bundle(team_abbrev):
     """
     One ESPN HTTP request per team: game dates and opponent labels (cached 1hr).
@@ -919,7 +919,7 @@ def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
     return df
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@functools.lru_cache(maxsize=None)
 def get_player_bio(player_id):
     """
     ESPN athlete bio for the Player Search header - team, jersey, position, height/weight,
@@ -959,7 +959,7 @@ def get_player_bio(player_id):
         return {}
 
 
-@st.cache_data(ttl=3600)
+@functools.lru_cache(maxsize=None)
 def get_espn_injury_data():
     """Fetch NBA injuries from ESPN public API. Returns dict: player_name -> {description, return_date}."""
     url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
