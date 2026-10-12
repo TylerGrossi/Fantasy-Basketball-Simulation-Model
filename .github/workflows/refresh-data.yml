@@ -16,12 +16,12 @@ name: Refresh league snapshot
 
 on:
   schedule:
-    # 06:00 and 18:00 UTC, October through April only — the NBA season. Outside those
+    # 12:00 UTC once a day, October through April only — the NBA season. Outside those
     # months the export would rewrite an identical finished season every run, and every
     # rewrite is a commit and a deploy. GitHub's scheduler is UTC and best-effort: runs
     # can be delayed by several minutes under load, and GitHub DISABLES cron entirely on
     # a repo with no activity for 60 days, which in the offseason is easy to hit.
-    - cron: "0 6,18 * 10,11,12,1,2,3,4 *"
+    - cron: "0 12 * 10,11,12,1,2,3,4 *"
   # Lets you run it by hand from the Actions tab — use this for the first run.
   workflow_dispatch:
 
@@ -75,10 +75,26 @@ jobs:
       - name: Rebuild the consistency baseline
         run: node scripts/build_consistency.mjs
 
+      # Every export stamps a fresh generatedAt, so a plain `git status` always sees a
+      # change. Compare with that field stripped, and throw away a timestamp-only rewrite
+      # instead of committing (and deploying) it.
       - name: Commit and deploy, but only if the data moved
         run: |
-          if [ -z "$(git status --porcelain -- public/data)" ]; then
-            echo "Snapshot is identical to the committed one — nothing to deploy."
+          moved=0
+          for f in public/data/*.json; do
+            if ! git cat-file -e "HEAD:$f" 2>/dev/null; then moved=1; break; fi
+            if ! python - "$f" <<'PY'
+          import json, subprocess, sys
+          f = sys.argv[1]
+          strip = lambda d: {k: v for k, v in d.items() if k != "generatedAt"}
+          old = json.loads(subprocess.run(["git", "show", f"HEAD:{f}"], capture_output=True, check=True).stdout)
+          new = json.load(open(f, encoding="utf-8"))
+          sys.exit(0 if strip(old) == strip(new) else 1)
+          PY
+            then moved=1; break; fi
+          done
+          if [ "$moved" = 0 ]; then
+            echo "Only timestamps changed — nothing to deploy."
             exit 0
           fi
           git config user.name "github-actions[bot]"
