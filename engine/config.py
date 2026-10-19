@@ -35,6 +35,13 @@ GEMINI_API_KEY = GEMINI_API_KEY.strip()
 ESPN_LEAGUE_ID = 267469544
 ESPN_SEASON_YEAR = 2026
 
+# The league the DRAFT GUIDE is built for — deliberately separate from the league above,
+# which the rest of the app still reads (the 2025-26 season it describes is over, and this
+# is a different league the owner joined for 2026-27). Read by scripts/build_draft.py and,
+# via make_env.py, by app/api/draft for the live pick feed. Same ESPN account, same cookies.
+DRAFT_LEAGUE_ID = 1330923505
+DRAFT_SEASON_YEAR = 2027
+
 # =============================================================================
 # Gemini (Google AI Studio) - powers the free-tier AI Assistant page. The API key lives in
 # config_secrets.py; the model list below is not secret.

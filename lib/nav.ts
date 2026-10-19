@@ -9,7 +9,8 @@
  * carried over from the original.
  *
  * The desktop header reads: Season Summary · Current Matchup · League · Tools · History ·
- * Agent, then the Settings gear (rendered separately in Nav.tsx, not from this list).
+ * Agent, then the Settings gear (rendered separately in Nav.tsx, not from this list). In
+ * the OFFSEASON the first slot is Draft Guide instead — see navFor.
  *
  * MOBILE IS INDEX-AND-DRILL. The bottom icons for This Week, Season and Tools do not open
  * a page — they open that section's INDEX (`/browse/<key>`), a list where every row names
@@ -296,11 +297,10 @@ export const IN_SEASON_ONLY = ["/playoffs", "/streamers", "/bench"];
  * anyone with the link or a bookmark, and `sectionFor` still resolves it to its section
  * so a direct visit keeps its sub-row. Hidden from the menus, not deleted.
  *
- * /draft is hidden again: the projection model behind it is mid-rebuild and still ranks
- * players wrongly enough that the board would mislead (see the note in lib/projection.ts).
- * The route stays live to work on.
+ * /draft came back 2026-10-19: the board now runs on ESPN's own projections
+ * (scripts/build_draft.py) rather than the unfinished home-grown model.
  */
-export const HIDDEN_FROM_NAV = ["/draft"];
+export const HIDDEN_FROM_NAV: string[] = [];
 
 /**
  * Pages kept out of the MOBILE navigation only — they lay out poorly on a phone and are
@@ -353,8 +353,26 @@ export function navFor(seasonOver: boolean): { flat: NavEntry[]; sections: Secti
           ...pages.filter((p) => p.href !== OFFSEASON_FIRST),
         ]
       : pages;
+  /*
+   * The header's first slot is SEASONAL (owner request, 2026-10-19). In season it is
+   * Season Summary; in the offseason the season it summarises is finished and the draft
+   * is the next thing that happens, so the Draft Guide takes the slot and leaves the
+   * Tools menu (one place, not two), and Season Summary drops to the end of League so a
+   * finished season's standings are still one click away.
+   */
+  const desktop: NavEntry[] = seasonOver
+    ? FLAT_NAV.map((e) => {
+        if (e.kind === "link" && e.href === "/season")
+          return { kind: "link", label: "Draft Guide", href: OFFSEASON_FIRST };
+        if (e.kind === "menu" && e.label === "Tools")
+          return { ...e, items: e.items.filter((i) => i.href !== OFFSEASON_FIRST) };
+        if (e.kind === "menu" && e.label === "League")
+          return { ...e, items: [...e.items, { label: "Season Summary", href: "/season" }] };
+        return e;
+      })
+    : FLAT_NAV;
   return {
-    flat: FLAT_NAV.flatMap<NavEntry>((e) => {
+    flat: desktop.flatMap<NavEntry>((e) => {
       if (e.kind === "link") return keep(e.href) ? [e] : [];
       const items = e.items.filter((i) => keep(i.href));
       return items.length ? [{ ...e, items: first(items) }] : [];

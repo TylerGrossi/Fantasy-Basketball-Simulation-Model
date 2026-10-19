@@ -45,7 +45,8 @@
    * than left to the consumers' slack, or a notched iPhone eats ~34px of it.
    */
   --bottomnav-h: calc(7rem + env(safe-area-inset-bottom, 0px));
-  --content-max: 1180px;
+  /* Widened 1180 -> 1480px (owner, 2026-10-19). Header and pages share it, so they stay aligned. */
+  --content-max: 1480px;
   --page-pad: clamp(1rem, 4vw, 2.5rem);
 }
 
@@ -6016,28 +6017,303 @@ table.sheet.sr-value-table tbody tr.sr-value-active:hover td { background: var(-
   .sbp-rows { justify-content: flex-start; }
 }
 
-/* -------- Draft Guide: ESPN rank comparison --------
-   NOTE: the rest of the draft board carries `dg-*` class hooks that have NO rules at all —
-   it renders on the `pv-*` classes it shares with Player Value. That is why this block is
-   small: it styles only the one element that has no `pv-` equivalent, rather than
-   retro-fitting a design onto hooks that are currently, and deliberately, inert. */
-.dg-espn {
-  flex: 0 0 auto;
-  min-width: 2.9rem;
-  text-align: right;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.72rem;
-  color: var(--ink-3);
-  white-space: nowrap;
+/* -------- Draft Guide (components/DraftBoardView.tsx) --------
+   Draft night: a status strip, two panels (value / your team), then a dense sheet table.
+   Dense on purpose — eleven rank columns side by side is the whole point of the page, so
+   it scrolls inside .table-scroll with the player column pinned. */
+.dg-mono, .dg-board .num, .dg-vtable .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.dg-dim { color: var(--ink-3); }
+.dg-board .good, .dg-vtable .good { color: var(--good); font-weight: 700; }
+.dg-board .bad, .dg-vtable .bad { color: var(--bad); font-weight: 700; }
+
+.dg-inline { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--ink-2); }
+.dg-inline .field-select { width: auto; min-width: 4.2rem; }
+
+.dg-btn {
+  font: inherit; font-size: 0.76rem; padding: 0.3rem 0.65rem; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--card); color: var(--ink);
 }
-.dg-espn-none { color: var(--line-strong); }
-/* Only a 20+ slot disagreement gets colour — agreeing within a few slots is not a
-   finding, and colouring every row would make the column unreadable. Cobalt = this board
-   is higher than ESPN, clay = lower; the same two hues the value bar already uses. */
-.dg-espn-high { color: var(--cobalt); font-weight: 700; }
-.dg-espn-low { color: var(--clay); font-weight: 700; }
-.dg-espn-gap { margin-left: 0.15rem; font-size: 0.6rem; }
+.dg-btn:hover { border-color: var(--cobalt); color: var(--cobalt); }
+.dg-btn.sm { font-size: 0.66rem; padding: 0.12rem 0.4rem; }
+.dg-btn.on { background: var(--cobalt); border-color: var(--cobalt); color: #fff; }
+.dg-f-check { align-self: flex-end; padding-bottom: 0.45rem; }
+
+.dg-panels { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.dg-panel { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 0.8rem 1rem; min-width: 0; }
+.dg-h { font-size: 0.95rem; margin: 0 0 0.25rem; }
+.dg-h3 { font-size: 0.8rem; margin: 0.9rem 0 0.3rem; color: var(--ink-2); font-weight: 600; }
+.dg-note { font-size: 0.74rem; color: var(--ink-2); margin: 0 0 0.5rem; }
+.dg-vscroll { overflow-x: auto; }
+.dg-vtable td, .dg-vtable th { padding: 0.3rem 0.45rem; }
+.dg-roster { list-style: none; margin: 0 0 0.6rem; padding: 0; font-size: 0.8rem; }
+.dg-roster li { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.2rem 0; border-bottom: 1px solid var(--line-2); }
+
+/* The draft board's pickers opt OUT of .pv-filters' "panel exactly as wide as its trigger"
+   rule: their buttons are narrow ("Any", "3 selected") and their options are not, so the
+   shared rule clipped every punt category to one letter and every source to "Hasht...". */
+.pv-filters .dg-ms .ms-panel { width: max-content; min-width: max(100%, 11rem); max-width: min(22rem, calc(100vw - 2rem)); }
+.pv-filters .dg-ms .ms-opt span { overflow: visible; text-overflow: clip; }
+/* Mock draft. Clay marks "practice" (the status strip's left rule) so a mock can never be
+   mistaken for the live board at a glance. */
+.dg-btn:disabled { opacity: 0.45; cursor: default; }
+.dg-btn:disabled:hover { border-color: var(--line-strong); color: var(--ink); }
+.dg-btn.on:disabled:hover { color: #fff; border-color: var(--cobalt); }
+.dg-mock { margin-bottom: 1rem; }
+.dg-me { background: var(--cobalt-soft); font-weight: 600; }
+.dg-good { color: var(--good); font-weight: 600; }
+.dg-bad { color: var(--bad); font-weight: 600; }
+.dg-catranks { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.4rem; }
+.dg-cr { font-size: 0.72rem; font-family: var(--mono); border: 1px solid var(--line); border-radius: 6px; padding: 0.1rem 0.4rem; color: var(--ink-2); }
+.dg-cr.good { border-color: var(--good); color: var(--good); }
+.dg-cr.bad { border-color: var(--bad); color: var(--bad); }
+.dg-grid-wrap { margin-bottom: 1rem; }
+.dg-grid td, .dg-grid th { padding: 0.28rem 0.45rem; font-size: 0.72rem; }
+.dg-grid td.dg-onclock { outline: 2px solid var(--clay); outline-offset: -2px; }
+/* Plan tab */
+.dg-plan-head .dg-note { max-width: 560px; margin: 0; }
+.dg-plan-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.dg-plan-save { font-size: 0.72rem; }
+/* Recommendation stars — a text glyph (U+2605), not an emoji, in the accent colour.
+   Weight steps down with the recommendation so three stars reads strongest. */
+.dg-stars { color: var(--cobalt); font-size: 0.72rem; letter-spacing: 0.02em; white-space: nowrap; }
+.dg-stars.s2 { opacity: 0.8; }
+.dg-stars.s1 { opacity: 0.6; }
+/* Sortable board headers */
+.dg-sort-b {
+  font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit;
+  background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap;
+}
+.dg-sort-b:hover { color: var(--cobalt); }
+.dg-sort.on { color: var(--cobalt); }
+.dg-sort-i { display: inline-block; width: 0.7rem; font-size: 0.5rem; margin-left: 0.15rem; }
+/* ---- Draft Guide, table-first layout (2026-10-19 cleanup) ---- */
+.dg-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.1rem;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  padding: 0.5rem 0.75rem; margin: 0.75rem 0 0.6rem;
+}
+.dg-toolbar.is-mock { border-color: var(--clay); box-shadow: inset 3px 0 0 var(--clay); }
+.dg-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 7px; overflow: hidden; }
+.dg-seg-b {
+  font: inherit; font-size: 0.78rem; padding: 0.28rem 0.75rem; cursor: pointer;
+  background: var(--card); color: var(--ink-2); border: 0;
+}
+.dg-seg-b + .dg-seg-b { border-left: 1px solid var(--line-strong); }
+.dg-seg-b.on { background: var(--ink); color: var(--card); }
+.dg-clock { display: inline-flex; align-items: baseline; gap: 0.4rem; white-space: nowrap; }
+.dg-clock-k { font-size: 0.7rem; color: var(--ink-3); }
+.dg-clock strong { font-size: 1.05rem; color: var(--ink); }
+.dg-clock-sub { font-size: 0.72rem; color: var(--ink-2); }
+.dg-clock-sub.up { color: var(--good); font-weight: 700; }
+.dg-toolbar-end { display: inline-flex; align-items: center; gap: 0.7rem; margin-left: auto; }
+.field-select.dg-compact { width: auto; min-width: 0; padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 0.78rem; }
+.dg-live-pill {
+  display: inline-flex; align-items: center; gap: 0.35rem; font: inherit; font-size: 0.74rem;
+  padding: 0.22rem 0.6rem; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--ink-2); cursor: pointer;
+}
+.dg-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--ink-3); }
+.dg-live-pill.ok .dg-dot { background: var(--good); }
+.dg-live-pill.bad { color: var(--bad); border-color: var(--bad); }
+.dg-live-pill.bad .dg-dot { background: var(--bad); }
+
+.dg-subbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin: -0.2rem 0 0.6rem; padding: 0 0.2rem; }
+.dg-subbar-k { font-size: 0.72rem; font-weight: 600; color: var(--clay); }
+.dg-subbar-grade { margin-left: auto; font-size: 0.82rem; }
+
+.dg-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.6rem; }
+.dg-chip {
+  font: inherit; font-size: 0.76rem; padding: 0.25rem 0.7rem; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink-2);
+}
+.dg-chip:hover { border-color: var(--cobalt); color: var(--cobalt); }
+.dg-chip.on { border-color: var(--cobalt); background: var(--cobalt-soft); color: var(--cobalt); }
+.dg-chip-n { font-family: var(--mono); font-size: 0.68rem; margin-left: 0.2rem; opacity: 0.8; }
+.dg-legend { margin-left: auto; font-size: 0.7rem; color: var(--ink-3); display: inline-flex; gap: 0.35rem; align-items: center; }
+.dg-drawer { margin-bottom: 0.8rem; }
+.dg-team { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 1rem; }
+
+.dg-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; margin-bottom: 0.5rem; }
+.dg-search { flex: 1 1 200px; max-width: 280px; min-width: 0; }
+.dg-posbar { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 7px; overflow: hidden; }
+.dg-pos-b { font: inherit; font-size: 0.74rem; padding: 0.28rem 0.55rem; background: var(--card); color: var(--ink-2); border: 0; cursor: pointer; }
+.dg-pos-b + .dg-pos-b { border-left: 1px solid var(--line); }
+.dg-pos-b.on { background: var(--cobalt-soft); color: var(--cobalt); font-weight: 700; }
+.dg-btn.on-soft { border-color: var(--cobalt); color: var(--cobalt); background: var(--cobalt-soft); }
+.dg-filters-end { margin-left: auto; }
+.dg-more {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6rem 1rem;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 0.7rem 0.8rem; margin-bottom: 0.6rem;
+}
+.dg-more .dg-weights { flex: 1 1 100%; margin: 0.2rem 0 0; align-items: center; }
+
+/* The board itself: quieter rows, emphasis on ESPN rank, value through colour only */
+.dg-board .dg-strong { font-weight: 700; color: var(--ink); }
+.dg-row.is-gone td { opacity: 0.45; }
+.dg-row.is-gone:hover td { opacity: 0.8; }
+.dg-row.is-rec .dg-sticky { box-shadow: inset 3px 0 0 var(--cobalt); }
+/* Row actions appear on hover where there is hover; always on touch screens. */
+@media (hover: hover) {
+  .dg-acts .dg-btn:not(.dg-act-draft) { opacity: 0; transition: opacity 0.12s; }
+  .dg-row:hover .dg-acts .dg-btn, .dg-acts .dg-btn.on { opacity: 1; }
+}
+details.dg-method { margin-top: 1rem; }
+details.dg-method > summary { cursor: pointer; font-size: 0.82rem; color: var(--ink-2); font-weight: 600; }
+details.dg-method[open] > summary { margin-bottom: 0.4rem; }
+@media (max-width: 767px) {
+  .dg-toolbar-end { margin-left: 0; }
+  .dg-legend { margin-left: 0; }
+  .dg-filters-end { margin-left: 0; }
+  .dg-team { grid-template-columns: minmax(0, 1fr); }
+  .dg-search { max-width: none; flex-basis: 100%; }
+}
+/* Board + team sidebar. The sidebar only exists side-by-side where there is room for it;
+   below that the "Your team" chip and drawer take over (.dg-narrow-only). */
+.dg-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 1rem; align-items: start; }
+.dg-main { min-width: 0; }
+.dg-side { position: sticky; top: 0.75rem; }
+.dg-side-in { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 0.75rem 0.85rem; }
+.dg-side-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.3rem; }
+.dg-side .dg-roster { font-size: 0.76rem; max-height: 40vh; overflow-y: auto; }
+.dg-side .dg-bars { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.2rem 0.7rem; }
+.dg-side .dg-bar { grid-template-columns: 2.1rem 1fr 2rem; font-size: 0.64rem; }
+.dg-side-h > span { font-size: 0.7rem; }
+.dg-side-log { margin-bottom: 0.7rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--line); }
+ol.dg-log { list-style: none; margin: 0; padding: 0; font-size: 0.72rem; }
+.dg-log li { display: grid; grid-template-columns: 2.3rem minmax(0, 1fr) auto; gap: 0.4rem; align-items: baseline; padding: 0.16rem 0; border-bottom: 1px solid var(--line-2); }
+.dg-log li:first-child .dg-log-nm { font-weight: 700; }
+.dg-log li.is-me { background: var(--cobalt-soft); }
+.dg-log-pk { color: var(--ink-3); font-size: 0.66rem; }
+.dg-log-nm { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dg-log-tm { color: var(--ink-3); font-size: 0.64rem; white-space: nowrap; }
+.dg-side-block { border-top: 1px solid var(--line); margin-top: 0.7rem; padding-top: 0.6rem; }
+.dg-side-table { width: 100%; margin-bottom: 0.5rem; }
+.dg-side-table td, .dg-side-table th { padding: 0.2rem 0.35rem; font-size: 0.72rem; }
+.dg-side .dg-catranks .dg-cr { font-size: 0.64rem; padding: 0.05rem 0.3rem; }
+.dg-poscount { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.3rem; margin: 0.2rem 0 0.5rem; }
+.dg-pc { display: flex; flex-direction: column; align-items: center; border: 1px solid var(--line); border-radius: 6px; padding: 0.15rem 0; background: var(--surface-2); }
+.dg-pc-l { font-size: 0.58rem; color: var(--ink-3); }
+.dg-pc b { font-family: var(--mono); font-size: 0.86rem; color: var(--ink); }
+.dg-pc.zero { border-color: var(--clay); background: var(--clay-soft); }
+.dg-pc.zero b { color: var(--clay); }
+.dg-narrow-only { display: none; }
+@media (max-width: 1099px) {
+  .dg-layout { grid-template-columns: minmax(0, 1fr); }
+  .dg-side { display: none; }
+  .dg-chip.dg-narrow-only { display: inline-block; }
+  .dg-drawer.dg-narrow-only { display: block; }
+  .dg-panels.dg-narrow-only { display: grid; }
+}
+
+/* Slightly smaller board: tighter rows, smaller type. */
+table.sheet.dg-board { font-size: 0.74rem; }
+table.sheet.dg-board td, table.sheet.dg-board th { padding: 0.24rem 0.45rem; }
+.dg-board .dg-nm { font-size: 0.8rem; }
+.dg-board .dg-sub { font-size: 0.6rem; line-height: 1.2; }
+.dg-board .dg-btn.sm { font-size: 0.62rem; padding: 0.08rem 0.35rem; }
+/* Your team as a lineup */
+table.dg-lineup { width: 100%; border-collapse: collapse; font-size: 0.74rem; margin-bottom: 0.5rem; }
+.dg-lineup th {
+  width: 2.2rem; text-align: left; font-family: var(--mono); font-size: 0.64rem; font-weight: 700;
+  color: var(--ink-2); padding: 0.18rem 0.3rem; border-bottom: 1px solid var(--line-2);
+}
+.dg-lineup td { padding: 0.18rem 0.3rem; border-bottom: 1px solid var(--line-2); }
+.dg-lineup tr.first-bench th, .dg-lineup tr.first-bench td { border-top: 1px solid var(--line-strong); }
+.dg-lineup tr.is-bench th { color: var(--ink-3); }
+.dg-lu-nm { color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 9.5rem; }
+.dg-lu-pos { color: var(--ink-3); font-size: 0.62rem; text-align: right; white-space: nowrap; }
+.dg-lu-empty { color: var(--line-strong); font-style: italic; }
+
+/* Plan tab, sheet-style (2026-10-19 rebuild) */
+.dg-plan-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.4rem 1rem; margin: 0 0 0.5rem; }
+.dg-plan-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.72rem; }
+.dg-pl-key { padding: 0.05rem 0.45rem; border-radius: 5px; border: 1px solid var(--line); }
+.dg-pl-key.sug { color: var(--ink-3); }
+.dg-pl-key.typed { color: var(--ink); font-weight: 700; }
+.dg-pl-key.is-mine { background: rgba(46, 125, 70, 0.12); border-color: var(--good); color: var(--good); }
+.dg-pl-key.is-gone { color: var(--ink-3); text-decoration: line-through; }
+.dg-plan-warn {
+  font-size: 0.78rem; color: var(--ink-2); background: var(--clay-soft); border: 1px solid var(--clay);
+  border-radius: 8px; padding: 0.45rem 0.7rem; margin: 0 0 0.6rem;
+}
+.dg-linkbtn { font: inherit; background: none; border: 0; padding: 0; color: var(--cobalt); font-weight: 600; cursor: pointer; text-decoration: underline; }
+table.sheet.dg-pl-table { font-size: 0.76rem; }
+table.sheet.dg-pl-table td, table.sheet.dg-pl-table th { padding: 0.22rem 0.5rem; vertical-align: middle; }
+.dg-pl-table tbody tr.dg-pl-next td { background: var(--cobalt-soft); }
+.dg-pl-table tbody tr.dg-pl-done td { opacity: 0.7; }
+.dg-pl-pick { font-weight: 700; color: var(--ink); }
+.dg-pl-cell { min-width: 9rem; padding: 0.1rem 0.3rem !important; }
+.dg-pl-cell.dg-pl-pos { min-width: 4.5rem; }
+.dg-pl-b {
+  display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left;
+  font: inherit; background: none; border: 1px solid transparent; border-radius: 6px;
+  padding: 0.2rem 0.35rem; cursor: pointer; color: inherit;
+}
+.dg-pl-b:hover { border-color: var(--line-strong); background: var(--card); }
+.dg-pl-nm { font-size: 0.78rem; line-height: 1.25; white-space: nowrap; }
+.dg-pl-meta { font-size: 0.6rem; color: var(--ink-3); line-height: 1.2; white-space: nowrap; }
+.dg-pl-risk { color: var(--clay); }
+.dg-pl-empty { color: var(--line-strong); }
+.dg-pl-cell.sug .dg-pl-nm { color: var(--ink-3); }
+.dg-pl-cell.typed .dg-pl-nm { color: var(--ink); font-weight: 700; }
+.dg-pl-cell.is-gone .dg-pl-nm { text-decoration: line-through; color: var(--ink-3); }
+.dg-pl-cell.is-mine .dg-pl-b { background: rgba(46, 125, 70, 0.12); border-color: var(--good); }
+.dg-pl-in {
+  font: inherit; font-size: 0.78rem; width: 100%; padding: 0.3rem 0.4rem;
+  border: 1px solid var(--cobalt); border-radius: 6px; background: var(--card); color: var(--ink);
+}
+.dg-pl-res { border-left: 1px solid var(--line); min-width: 9rem; }
+.dg-pl-res .dg-pl-nm { display: block; color: var(--ink); font-weight: 600; }
+.dg-pl-table tfoot td { border-top: 1px solid var(--line); font-size: 0.74rem; }
+.dg-weights { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin: 0.4rem 0 0.6rem; }
+.dg-punt-note { font-size: 0.78rem; color: var(--ink-2); margin: 0.3rem 0 0.6rem; }
+
+.dg-scroll { max-height: 75vh; overflow: auto; }
+.dg-board td, .dg-board th { padding: 0.36rem 0.5rem; }
+.dg-board thead th { z-index: 3; }
+.dg-sticky { position: sticky; left: 0; background: var(--card); z-index: 2; min-width: 11.5rem; max-width: 15rem; }
+.dg-board thead .dg-sticky { background: var(--surface-2); z-index: 4; }
+.dg-row { cursor: pointer; }
+.dg-row:hover td, .dg-row:hover .dg-sticky { background: var(--row-highlight); }
+.dg-row.is-open td, .dg-row.is-open .dg-sticky { background: var(--surface-2); }
+.dg-row.is-taken td { color: var(--ink-3); }
+.dg-row.is-taken .dg-nm { text-decoration: line-through; }
+.dg-row.is-mine td, .dg-row.is-mine .dg-sticky { background: var(--cobalt-soft); }
+.dg-pname { display: flex; align-items: center; gap: 0.35rem; }
+.dg-nm { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dg-sub { font-size: 0.66rem; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dg-owner { color: var(--cobalt); }
+.dg-tag { font-size: 0.58rem; font-weight: 700; color: var(--cobalt); border: 1px solid var(--cobalt); border-radius: 4px; padding: 0 0.25rem; }
+.dg-tier-row td { font-size: 0.64rem; color: var(--ink-2); background: var(--surface-2); padding: 0.18rem 0.6rem; border-top: 1px solid var(--line); }
+.dg-valcell { position: relative; min-width: 4rem; }
+.dg-vbar { position: absolute; left: 0; top: 22%; bottom: 22%; opacity: 0.16; border-radius: 2px; }
+.dg-vnum { position: relative; font-weight: 700; }
+.dg-acts { white-space: nowrap; }
+.dg-acts .dg-btn + .dg-btn { margin-left: 0.25rem; }
+/* `table.sheet td` (0,1,2) sets nowrap; this has to out-rank it or the outlook runs on
+   one endless line. */
+table.sheet.dg-board .dg-detail-row > td { background: var(--surface-2); white-space: normal; padding: 0.7rem; }
+.dg-detail { position: sticky; left: 0.7rem; width: min(860px, calc(100vw - 3rem)); white-space: normal; }
+.dg-detail .pv-card { margin-bottom: 0.5rem; }
+.dg-drivers { margin: 0.3rem 0 0.5rem 1.1rem; padding: 0; font-size: 0.78rem; color: var(--ink-2); }
+.dg-ranks { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-2); margin-bottom: 0.6rem; }
+.dg-table td, .dg-table th { padding: 0.3rem 0.5rem; }
+.dg-outlook { white-space: normal; overflow-wrap: anywhere; font-size: 0.8rem; line-height: 1.5; color: var(--ink-2); margin: 0.7rem 0 0; }
+
+.dg-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.25rem 1rem; margin-top: 0.6rem; }
+.dg-bar { display: grid; grid-template-columns: 2.4rem 1fr 2.4rem; align-items: center; gap: 0.35rem; font-size: 0.7rem; }
+.dg-bar-l { color: var(--ink-2); }
+.dg-bar-track { position: relative; height: 0.5rem; background: var(--line-2); border-radius: 3px; }
+.dg-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.dg-bar-v { font-family: var(--mono); text-align: right; color: var(--ink-2); }
+
+.dg-method { margin-top: 1.5rem; font-size: 0.82rem; color: var(--ink-2); max-width: 820px; }
+
+@media (max-width: 767px) {
+  .dg-panels { grid-template-columns: minmax(0, 1fr); }
+  .dg-sticky { min-width: 9.5rem; max-width: 10.5rem; }
+  .dg-scroll { max-height: 70vh; }
+}
 
 /* -------- Matchup phase switcher (lib/matchupPhase.ts) --------
    The three states of a head-to-head week — pre / mid / final — as tabs, so they can be

@@ -15,3 +15,10 @@ node_modules/
 next-env.d.ts
 .vercel
 tsconfig.tsbuildinfo
+
+# Throwaway build output for verifying while `next dev` runs (NEXT_DIST_DIR=.next-verify)
+.next-verify/
+
+# The owner's personal draft plan, written by app/api/draft/plan on the local dev server
+scripts/draft_inputs/draft-plan.json
+

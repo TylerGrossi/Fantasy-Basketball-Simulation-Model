@@ -1,0 +1,17 @@
+{
+  "_comment": "Manual overrides applied by scripts/build_draft.py on top of ESPN's projections, for news newer than ESPN's numbers. Keyed by full name. projGp replaces ESPN's projected games; minScale multiplies every counting stat (role change); note is shown on the player's card. Re-run the export after editing.",
+  "Stephen Curry": {
+    "projGp": 62,
+    "note": "Right ankle sprain at open practice Oct 18 (Kerr: 'fine', not serious; opener Oct 21 TBD). Docked from ESPN's 66 to 62 games: ~2 for the ankle, ~2 for re-aggravation risk at 38 after last season's 27-game knee absence."
+  },
+  "Paul George": {
+    "projGp": 44,
+    "minScale": 0.82,
+    "note": "Age 36, 37 games last season, traded PHI to BOS. ESPN's 55 games and 33.2 minutes (up from 30.6) read optimistic: cut to 44 games and production scaled 0.82 for age decline, a smaller role on a new team, and load management."
+  },
+  "Kyrie Irving": {
+    "projGp": 46,
+    "minScale": 0.86,
+    "note": "Torn left ACL March 2025; hasn't played in 19 months, age 34. Says he has no restrictions, but cut ESPN's 59 games to 46 and production scaled 0.86 for ramp-up, minutes management and re-injury risk."
+  }
+}

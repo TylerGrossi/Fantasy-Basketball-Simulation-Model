@@ -129,6 +129,14 @@ export interface ProjectedLine {
    */
   espnRank?: number;
   adp?: number;
+  /** Fields carried by the ESPN-projection export (scripts/build_draft.py) only. */
+  espnStdRank?: number;
+  fpRank?: number;
+  hbRank?: number;
+  hbLastRank?: number;
+  projMin?: number;
+  lastMin?: number;
+  rookie?: boolean;
 }
 
 export type Confidence = "high" | "med" | "low";
@@ -785,6 +793,11 @@ export interface ScoreOptions {
    * slots, and the outliers are dominated by exactly those role changes.
    */
   rankBy?: "total" | "perGame" | "blend";
+  /**
+   * Per-category multipliers (Hashtag-style "x0.25"). Missing = 1. A weight of 0 is the
+   * same as punting the category; it is kept separate so a punt stays one obvious click.
+   */
+  weights?: Record<string, number>;
 }
 
 /**
@@ -857,8 +870,9 @@ export function scoreProjections(
     return out;
   };
 
+  const weight = (c: string) => opts.weights?.[c] ?? 1;
   const sum = (z: Record<string, number>) =>
-    cats.reduce((a, c) => a + (z[c] ?? 0), 0);
+    cats.reduce((a, c) => a + weight(c) * (z[c] ?? 0), 0);
 
   // Pass 1: rough ranking against everyone, only to find the draftable set.
   const rough = zAll(lines, (l) => l.proj);

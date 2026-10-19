@@ -1,51 +1,45 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import DraftBoardView from "@/components/DraftBoardView";
-import { loadLeague } from "@/lib/loadLeague";
-import { scorableCategories } from "@/lib/playerPool";
-import { draftablePoolSize, projectPool } from "@/lib/projection";
+import type { DraftData } from "@/lib/draft";
 
 /**
- * The draft guide for next season.
+ * The draft guide for the DRAFT league (engine/config.py DRAFT_LEAGUE_ID), built from
+ * public/data/draft.json — ESPN's own 2026-27 projections plus outside rankings, exported
+ * by scripts/build_draft.py.
  *
- * The projection runs HERE, on the server, not in the browser: it is a fixed function of
- * the export, so recomputing it per visitor would be waste, and the pool it reads is
- * bigger than the lines it produces. Only the projected lines cross to the client, which
- * then re-scores them on every filter and punt change (`scoreProjections`) — the same
- * slow-tier / fast-tier split the rest of the app uses.
+ * It used to run lib/projection.ts's home-grown model (`projectPool`) over last season's
+ * player pool. That model is still in the repo, but it could not see rookies, trades or
+ * anyone who missed last season, so the board now reads ESPN's projections and keeps only
+ * the model's scoring half (`scoreProjections`), which re-scores them on this league's own
+ * categories in the browser.
  *
- * Note this page deliberately does NOT call `trimLeague`: it never hands the client a
- * `LeagueData` at all, just an array of projections, so there is nothing to trim.
+ * Only the lines and the league metadata cross to the client; the outlooks (~55 KB of
+ * prose) live in draft-outlooks.json and are fetched when a card is opened.
  */
+async function loadDraft(): Promise<DraftData | null> {
+  try {
+    const file = path.join(process.cwd(), "public", "data", "draft.json");
+    return JSON.parse(await readFile(file, "utf8")) as DraftData;
+  } catch {
+    return null;
+  }
+}
+
 export default async function Page() {
-  const league = await loadLeague();
-  const pool = league.seasonData.playerPool ?? [];
-  const lines = projectPool(pool);
-
-  // The league's OWN categories, not the conventional nine. This league scores fifteen
-  // — including the volume categories FGA and 3PA, which changes who is valuable in it —
-  // so ranking a draft board for it on 9-cat would be ranking a game nobody here plays.
-  // The nine are still offered as an alternate basis in the view.
-  const leagueCats = scorableCategories(league.categories);
-
-  const nextSeason = `${league.season}-${String((league.season + 1) % 100).padStart(2, "0")}`;
+  const data = await loadDraft();
+  const season = data?.league.season ?? new Date().getFullYear();
+  const label = `${season - 1}-${String(season % 100).padStart(2, "0")}`;
 
   return (
     <>
       <h1>Draft Guide</h1>
       <p className="caption">
-        A tiered board for the {nextSeason} draft, ranked on projected production rather
-        than last season&rsquo;s box score.
+        {data
+          ? `${data.league.name} · ${data.league.teams.length} teams · ${data.league.rounds} rounds · ${label} projections, ranked on this league's ${data.league.categories.length} categories.`
+          : "No draft data — run `python scripts/build_draft.py`."}
       </p>
-      {lines.length === 0 ? (
-        <p className="caption">No player pool data — run the data export.</p>
-      ) : (
-        <DraftBoardView
-          lines={lines}
-          leagueCats={leagueCats}
-          lowerIsBetter={league.lowerIsBetter}
-          poolSize={draftablePoolSize(league.teams.length || 10)}
-          season={league.season}
-        />
-      )}
+      {data && <DraftBoardView data={data} />}
     </>
   );
 }

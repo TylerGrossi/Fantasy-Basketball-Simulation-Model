@@ -37,6 +37,9 @@ def main() -> int:
     values = {
         "ESPN_LEAGUE_ID": str(config.ESPN_LEAGUE_ID),
         "ESPN_SEASON_YEAR": str(config.ESPN_SEASON_YEAR),
+        # The draft guide's league (app/api/draft) — a different league from the one above.
+        "DRAFT_LEAGUE_ID": str(getattr(config, "DRAFT_LEAGUE_ID", "") or ""),
+        "DRAFT_SEASON_YEAR": str(getattr(config, "DRAFT_SEASON_YEAR", "") or ""),
         "ESPN_S2": str(config.ESPN_S2 or ""),
         "ESPN_SWID": str(config.ESPN_SWID or ""),
         # Powers the Agent chat page (app/api/agent). Optional: without it every other
@@ -62,7 +65,8 @@ def main() -> int:
     out.write_text(body, encoding="utf-8")
 
     # Never echo the cookie or key values themselves.
-    plain = ("ESPN_LEAGUE_ID", "ESPN_SEASON_YEAR", "GEMINI_MODELS")
+    plain = ("ESPN_LEAGUE_ID", "ESPN_SEASON_YEAR", "DRAFT_LEAGUE_ID", "DRAFT_SEASON_YEAR",
+             "GEMINI_MODELS")
     print(f"wrote {out}")
     for k, v in values.items():
         shown = v if k in plain else ("set" if v else "EMPTY")
