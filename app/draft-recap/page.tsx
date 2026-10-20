@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import DraftRecapView from "@/components/DraftRecapView";
 import type { DraftData } from "@/lib/draft";
+import { loadLeague } from "@/lib/loadLeague";
 
 /**
  * Draft Recap: who won the draft in the draft league (engine/config.py DRAFT_LEAGUE_ID).
@@ -19,6 +20,16 @@ async function loadDraft(): Promise<DraftData | null> {
 
 export default async function Page() {
   const data = await loadDraft();
+  // The Playoffs page's season simulation (the daily export): its playoff odds AND the
+  // projected record behind them, so the recap's Proj record, Win % and Playoff % are
+  // one model's numbers and agree with that page. Ids line up: same ESPN league.
+  const league = await loadLeague();
+  const playoffModel = Object.fromEntries(
+    (league.seasonData.playoffOdds ?? []).map((o) => [
+      o.teamId,
+      { playoff: o.playoffProb / 100, record: o.projRecord?.length === 3 ? o.projRecord : undefined },
+    ])
+  );
   return (
     <>
       <h1>Draft Recap</h1>
@@ -27,7 +38,7 @@ export default async function Page() {
           ? `${data.league.name} · who won the draft, graded on this league's ${data.league.categories.length} categories.`
           : "No draft data — run `python scripts/build_draft.py`."}
       </p>
-      {data && <DraftRecapView data={data} />}
+      {data && <DraftRecapView data={data} playoffModel={playoffModel} />}
     </>
   );
 }

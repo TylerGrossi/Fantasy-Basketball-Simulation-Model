@@ -1,3 +1,4 @@
+import type React from "react";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
 import type { PlayoffOddsRow } from "@/lib/league";
 
@@ -18,11 +19,20 @@ function fmtPct(pct: number): string {
   return `${pct.toFixed(0)}%`;
 }
 
-/** Green above a quarter chance, red below. `invert` for "no playoffs", where high = bad. */
-function pctColor(pct: number, invert = false): string {
-  if (pct < 0.01) return "var(--ink-3)";
-  const over = pct >= 25;
-  return (invert ? !over : over) ? "var(--good)" : "var(--bad)";
+/**
+ * A probability cell: ink text on a cobalt wash that deepens with the chance, so the
+ * column reads as a heat map. Replaced green-above-25% / red-below (owner, 2026-10-20) —
+ * a 2-way colour split turned 24% and 26% into opposites and made most of the table red.
+ * No "No Playoffs" column (owner, 2026-10-20): it is just 100 minus Playoff %.
+ */
+function pctStyle(pct: number): React.CSSProperties {
+  if (pct < 0.01) return { color: "var(--ink-3)" };
+  // Capped at 32% so the deepest cell still carries ink text comfortably.
+  const mix = Math.round(Math.min(pct, 100) * 0.32);
+  return {
+    color: "var(--ink)",
+    background: `color-mix(in oklab, var(--cobalt) ${mix}%, transparent)`,
+  };
 }
 
 /** Probability as American odds, blank at the extremes where a price is meaningless. */
@@ -120,7 +130,6 @@ export default async function Page() {
                       #{s}*
                     </th>
                   ))}
-                  <th className="num">No Playoffs</th>
                   <th className="num">Playoff %</th>
                   {showPlayoffOdds && <th className="num">Playoff Odds</th>}
                 </>
@@ -152,24 +161,16 @@ export default async function Page() {
                       {[1, 2, 3, 4].map((s) => {
                         const pct = t.seedProbs?.[String(s)] ?? 0;
                         return (
-                          <td className="num" key={s} style={{ color: pctColor(pct) }}>
+                          <td className="num" key={s} style={pctStyle(pct)}>
                             {fmtPct(pct)}
                           </td>
                         );
                       })}
-                      <td
-                        className="num"
-                        style={{
-                          color: pctColor(t.seedProbs?.no_playoffs ?? 0, true),
-                        }}
-                      >
-                        {fmtPct(t.seedProbs?.no_playoffs ?? 0)}
-                      </td>
-                      <td className="num" style={{ color: pctColor(t.playoffProb) }}>
+                      <td className="num" style={pctStyle(t.playoffProb)}>
                         {fmtPct(t.playoffProb)}
                       </td>
                       {showPlayoffOdds && (
-                        <td className="num" style={{ color: "var(--clay)" }}>
+                        <td className="num" style={{ color: "var(--ink-2)" }}>
                           {americanOdds(t.playoffProb) || "–"}
                         </td>
                       )}
@@ -177,21 +178,21 @@ export default async function Page() {
                   )}
                   {!isChampionship && inPlayoffs && (
                     <>
-                      <td className="num" style={{ color: pctColor(t.advanceProb) }}>
+                      <td className="num" style={pctStyle(t.advanceProb)}>
                         {fmtPct(t.advanceProb)}
                       </td>
                       {showAdvanceOdds && (
-                        <td className="num" style={{ color: "var(--clay)" }}>
+                        <td className="num" style={{ color: "var(--ink-2)" }}>
                           {americanOdds(t.advanceProb) || "–"}
                         </td>
                       )}
                     </>
                   )}
-                  <td className="num" style={{ color: pctColor(t.championshipProb) }}>
+                  <td className="num" style={pctStyle(t.championshipProb)}>
                     {fmtPct(t.championshipProb)}
                   </td>
                   {showChampOdds && (
-                    <td className="num" style={{ color: "var(--clay)" }}>
+                    <td className="num" style={{ color: "var(--ink-2)" }}>
                       {americanOdds(t.championshipProb) || "–"}
                     </td>
                   )}

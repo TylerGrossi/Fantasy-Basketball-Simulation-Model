@@ -159,6 +159,12 @@ export interface PlayoffOddsRow {
   inPlayoffs: boolean;
   record: number[];
   /**
+   * Mean final regular-season record [W, L, T] across the same simulated seasons that
+   * produced `playoffProb` — categories, in an each-category league. Absent on exports
+   * built before it was added.
+   */
+  projRecord?: number[];
+  /**
    * Chance of finishing on each seed, keyed by seed number as a string, plus
    * `no_playoffs`. Only meaningful before the bracket starts — optional because it is
    * absent from exports built before it was added.
@@ -327,6 +333,16 @@ export interface LeagueData extends LeagueMeta {
   periodResults?: PeriodResult[];
   /** Season-wide data. `season` above is the YEAR — do not confuse them. */
   seasonData: SeasonData;
+  /**
+   * The current matchup week's NBA games per team (keyed by the same abbreviation as
+   * `PlayerRow.nbaTeam`): ISO date -> opponent label ("@LAL" away, "MEM" home). The whole
+   * week, played days included. Absent outside a live week and on older exports.
+   */
+  weekSchedule?: {
+    start: string;
+    end: string;
+    teams: Record<string, Record<string, string>>;
+  };
 }
 
 /**

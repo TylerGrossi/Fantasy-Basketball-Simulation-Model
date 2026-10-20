@@ -178,6 +178,13 @@ export interface PercentileRow {
   percentile: number | null;
   /** How many players the rank was taken against. */
   n: number;
+  /**
+   * League rank among those `n`: 1 + everyone strictly better. Null exactly when
+   * `percentile` is. `tied` when someone else has the identical figure, so the rank is
+   * shared ("T-12th") rather than arbitrarily broken.
+   */
+  rank: number | null;
+  tied: boolean;
 }
 
 /**
@@ -196,6 +203,19 @@ function midrank(value: number, others: number[], lowerIsBetter?: boolean): numb
     else if (lowerIsBetter ? o > value : o < value) below++;
   }
   return Math.round(((below + equal / 2) / others.length) * 100);
+}
+
+/** 1 + how many have a strictly better figure; `tied` if another shares this one. */
+function rankOf(value: number, others: number[], lowerIsBetter?: boolean) {
+  let better = 0;
+  let equal = 0;
+  for (const o of others) {
+    if (o === value) equal++;
+    else if (lowerIsBetter ? o < value : o > value) better++;
+  }
+  // `others` includes the player himself when he is in the reference population, so a
+  // tie means a SECOND equal figure.
+  return { rank: better + 1, tied: equal > 1 };
 }
 
 /**
@@ -268,14 +288,15 @@ export function percentileRows(
       const others = population
         .map((x) => valueOf(x, spec.key))
         .filter((v): v is number => v != null);
+      const ranked = !(value == null || unqualified || others.length < 2);
+      const r = ranked ? rankOf(value, others, spec.lowerIsBetter) : null;
       rows.push({
         spec,
         value,
-        percentile:
-          value == null || unqualified || others.length < 2
-            ? null
-            : midrank(value, others, spec.lowerIsBetter),
+        percentile: ranked ? midrank(value, others, spec.lowerIsBetter) : null,
         n: others.length,
+        rank: r?.rank ?? null,
+        tied: r?.tied ?? false,
       });
     }
   }

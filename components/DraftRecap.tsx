@@ -62,12 +62,20 @@ export default function DraftRecap({
   live: liveProp,
   mock,
   myTeamId,
+  playoffModel,
 }: {
   lines: ProjectedLine[];
   league: DraftLeague;
   live: LiveDraft | null;
   mock: MockState;
   myTeamId: number | null;
+  /**
+   * Team id -> the daily export's season simulation: the Playoffs page's numbers. When
+   * present, Proj record, Win % and Playoff % all come from it rather than this page's
+   * draft-night simulation, so they agree with each other and with that page (owner,
+   * 2026-10-20). The draft simulation still drives the category ranks.
+   */
+  playoffModel?: Record<number, PlayoffModelRow>;
 }) {
   // Fetch the feed itself, independent of the board's sync toggle (which the owner may
   // have switched off during the draft, when ESPN's feed was empty).
@@ -96,6 +104,10 @@ export default function DraftRecap({
   const [pref, setPref] = useState<Source | null>(null);
   // Phone: the ladder is the picker (Season Summary pattern); null = your own team.
   const [sel, setSel] = useState<number | null>(null);
+  // Header sorting for the two desktop tables (owner, 2026-10-20). "rank" = the default
+  // projected-value order.
+  const [mainSort, setMainSort] = useState<SortState>({ key: "rank", desc: false });
+  const [catSort, setCatSort] = useState<SortState>({ key: "rank", desc: false });
   const source: Source | null = pref ?? (liveReady ? "live" : mockReady ? "mock" : null);
 
   // Neutral scoring: league categories, no weights, no punts.
@@ -195,6 +207,14 @@ export default function DraftRecap({
     order.forEach((x, i) => m.set(x.team, { place: i + 1, pct: pct(x), res: x, catRank: catRank[x.team] ?? {} }));
     return m;
   }, [season, league.categories]);
+  // The Playoffs page's model when the export has it, else the draft simulation's.
+  const playoffOf = (id: number, res: SeasonResult) => playoffModel?.[id]?.playoff ?? res.playoffPct;
+  const recordOf = (id: number, res: SeasonResult): [number, number, number] =>
+    (playoffModel?.[id]?.record as [number, number, number] | undefined) ?? [res.catW, res.catL, res.catT];
+  const winPctOf = (id: number, res: SeasonResult) => {
+    const [w, l, t] = recordOf(id, res);
+    return (w + t / 2) / Math.max(1, w + l + t);
+  };
   // Tolerant of a missing number (e.g. a result from an older model): shows a dash.
   const fmt0 = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) ? n.toFixed(0) : "—");
 
@@ -209,6 +229,42 @@ export default function DraftRecap({
   const ranked = [...teams].sort((a, b) => (valuePlace.get(a.id) ?? 99) - (valuePlace.get(b.id) ?? 99));
   const valueRanked = [...teams].sort((a, b) => (valuePlace.get(a.id) ?? 99) - (valuePlace.get(b.id) ?? 99));
   const winner = ranked[0];
+
+  /*
+   * Sort keys for the two tables. Missing simulation numbers (still loading) sort last
+   * either way, so a half-loaded table never leads with dashes.
+   */
+  const mainValue = (t: TeamResult, key: string): number | string | null => {
+    const g = standOf.get(t.id);
+    switch (key) {
+      case "rank":
+      case "grade":
+        return valuePlace.get(t.id) ?? 99;
+      case "team":
+        return t.name.toLowerCase();
+      case "record":
+        return g ? recordOf(t.id, g.res)[0] : null;
+      case "win":
+        return g ? winPctOf(t.id, g.res) : null;
+      case "playoff":
+        return g ? playoffOf(t.id, g.res) : null;
+      case "value":
+        return t.projValue;
+      case "steal":
+        return t.steal ? t.steal.r.name.toLowerCase() : null;
+      case "reach":
+        return t.reach ? t.reach.r.name.toLowerCase() : null;
+      default:
+        return null;
+    }
+  };
+  const catValue = (t: TeamResult, key: string): number | string | null => {
+    if (key === "rank") return valuePlace.get(t.id) ?? 99;
+    if (key === "team") return t.name.toLowerCase();
+    return standOf.get(t.id)?.catRank[key] ?? null;
+  };
+  const mainRows = sortRows(ranked, mainSort, mainValue);
+  const catRows = sortRows(ranked, catSort, catValue);
   const allPicks = teams.flatMap((t) =>
     t.picks.map((x) => {
       const d = x.r.adp != null ? x.pick - x.r.adp : 0;
@@ -241,8 +297,8 @@ export default function DraftRecap({
           <span className="dg-dim">Won the draft</span>
           <strong>{winner.name}</strong>
           <span>
-            Grade {letterFor(1, nT)} · projected {fmt0(standOf.get(winner.id)!.res.catW)}-
-            {fmt0(standOf.get(winner.id)!.res.catL)} · playoffs {(standOf.get(winner.id)!.res.playoffPct * 100).toFixed(0)}%
+            Grade {letterFor(1, nT)} · projected {fmt0(recordOf(winner.id, standOf.get(winner.id)!.res)[0])}-
+            {fmt0(recordOf(winner.id, standOf.get(winner.id)!.res)[1])} · playoffs {(playoffOf(winner.id, standOf.get(winner.id)!.res) * 100).toFixed(0)}%
           </span>
         </div>
       )}
@@ -267,7 +323,7 @@ export default function DraftRecap({
             </p>
             <div className="metrics ss-metrics">
               <Tile label="Proj value" value={t.projValue.toFixed(1)} />
-              <Tile label="Playoffs" value={g ? `${(g.res.playoffPct * 100).toFixed(0)}%` : "\u2026"} />
+              <Tile label="Playoffs" value={g ? `${(playoffOf(t.id, g.res) * 100).toFixed(0)}%` : "\u2026"} />
               <Tile label="Best pick" text value={t.steal ? t.steal.r.name : "—"} sub={t.steal ? `#${t.steal.pick} · ADP ${t.steal.r.adp?.toFixed(0)}` : undefined} />
             </div>
             <h2 className="pr-title">Draft rankings</h2>
@@ -296,24 +352,24 @@ export default function DraftRecap({
       </div>
       <div className="only-web">
       <div className="table-scroll">
-        <table className="sheet dg-recap-table">
+        <table className="sheet sortable dg-recap-table">
           <thead>
             <tr>
-              <th className="num">#</th>
-              <th>Team</th>
-              <th className="num">Grade</th>
-              <th className="num" title="Projected season record in categories: 19 weeks x 15 categories = 285 (mean of 5,000 simulated seasons)">
+              <SortTh k="rank" s={mainSort} set={setMainSort} num asc>#</SortTh>
+              <SortTh k="team" s={mainSort} set={setMainSort} asc>Team</SortTh>
+              <SortTh k="grade" s={mainSort} set={setMainSort} num asc>Grade</SortTh>
+              <SortTh k="record" s={mainSort} set={setMainSort} num title="Projected season record in categories: 19 weeks x 15 categories = 285 (mean of 5,000 simulated seasons)">
                 Proj record
-              </th>
-              <th className="num">Win %</th>
-              <th className="num" title={`Share of simulated seasons finishing in the top ${league.playoffTeams || 4}`}>Playoff %</th>
-              <th className="num" title="Sum of each player's projected season value">Proj value</th>
-              <th>Best pick</th>
-              <th>Biggest reach</th>
+              </SortTh>
+              <SortTh k="win" s={mainSort} set={setMainSort} num>Win %</SortTh>
+              <SortTh k="playoff" s={mainSort} set={setMainSort} num title="Same figure as the Playoffs page">Playoff %</SortTh>
+              <SortTh k="value" s={mainSort} set={setMainSort} num title="Sum of each player's projected season value">Proj value</SortTh>
+              <SortTh k="steal" s={mainSort} set={setMainSort} asc>Best pick</SortTh>
+              <SortTh k="reach" s={mainSort} set={setMainSort} asc>Biggest reach</SortTh>
             </tr>
           </thead>
           <tbody>
-            {ranked.map((t) => {
+            {mainRows.map((t) => {
               const g = standOf.get(t.id);
               return (
                 <tr key={t.id} className={t.mine ? "dg-me" : ""}>
@@ -323,11 +379,11 @@ export default function DraftRecap({
                     <strong>{letterFor(valuePlace.get(t.id) ?? nT, nT)}</strong>
                   </td>
                   <td className="num">
-                    <strong>{g ? `${fmt0(g.res.catW)}-${fmt0(g.res.catL)}` : "\u2014"}</strong>
+                    <strong>{g ? `${fmt0(recordOf(t.id, g.res)[0])}-${fmt0(recordOf(t.id, g.res)[1])}` : "\u2014"}</strong>
                   </td>
-                  <td className="num">{g ? `${(g.pct * 100).toFixed(1)}%` : "\u2014"}</td>
-                  <td className={`num ${g ? (g.res.playoffPct >= 0.6 ? "dg-good" : g.res.playoffPct < 0.25 ? "dg-bad" : "") : ""}`}>
-                    <strong>{g ? `${(g.res.playoffPct * 100).toFixed(0)}%` : "\u2014"}</strong>
+                  <td className="num">{g ? `${(winPctOf(t.id, g.res) * 100).toFixed(1)}%` : "\u2014"}</td>
+                  <td className={`num ${g ? (playoffOf(t.id, g.res) >= 0.6 ? "dg-good" : playoffOf(t.id, g.res) < 0.25 ? "dg-bad" : "") : ""}`}>
+                    <strong>{g ? `${(playoffOf(t.id, g.res) * 100).toFixed(0)}%` : "\u2014"}</strong>
                   </td>
                   <td className="num">{t.projValue.toFixed(1)}</td>
                   <td>
@@ -358,19 +414,20 @@ export default function DraftRecap({
 
       <h2 className="dg-h dg-recap-h">Category ranks (projected weekly win rate)</h2>
       <div className="table-scroll">
-        <table className="sheet dg-recap-cats">
+        <table className="sheet sortable dg-recap-cats">
           <thead>
             <tr>
-              <th>Team</th>
+              <SortTh k="team" s={catSort} set={setCatSort} asc>Team</SortTh>
+              {/* Ranks: 1 is best, so a first click sorts ascending — leaders on top. */}
               {league.categories.map((c) => (
-                <th key={c} className="num">
+                <SortTh key={c} k={c} s={catSort} set={setCatSort} num asc>
                   {c}
-                </th>
+                </SortTh>
               ))}
             </tr>
           </thead>
           <tbody>
-            {ranked.map((t) => {
+            {catRows.map((t) => {
               const g = standOf.get(t.id);
               return (
                 <tr key={t.id} className={t.mine ? "dg-me" : ""}>
@@ -453,15 +510,7 @@ export default function DraftRecap({
           );
         })}
       </div>
-      <p className="caption">
-        Graded on this league&rsquo;s {league.categories.length} categories with equal weights
-        and no punts, from 2026-27 projections (with this guide&rsquo;s injury adjustments).
-        Early picks count more: each player is weighted by round (1.0 through round 2, then
-        about &minus;0.075 a round, down to 0.25 by round 12), because late picks are the ones
-        that get dropped. Best pick, biggest reach and the value lists use rounds 1&ndash;{HIGHLIGHT_MAX_ROUND} only.
-        Proj record and Playoff % come from a season projection: the real {league.regularWeeks || 19}-week schedule simulated 10,000 times, each week&rsquo;s swings calibrated on this league&rsquo;s real 2025-26 weekly results, plus season-level uncertainty for breakouts, busts, injuries and in-season moves, every category a win or loss (H2H each category), the top {league.playoffTeams || 4} make the playoffs. Late picks are blended with a replacement-level waiver player by round weight. Category ranks are each team&rsquo;s weekly win rate in that category. Teams are ranked by projected value: each roster&rsquo;s value over replacement, weighted by round.
-        Best pick and biggest reach compare each pick with ESPN ADP.
-      </p>
+      {/* The methodology paragraph that sat here was removed (owner, 2026-10-20). */}
     </section>
   );
 }
@@ -505,5 +554,86 @@ function Tile({ label, value, sub, text }: { label: string; value: string; sub?:
       </div>
       {sub && <div className="dg-tile-sub">{sub}</div>}
     </div>
+  );
+}
+
+/** One team's row from the Playoffs page's season simulation (see the page loader). */
+export interface PlayoffModelRow {
+  /** P(playoffs), 0-1. */
+  playoff: number;
+  /** Mean final record [W, L, T]; absent on exports built before it was added. */
+  record?: number[];
+}
+
+/* ---------------------------------------------------------------- sorting */
+
+/** Which column a recap table is sorted on, and which way. */
+interface SortState {
+  key: string;
+  desc: boolean;
+}
+
+/**
+ * Rows ordered by `value(row, key)`. Nulls (a simulation number still loading) go last
+ * in either direction; equal values keep the default projected-value order.
+ */
+function sortRows<T>(
+  rows: T[],
+  s: SortState,
+  value: (row: T, key: string) => number | string | null
+): T[] {
+  return rows
+    .map((row, i) => ({ row, i, v: value(row, s.key) }))
+    .sort((a, b) => {
+      if (a.v == null || b.v == null) return a.v == null ? (b.v == null ? a.i - b.i : 1) : -1;
+      const c =
+        typeof a.v === "string" || typeof b.v === "string"
+          ? String(a.v).localeCompare(String(b.v))
+          : a.v - b.v;
+      return (s.desc ? -c : c) || a.i - b.i;
+    })
+    .map((x) => x.row);
+}
+
+/**
+ * A sortable header — the same `.th-sort` button and caret as Season Stats, so sorting
+ * looks the same everywhere in the app. `asc` makes the FIRST click ascending, for
+ * columns where small is good (ranks, grades) or alphabetical (names).
+ */
+function SortTh({
+  k,
+  s,
+  set,
+  num,
+  asc,
+  title,
+  children,
+}: {
+  k: string;
+  s: SortState;
+  set: (s: SortState) => void;
+  num?: boolean;
+  asc?: boolean;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const active = s.key === k;
+  return (
+    <th
+      className={num ? "num" : undefined}
+      title={title}
+      aria-sort={active ? (s.desc ? "descending" : "ascending") : "none"}
+    >
+      <button
+        type="button"
+        className="th-sort"
+        onClick={() => set(active ? { key: k, desc: !s.desc } : { key: k, desc: !asc })}
+      >
+        {children}
+        <span className={`sort-caret ${active ? "on" : ""}`} aria-hidden="true">
+          {active ? (s.desc ? "▾" : "▴") : "▾"}
+        </span>
+      </button>
+    </th>
   );
 }

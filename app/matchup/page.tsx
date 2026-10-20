@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import MatchupView from "@/components/MatchupView";
 import PhaseBanner from "@/components/PhaseBanner";
 import { livePhase, phaseFrom, phasedMatchup } from "@/lib/matchupPhase";
@@ -26,6 +27,10 @@ export default async function Page({
   const demo = sp.demo === "1";
   // A dev-only override with no UI behind it — see phaseFrom.
   const override = phaseFrom(sp.phase);
+  // Folded into the one-page Current Matchup (owner, 2026-10-20). Only the dev-only
+  // simulated-week preview (?phase=) still renders here; everything else goes to the
+  // matching section of the combined page.
+  if (!override) redirect(`/scoreboard${demo ? "?demo=1" : ""}#odds`);
   const league = await loadLeague();
   const me = await myTeam(league);
   const r = resolveMatchup(league, me.id);

@@ -46,35 +46,85 @@ export function useLiveTotals(
 
   useEffect(() => {
     if (!enabled) return;
-    let cancelled = false;
+    // Every component on the page that asks for the same matchup shares ONE poller (see
+    // `subscribe`): the Current Matchup page mounts four of them, which used to mean
+    // four identical ESPN round trips every 90 seconds.
+    return subscribe(`${period}-${teamId}`, period, teamId, refreshMs, (r) => {
+      if (r.ok) {
+        setYou(r.you);
+        setOpp(r.opp);
+        setFetchedAt(r.fetchedAt);
+        setState("live");
+      } else {
+        setState("error");
+      }
+    });
+  }, [period, teamId, refreshMs, enabled]);
 
-    async function refresh() {
+  return { you, opp, state, fetchedAt };
+}
+
+/* ------------------------------------------------------------ shared poller */
+
+type LiveResult =
+  | { ok: true; you: StatVector; opp: StatVector; fetchedAt: string }
+  | { ok: false };
+
+interface Poller {
+  listeners: Set<(r: LiveResult) => void>;
+  last: LiveResult | null;
+  timer: ReturnType<typeof setInterval>;
+}
+
+const pollers = new Map<string, Poller>();
+
+/**
+ * Join (or start) the poller for one matchup. The first subscriber starts the fetch loop,
+ * later ones get the latest result immediately and every result after; the loop stops
+ * when the last one unmounts. Returns the unsubscribe.
+ */
+function subscribe(
+  key: string,
+  period: number,
+  teamId: number,
+  refreshMs: number,
+  listener: (r: LiveResult) => void
+): () => void {
+  let p = pollers.get(key);
+  if (!p) {
+    const poller: Poller = { listeners: new Set(), last: null, timer: 0 as never };
+    const refresh = async () => {
+      let r: LiveResult;
       try {
         const res = await fetch(`/api/live?period=${period}&teamId=${teamId}`, {
           cache: "no-store",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (cancelled) return;
         if (!Array.isArray(data.you) || !Array.isArray(data.opp)) {
           throw new Error("malformed response");
         }
-        setYou(data.you);
-        setOpp(data.opp);
-        setFetchedAt(new Date().toLocaleTimeString());
-        setState("live");
+        r = { ok: true, you: data.you, opp: data.opp, fetchedAt: new Date().toLocaleTimeString() };
       } catch {
-        if (!cancelled) setState("error");
+        r = { ok: false };
       }
-    }
-
-    refresh();
-    const id = setInterval(refresh, refreshMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
+      poller.last = r;
+      poller.listeners.forEach((l) => l(r));
     };
-  }, [period, teamId, refreshMs, enabled]);
-
-  return { you, opp, state, fetchedAt };
+    poller.timer = setInterval(refresh, refreshMs);
+    pollers.set(key, poller);
+    p = poller;
+    void refresh();
+  } else if (p.last) {
+    listener(p.last);
+  }
+  p.listeners.add(listener);
+  const mine = p;
+  return () => {
+    mine.listeners.delete(listener);
+    if (mine.listeners.size === 0) {
+      clearInterval(mine.timer);
+      pollers.delete(key);
+    }
+  };
 }

@@ -128,6 +128,30 @@ export async function loadConsistency(): Promise<ConsistencyPool | null> {
   }
 }
 
+/** One team's week-0 power ranking (see loadWeek0). */
+export interface Week0Rank {
+  teamId: number;
+  teamName: string;
+  /** Whole-roster 9-cat value: the Value Power Rankings' "Total Value". */
+  value: number;
+  place: number;
+}
+
+/**
+ * WEEK 0 of the power rankings: the Value Power Rankings as they stood before the first
+ * game, snapshotted ONCE into public/data/power-week0.json (owner, 2026-10-20) so it stays
+ * fixed while the live values move. Week 1's movement is measured from it. Null when the
+ * file is missing — the pages then simply have no week 0.
+ */
+export async function loadWeek0(): Promise<Week0Rank[] | null> {
+  try {
+    const raw = await readJson<{ teams: Week0Rank[] }>(dataFile("power-week0.json"));
+    return [...(raw.teams ?? [])].sort((a, b) => a.place - b.place);
+  } catch {
+    return null;
+  }
+}
+
 /** One finished season's player pool, from public/data/archive/league-<season>.json. */
 export interface ArchivedPool {
   /** ESPN's season year: 2026 = the 2025-26 season. */

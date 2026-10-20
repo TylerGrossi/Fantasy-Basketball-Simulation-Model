@@ -3183,7 +3183,15 @@ table.sheet.lu-table .lu-pos {
   .pv-cmp-pickers .pd-ac { flex: 1 1 100%; }
   .pv-cmp-pickers > .caption { text-align: center; width: 100%; }
 }
-.pv-cmp { margin: 0.6rem 0 0; }
+/* The Player Card's panel (.pd-card / .pd-rank): card ground, hairline, 12px radius —
+   so the two players sit on a sheet rather than straight on the page paper. */
+.pv-cmp {
+  margin: 0.9rem 0 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 1.15rem 1.3rem 1.3rem;
+}
 .pv-cmp-head {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -7862,3 +7870,181 @@ table.sheet.lh-stand td { padding-left: 0.35rem; padding-right: 0.35rem; }
 .lh-pr-d.dn { color: var(--bad); }
 .lh-pr-bar { width: 4.5rem; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .lh-pr-bar > span { display: block; height: 100%; background: var(--cobalt); }
+
+/* ------------------------------------------------------------ Current Matchup
+   One page since 2026-10-20: scoreboard -> Box Score / Schedule / Roster tabs -> win
+   probability -> projections -> streamers -> bench. A sticky jump bar under the site
+   header links the sections. */
+/* The section links under the page title. NOT sticky (owner, 2026-10-20): pinned under
+   the header it slid over the content as you scrolled. It scrolls away with the page. */
+.cm-jump {
+  display: flex;
+  gap: 1.4rem;
+  overflow-x: auto;
+  margin: 0.4rem 0 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+.cm-jump::-webkit-scrollbar { display: none; }
+.cm-jump a {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.cm-jump a:hover { color: var(--cobalt); }
+/* Land each section below the sticky site header, not under it. */
+.cm-sec,
+.cm-sec h2[id],
+.md-anchor { scroll-margin-top: calc(var(--nav-h) + 1rem); }
+.cm-sec { margin-bottom: 2.4rem; }
+.cm-sec + .cm-sec { padding-top: 1.6rem; border-top: 1px solid var(--line); }
+.cm-h { margin-top: 0; }
+@media (max-width: 767px) {
+  /* No site header on a phone; the page's own 45px back row is the sticky band there. */
+  .cm-jump { gap: 1.1rem; }
+  .cm-sec,
+  .cm-sec h2[id],
+  .md-anchor { scroll-margin-top: 3.5rem; }
+}
+
+/* The scoreboard alone (no box-score tabs): the in-panel board shows at every width. */
+.sbx-solo { margin-bottom: 0.4rem; }
+
+/* Box Score / Schedule / Roster: ESPN's underline tabs, in this app's cobalt. */
+.md { margin-top: 1rem; }
+.md-anchor { display: block; height: 0; }
+.md-tabs {
+  display: flex;
+  gap: 1.6rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.9rem;
+}
+.md-tab {
+  padding: 0.55rem 0.15rem;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.md-tab:hover { color: var(--ink-2); }
+.md-tab-on { color: var(--ink); border-bottom-color: var(--cobalt); }
+.md-panel[hidden] { display: none; }
+
+/* Week schedule grid */
+.ws-toggle { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+.ws-sum { font-size: 0.85rem; color: var(--ink-2); margin: 0 0 0.7rem; }
+.ws-sum b { color: var(--clay); }
+table.sheet.ws-table { min-width: 760px; }
+table.sheet.ws-table th.ws-day,
+table.sheet.ws-table td.ws-cell,
+table.sheet.ws-table td.ws-count { text-align: center; white-space: nowrap; }
+.ws-player { white-space: nowrap; }
+.ws-team { display: block; font-size: 0.7rem; color: var(--ink-3); }
+.ws-st { font-weight: 700; }
+.ws-st.out { color: var(--bad); }
+.ws-st.day { color: var(--clay); }
+.ws-cell { color: var(--ink-3); font-size: 0.82rem; }
+.ws-cell.ws-game { color: var(--ink); font-weight: 600; }
+/* A game that would not start: the day is over the slot count and he is the odd one out. */
+.ws-cell.ws-sits { color: var(--ink-3); font-weight: 400; text-decoration: line-through; }
+.ws-cell.ws-out { color: var(--ink-3); font-weight: 400; font-style: italic; }
+.ws-past { opacity: 0.55; }
+th.ws-today,
+td.ws-today { background: var(--row-highlight); }
+table.sheet.ws-table tfoot td {
+  border-top: 1px solid var(--line-strong);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.ws-foot-l { color: var(--ink-2); }
+.ws-count { font-family: var(--mono); color: var(--ink-2); }
+.ws-count.ws-over { color: var(--clay); }
+
+/* Bench strategy: the old Streamlit layout in Analyst Sheet clothes — no gradients, a
+   coloured edge instead of a coloured fill. Play is cobalt, bench is clay. */
+.bn-rec {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--cobalt);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0 1rem;
+}
+.bn-rec.bench { border-left-color: var(--clay); }
+.bn-rec-h {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--cobalt);
+}
+.bn-rec.bench .bn-rec-h { color: var(--clay); }
+.bn-rec-sub { margin-top: 0.35rem; font-size: 0.85rem; color: var(--ink-2); }
+.bn-rec-sub b { color: var(--ink); }
+.bn-sep { margin: 0 0.6rem; color: var(--line-strong); }
+.bn-note { font-size: 0.75rem; color: var(--ink-3); font-weight: 400; }
+.bn-scen { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.bn-card {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--cobalt);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 0.85rem 1rem;
+}
+.bn-card.bench { border-left-color: var(--clay); }
+.bn-card-h {
+  font-family: var(--mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.8rem;
+  color: var(--cobalt);
+}
+.bn-card.bench .bn-card-h { color: var(--clay); }
+.bn-stats { display: flex; gap: 2rem; margin: 0.7rem 0; }
+.bn-stats > div { display: flex; flex-direction: column; }
+.bn-l {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.bn-v { font-size: 1.3rem; font-weight: 700; color: var(--ink); }
+.bn-helps { border-top: 1px solid var(--line-2); padding-top: 0.55rem; }
+.bn-help { font-size: 0.82rem; color: var(--ink); padding: 0.1rem 0; }
+.bn-h { margin: 1.4rem 0 0.6rem; font-size: 0.95rem; }
+.bn-better { font-weight: 700; color: var(--ink-3); }
+.bn-better.play { color: var(--cobalt); }
+.bn-better.bench { color: var(--clay); }
+.bn-more { margin-top: 1.2rem; }
+.bn-more > summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--ink);
+  padding: 0.4rem 0;
+}
+@media (max-width: 767px) {
+  .bn-scen { grid-template-columns: 1fr; }
+}
+
+/* Streamers on Current Matchup: a ten-row window that scrolls inside itself, header
+   pinned. Header and rows both measure ~30px (1.9rem), so 11 of them plus the borders
+   shows exactly ten rows; `overflow-y` pairs with .table-scroll's own x scroll. */
+.st-scroll {
+  max-height: calc(11 * 1.9rem + 2px);
+  overflow-y: auto;
+}
+.st-scroll table.sheet thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}

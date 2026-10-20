@@ -25,8 +25,10 @@ interface Props {
   /** Tab labels and the two per-player box tables, rendered upstream on the server. */
   mineLabel: string;
   oppLabel: string;
-  mine: ReactNode;
-  opp: ReactNode;
+  /** The two box-score tables. Omit both to render the scoreboard alone (Current Matchup
+   *  puts the box scores in its own tabbed panel below). */
+  mine?: ReactNode;
+  opp?: ReactNode;
 }
 
 /**

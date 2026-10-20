@@ -1,6 +1,6 @@
 import RankTrendChart from "@/components/RankTrendChart";
 import StarterRankingsPanel from "@/components/StarterRankingsPanel";
-import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { loadLeague, loadWeek0, myTeam } from "@/lib/loadLeague";
 
 /** Power rankings by all-play %, plus how each rank moved week to week. */
 export default async function Page() {
@@ -15,16 +15,57 @@ export default async function Page() {
    */
   const played = pr?.teams.some((t) => t.record.some((n) => n > 0));
   const pool = league.seasonData?.playerPool ?? [];
+  /*
+   * WEEK 0 (owner, 2026-10-20): the Value Power Rankings as they stood before the first
+   * game, frozen in public/data/power-week0.json. Week 1's movement is measured from it.
+   */
+  const draft = await loadWeek0();
+  const draftPlace = new Map((draft ?? []).map((d) => [d.teamId, d]));
+  const nameOf = new Map(league.teams.map((t) => [t.id, t.name]));
 
   if (!pr || !played) {
     return (
       <>
         <h1>Power Rankings</h1>
-        <p className="caption">
-          {pr?.teams.length
-            ? "No matchups played yet — all-play rankings start after week 1."
-            : "No power-ranking data — run the data export."}
-        </p>
+        {draft?.length ? (
+          <>
+            <h2>Week 0</h2>
+            <p className="caption">
+              Before any games, teams rank by total roster value, as the Value Power
+              Rankings stood on opening day. All-play rankings take over after week 1, with
+              each team&rsquo;s move measured from here.
+            </p>
+            <div className="table-scroll">
+              <table className="sheet">
+                <thead>
+                  <tr>
+                    <th className="num">Rank</th>
+                    <th>Team</th>
+                    <th className="num">Total value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draft.map((d) => (
+                    <tr key={d.teamId} className={d.teamId === me.id ? "row-you" : undefined}>
+                      <td className="num">{d.place}</td>
+                      <td>{nameOf.get(d.teamId) ?? `Team ${d.teamId}`}</td>
+                      <td className="num">
+                        {d.value >= 0 ? "+" : ""}
+                        {d.value.toFixed(1)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="caption">
+            {pr?.teams.length
+              ? "No matchups played yet — all-play rankings start after week 1."
+              : "No power-ranking data — run the data export."}
+          </p>
+        )}
         {pool.length > 0 && (
           <>
             <h2>Value Power Rankings</h2>
@@ -39,7 +80,25 @@ export default async function Page() {
     );
   }
 
-  const teams = [...pr.teams].sort((a, b) => a.rank - b.rank);
+  /*
+   * Week 1's move is measured from the draft (week 0); the export's own `delta` has no
+   * previous week to compare against then. Later weeks keep the export's delta.
+   */
+  const firstWeek = pr.weeks.length <= 1;
+  const teams = [...pr.teams]
+    .sort((a, b) => a.rank - b.rank)
+    .map((t) => {
+      const d = draftPlace.get(t.teamId);
+      return firstWeek && d ? { ...t, delta: d.place - t.rank } : t;
+    });
+  // The chart starts at week 0 when the draft ranks are known.
+  const chartWeeks = draft?.length ? [0, ...pr.weeks] : pr.weeks;
+  const chartTeams = draft?.length
+    ? pr.teams.map((t) => ({
+        ...t,
+        rankHistory: [draftPlace.get(t.teamId)?.place ?? t.rankHistory[0], ...t.rankHistory],
+      }))
+    : pr.teams;
   /*
    * The team's REAL record, for the ladder's meta line.
    *
@@ -145,7 +204,7 @@ export default async function Page() {
       </div>
 
       <h2>Rank movement</h2>
-      <RankTrendChart weeks={pr.weeks} teams={pr.teams} yourTeamId={me.id} />
+      <RankTrendChart weeks={chartWeeks} teams={chartTeams} yourTeamId={me.id} />
 
       {/* Heading lives here, not inside the panel, so it sits at the same level as
           "Rank movement" above it — and inside the guard, so a missing player pool

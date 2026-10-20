@@ -31,11 +31,17 @@ export default function ScoreboardTabs({
    * shares a frame with the category sheet.
    */
   board?: ReactNode;
-  mine: ReactNode;
+  mine?: ReactNode;
   matchup: ReactNode;
-  opp: ReactNode;
+  opp?: ReactNode;
 }) {
   const [active, setActive] = useState<"mine" | "matchup" | "opp">("matchup");
+
+  // No box scores: just the scoreboard, at every width. No tabs to switch between, and
+  // no mobile-only duplicate of the board (`.sbx-solo` keeps the in-panel one visible).
+  if (!mine && !opp) {
+    return <div className="sbx sbx-solo">{matchup}</div>;
+  }
   const tabs = [
     { key: "mine" as const, label: mineLabel },
     { key: "matchup" as const, label: "Matchup" },

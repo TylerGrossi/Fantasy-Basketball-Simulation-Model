@@ -238,6 +238,31 @@ def build_free_agents(league, year, injury_data, window, size=150):
     return out
 
 
+def build_week_schedule(period, year, matchups):
+    """
+    The whole matchup week's NBA games for every team on a roster this period:
+    {"start", "end", "teams": {NBA abbrev: {ISO date: "@LAL" | "MEM"}}}.
+
+    The WHOLE week, not today onward like the games-left window — the grid shows the days
+    already played too, the way ESPN's schedule view does. Same cached ESPN schedule calls
+    the games-left counts already made, so this costs no extra requests.
+    """
+    start, end = D.get_week_date_range(period, year)
+    if start is None or end is None:
+        return None
+    nba_teams = sorted({
+        p["nbaTeam"]
+        for m in matchups for side in ("home", "away")
+        for p in m[side]["players"] if p.get("nbaTeam")
+    })
+    out = {}
+    for team in nba_teams:
+        dates, labels = D.get_team_schedule_bundle(team)
+        games = {d.isoformat(): (labels.get(d) or "GAME") for d in dates if start <= d <= end}
+        out[team] = games
+    return {"start": start.isoformat(), "end": end.isoformat(), "teams": out}
+
+
 def config_blend():
     return 0.7  # matches the app's blend_weight default
 
@@ -1445,6 +1470,9 @@ def build_season(league, injury_data, sims=8000):
                 "championshipProb": _round(r.get("championship_prob", 0), 3),
                 "inPlayoffs": bool(r.get("in_playoffs", False)),
                 "record": list(r.get("record", [])),
+                # Mean final regular-season record [W, L, T] across the simulated seasons
+                # — the record behind playoffProb, so the two always agree (Draft Recap).
+                "projRecord": [_round(x, 1) for x in (r.get("proj_record") or [])],
                 # Seed distribution (keys are seed numbers plus "no_playoffs"). Only
                 # meaningful before the bracket starts, but the page renders those
                 # columns then, so it has to ship.
@@ -1540,6 +1568,16 @@ def main():
     free_agents = build_free_agents(league, yr, injury, window)
     print(f"  free agents: {len(free_agents)}", flush=True)
 
+    week_schedule = None
+    if window[0] is not None:
+        try:
+            week_schedule = build_week_schedule(period, yr, matchups)
+            if week_schedule:
+                print(f"  week schedule: {len(week_schedule['teams'])} NBA teams, "
+                      f"{week_schedule['start']} to {week_schedule['end']}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! week schedule failed: {exc}", flush=True)
+
     print("season-wide data:", flush=True)
     season = build_season(league, injury)
     season_shape = _season_shape()
@@ -1579,6 +1617,9 @@ def main():
         "rosterSlots": fetch_roster_slots(league),
         "teams": teams,
         "matchups": matchups,
+        # The matchup week's NBA schedule per team, for the Current Matchup schedule grid.
+        # Absent outside a live week.
+        **({"weekSchedule": week_schedule} if week_schedule else {}),
         "freeAgents": free_agents,
         # Final totals per completed week, for the clickable schedule -> week view.
         "periodResults": period_results,

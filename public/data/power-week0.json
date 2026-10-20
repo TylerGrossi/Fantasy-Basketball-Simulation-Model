@@ -1,0 +1,54 @@
+{
+ "takenAt": "2026-10-20",
+ "source": "Value Power Rankings (sum of each roster's 9-cat player value) from the league.json generated 2026-10-20T16:39:34+00:00",
+ "teams": [
+  {
+   "teamId": 8,
+   "teamName": "Team Grossi",
+   "value": 39.35,
+   "place": 1
+  },
+  {
+   "teamId": 4,
+   "teamName": "Big Purr's Posse",
+   "value": 35.88,
+   "place": 2
+  },
+  {
+   "teamId": 2,
+   "teamName": "Bryant's Best Team",
+   "value": 35.25,
+   "place": 3
+  },
+  {
+   "teamId": 5,
+   "teamName": "Matt's Magnificent Team",
+   "value": 32.02,
+   "place": 4
+  },
+  {
+   "teamId": 7,
+   "teamName": "Josh Hart's Thumb",
+   "value": 30.24,
+   "place": 5
+  },
+  {
+   "teamId": 6,
+   "teamName": "Chris's Competitive Team",
+   "value": 29.05,
+   "place": 6
+  },
+  {
+   "teamId": 1,
+   "teamName": "JUST THE TIP",
+   "value": 21.6,
+   "place": 7
+  },
+  {
+   "teamId": 3,
+   "teamName": "Ryan's Rowdy Team",
+   "value": 16.08,
+   "place": 8
+  }
+ ]
+}

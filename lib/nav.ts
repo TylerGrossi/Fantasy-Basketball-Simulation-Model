@@ -58,13 +58,19 @@ export interface NavPage {
   group?: string;
 }
 
-/** Pages reached from the "This Week" menu. */
+/**
+ * The "This Week" section. Since 2026-10-20 it is ONE page (/scoreboard) — scoreboard,
+ * box score / schedule / roster tabs, win probability, projections, streamers, bench —
+ * so these are SECTIONS of it, linked by anchor. The old routes redirect to the same
+ * anchors.
+ */
 export const WEEK_PAGES: NavPage[] = [
   { label: "Scoreboard", href: "/scoreboard", blurb: "Category totals, live from ESPN" },
-  { label: "Matchup", href: "/matchup", blurb: "Win probability and the model behind it" },
-  { label: "Streamers", href: "/streamers", blurb: "Every pickup scored against this week" },
-  { label: "Bench", href: "/bench", blurb: "Who to play, and what sitting costs" },
-  { label: "Roster", href: "/roster", blurb: "Your players, games left, averages" },
+  { label: "Schedule", href: "/scoreboard#schedule", blurb: "Who plays each day, and crowded days" },
+  { label: "Win Probability", href: "/scoreboard#odds", blurb: "Win probability and the model behind it" },
+  { label: "Streamers", href: "/scoreboard#streamers", blurb: "Every pickup scored against this week" },
+  { label: "Bench", href: "/scoreboard#bench", blurb: "Play everyone, or protect what is banked" },
+  { label: "Roster", href: "/scoreboard#roster", blurb: "Your players, games left, averages" },
 ];
 
 
@@ -89,11 +95,8 @@ export const FLAT_NAV: NavEntry[] = [
   // this week's scores, recent moves, risers. It replaced Season Summary in this slot;
   // Season Summary moved to the end of the League menu.
   { kind: "link", label: "League Home", href: "/league" },
-  {
-    kind: "menu",
-    label: "Current Matchup",
-    items: WEEK_PAGES.map((p) => ({ label: p.label, href: p.href })),
-  },
+  // One page now (2026-10-20), so a link rather than a menu of its sections.
+  { kind: "link", label: "Current Matchup", href: "/scoreboard" },
   {
     kind: "menu",
     /*
@@ -294,7 +297,14 @@ export const SECTIONS: Section[] = [
  * The Streamlit app conditions its nav the same way in the other direction —
  * `render_top_nav` drops "Season Summary" from FLAT_NAV until the season is over.
  */
-export const IN_SEASON_ONLY = ["/playoffs", "/streamers", "/bench"];
+export const IN_SEASON_ONLY = [
+  "/playoffs",
+  "/streamers",
+  "/bench",
+  // The same two, as sections of the one-page Current Matchup.
+  "/scoreboard#streamers",
+  "/scoreboard#bench",
+];
 
 /**
  * Pages hidden from every menu, at every point in the season. Owner's call, and the only

@@ -97,12 +97,10 @@ export default function StreamersView({
             </span>
           </FilterBar>
 
-          <p className="caption">
-            {results.length} candidates evaluated against every legal drop. Δ Cats is the
-            change in expected categories won versus doing nothing.
-          </p>
-
-          <div className="table-scroll">
+          {/* About ten rows tall, scrolling inside itself (owner, 2026-10-20): the full
+              candidate list made this section the longest on the one-page matchup. The
+              header row stays pinned while the rows scroll under it. */}
+          <div className="table-scroll st-scroll">
             <table className="sheet">
               <thead>
                 <tr>

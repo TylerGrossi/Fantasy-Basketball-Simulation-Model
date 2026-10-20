@@ -9,7 +9,7 @@ import {
   type Matchup,
   type PoolPlayer,
 } from "@/lib/league";
-import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { loadLeague, loadWeek0, myTeam, type Week0Rank } from "@/lib/loadLeague";
 import { timeLabel } from "@/lib/moves";
 import { playerStatus } from "@/lib/playerPool";
 
@@ -38,6 +38,8 @@ export default async function Page() {
   const me = await myTeam(league);
   const teamName = new Map(league.teams.map((t) => [t.id, t.name]));
   const pool = league.seasonData.playerPool ?? [];
+  // Week 0 of the power rankings: the opening-day value snapshot (see loadWeek0).
+  const draft = await loadWeek0();
 
   const scores = league.matchups.map((m) => scoreLine(league, m));
   const mine = scores.find((s) => s.homeId === me.id || s.awayId === me.id);
@@ -65,7 +67,7 @@ export default async function Page() {
 
       <div className="lh-col lh-right">
         <StandingsCard league={league} meId={me.id} />
-        <PowerCard league={league} meId={me.id} />
+        <PowerCard league={league} meId={me.id} draft={draft} />
         <TitleOddsCard league={league} meId={me.id} />
       </div>
     </div>
@@ -165,9 +167,9 @@ function MyTeamCard({
       )}
 
       <div className="lh-links">
-        <Link href="/roster">Roster</Link>
+        <Link href="/scoreboard#roster">Roster</Link>
         <Link href="/lineup">Lineup</Link>
-        <Link href="/matchup">Matchup</Link>
+        <Link href="/scoreboard">Matchup</Link>
       </div>
     </section>
   );
@@ -510,7 +512,7 @@ function CategoryEdgeCard({
           );
         })}
       </div>
-      <Link href="/matchup" className="lh-more">
+      <Link href="/scoreboard#odds" className="lh-more">
         Full matchup model
       </Link>
     </section>
@@ -520,13 +522,15 @@ function CategoryEdgeCard({
 /* ------------------------------------------------------------- free agents */
 
 /**
- * The best players nobody has, by 9-cat value. Before a player has games this season
- * that value is his 2025-26 line (statSource "last"), which is still the honest
- * pre-season ranking — the note says so rather than hiding it.
+ * The best healthy players nobody has, by 9-cat value: the top one at each position, then
+ * the best of the rest. Before a player has games this season that value is his 2025-26
+ * line (statSource "last"), still the honest pre-season ranking.
  */
 function FreeAgentsCard({ pool }: { pool: PoolPlayer[] }) {
   const free = pool
-    .filter((p) => p.owner === "FA" || !p.owner)
+    // Injured (OUT / IR / suspended) players are left out: not available in any useful
+    // sense this week (owner, 2026-10-20).
+    .filter((p) => (p.owner === "FA" || !p.owner) && playerStatus(p.status)[1] !== "out")
     .sort((a, b) => b.value - a.value);
   /*
    * One per position, then one more. Eligibility, not the single listed position: a
@@ -546,12 +550,11 @@ function FreeAgentsCard({ pool }: { pool: PoolPlayer[] }) {
   }
   const rest = free.find((x) => !taken.has(x.name));
   if (rest) fas.push({ slot: "Next", p: rest });
-  const lastSeason = fas.some(({ p }) => p.statSource === "last");
 
   return (
     <section className="lh-card">
       <h2 className="lh-h">
-        Best Available <span className="lh-h-note">best at each position, by value</span>
+        Best Available
       </h2>
       {fas.length === 0 ? (
         <p className="caption">No free agents in the export.</p>
@@ -577,10 +580,7 @@ function FreeAgentsCard({ pool }: { pool: PoolPlayer[] }) {
           })}
         </div>
       )}
-      {lastSeason && (
-        <p className="lh-foot-note">2025-26 values until they play this season.</p>
-      )}
-      <Link href="/streamers" className="lh-more">
+      <Link href="/scoreboard#streamers" className="lh-more">
         Streamers
       </Link>
     </section>
@@ -594,18 +594,55 @@ function FreeAgentsCard({ pool }: { pool: PoolPlayer[] }) {
  * Rankings page hides its table for the same reason), so the card says when it starts
  * instead of printing a table of zeros.
  */
-function PowerCard({ league, meId }: { league: LeagueData; meId: number }) {
+function PowerCard({
+  league,
+  meId,
+  draft,
+}: {
+  league: LeagueData;
+  meId: number;
+  draft: Week0Rank[] | null;
+}) {
   const pr = league.seasonData.powerRankings;
   const played = pr?.teams.some((t) => t.record.some((n) => n > 0));
-  const teams = played && pr ? [...pr.teams].sort((a, b) => a.rank - b.rank) : [];
+  const draftPlace = new Map((draft ?? []).map((d) => [d.teamId, d.place]));
+  // Week 1's move is measured from week 0 (the opening-day value rank), as on Rankings.
+  const firstWeek = (pr?.weeks.length ?? 0) <= 1;
+  const teams =
+    played && pr
+      ? [...pr.teams]
+          .sort((a, b) => a.rank - b.rank)
+          .map((t) => {
+            const d = draftPlace.get(t.teamId);
+            return firstWeek && d ? { ...t, delta: d - t.rank } : t;
+          })
+      : [];
+  const nameOf = new Map(league.teams.map((t) => [t.id, t.name]));
 
   return (
     <section className="lh-card">
       <h2 className="lh-h">
-        Power Rankings <span className="lh-h-note">all-play</span>
+        Power Rankings{" "}
+        <span className="lh-h-note">{teams.length ? "all-play" : "week 0 · total value"}</span>
       </h2>
       {teams.length === 0 ? (
-        <p className="caption">Starts once week 1 is scored.</p>
+        draft?.length ? (
+          <div className="lh-pr">
+            {draft.map((d) => (
+              <div className={`lh-pr-row${d.teamId === meId ? " you" : ""}`} key={d.teamId}>
+                <span className="lh-seed mono">{d.place}</span>
+                <span className="lh-pr-team">{nameOf.get(d.teamId) ?? `Team ${d.teamId}`}</span>
+                <span />
+                <span className="lh-pr-p mono">
+                  {d.value >= 0 ? "+" : ""}
+                  {d.value.toFixed(1)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="caption">Starts once week 1 is scored.</p>
+        )
       ) : (
         <div className="lh-pr">
           {teams.map((t) => (

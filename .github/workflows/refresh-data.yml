@@ -16,12 +16,17 @@ name: Refresh league snapshot
 
 on:
   schedule:
-    # 12:00 UTC once a day, October through April only — the NBA season. Outside those
-    # months the export would rewrite an identical finished season every run, and every
-    # rewrite is a commit and a deploy. GitHub's scheduler is UTC and best-effort: runs
-    # can be delayed by several minutes under load, and GitHub DISABLES cron entirely on
-    # a repo with no activity for 60 days, which in the offseason is easy to hit.
-    - cron: "0 12 * 10,11,12,1,2,3,4 *"
+    # TWICE a day (owner, 2026-10-20), October through April only — the NBA season:
+    #   11:00 UTC = 7:00 AM Eastern (EDT; 6:00 AM in EST) — last night's games are final
+    #   21:30 UTC = 5:30 PM Eastern (EDT; 4:30 PM in EST) — the day's injury news is in,
+    #               before tip-off. Early on purpose: GitHub can start a run hours late.
+    # Cron is UTC with no daylight saving, so both drift an hour earlier in Eastern from
+    # November to March; either way they stay on the right side of the games.
+    # Outside the season the export would rewrite an identical finished season every run,
+    # and every rewrite is a commit and a deploy. GitHub DISABLES cron entirely on a repo
+    # with no activity for 60 days, which in the offseason is easy to hit.
+    - cron: "0 11 * 10,11,12,1,2,3,4 *"
+    - cron: "30 21 * 10,11,12,1,2,3,4 *"
   # Lets you run it by hand from the Actions tab — use this for the first run.
   workflow_dispatch:
 

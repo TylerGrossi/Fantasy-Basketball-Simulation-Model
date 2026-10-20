@@ -754,30 +754,55 @@ def _simulate_matchup_winner(home_id, away_id, proj_home, proj_away, variance_mu
     #     here. Vectorizing the 14 categories into one array draw was tried and measured
     #     SLOWER than this (the array setup on 14 elements outweighs the saved calls).
     # Net: ~33us -> ~12us per matchup. Nothing about the distribution changes.
-    home_wins = 0
-    away_wins = 0
-    gauss = random.gauss
-    for i, stat in enumerate(_SIM_STATS):
-        m_h = proj_home.get(stat, 0)
-        m_a = proj_away.get(stat, 0)
-        v = _VARIANCE_LIST[i] * variance_multiplier
-        draw_h = gauss(m_h, max(0.01, abs(m_h) * v))
-        draw_a = gauss(m_a, max(0.01, abs(m_a) * v))
-        if stat == "TO":
-            if draw_h < draw_a:
-                home_wins += 1
-            elif draw_a < draw_h:
-                away_wins += 1
-        else:
-            if draw_h > draw_a:
-                home_wins += 1
-            elif draw_a > draw_h:
-                away_wins += 1
+    home_wins, away_wins, _ = _simulate_matchup_cats(proj_home, proj_away, variance_multiplier)
     if home_wins > away_wins:
         return (home_id, away_id, False)
     if away_wins > home_wins:
         return (away_id, home_id, False)
     return (home_id, away_id, True)
+
+
+# The three ratio categories and the made/attempted pair each is computed from.
+_RATIO_CATS = (("FG%", "FGM", "FGA"), ("FT%", "FTM", "FTA"), ("3P%", "3PM", "3PA"))
+
+
+def _simulate_matchup_cats(proj_home, proj_away, variance_multiplier=1.0):
+    """
+    One simulated week, scored on the LEAGUE'S categories: (home_cat_wins, away_cat_wins,
+    cat_ties).
+
+    The raw counting stats are drawn (Normal(proj, variance*proj), as before) and the
+    ratio categories are COMPUTED from the drawn makes and attempts. This used to compare
+    the 14 raw stats directly — scoring FTM and FTA, which this league does not, and never
+    scoring FG%, FT% or 3P%, which it does (fixed 2026-10-20).
+    """
+    gauss = random.gauss
+    dh = {}
+    da = {}
+    for i, stat in enumerate(_SIM_STATS):
+        m_h = proj_home.get(stat, 0)
+        m_a = proj_away.get(stat, 0)
+        v = _VARIANCE_LIST[i] * variance_multiplier
+        # A week's total cannot go negative; an unclamped draw could, and a negative
+        # attempt count would turn a percentage meaningless.
+        dh[stat] = max(0.0, gauss(m_h, max(0.01, abs(m_h) * v)))
+        da[stat] = max(0.0, gauss(m_a, max(0.01, abs(m_a) * v)))
+    for pct, made, att in _RATIO_CATS:
+        dh[pct] = min(dh[made], dh[att]) / dh[att] if dh[att] > 0 else 0.0
+        da[pct] = min(da[made], da[att]) / da[att] if da[att] > 0 else 0.0
+
+    home_wins = 0
+    away_wins = 0
+    for cat in CATEGORIES:
+        h = dh.get(cat, 0.0)
+        a = da.get(cat, 0.0)
+        if cat == "TO":
+            h, a = a, h
+        if h > a:
+            home_wins += 1
+        elif a > h:
+            away_wins += 1
+    return home_wins, away_wins, len(CATEGORIES) - home_wins - away_wins
 
 
 def _compute_playoff_matchup_win_prob(team_a, team_b, current_a, current_b,
@@ -1551,6 +1576,18 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
     current_week_user_outcomes = None
     user_matchup_pair = None
     override_team_ids = set(record_override.keys()) if record_override else set()
+
+    # HOW A WEEK COUNTS. "H2H_CATEGORY" (head-to-head EACH category, this league) puts
+    # every category into the standings — a 10-4-1 week is 10 wins, 4 losses, 1 tie, and
+    # the real records this starts from (185-92-8) are on that scale. "Most categories"
+    # leagues score the week as one win or loss. The simulation used to add 1 per week
+    # whatever the format, so in an each-category league its simulated weeks were on a
+    # different scale from the real record they were added to (fixed 2026-10-20).
+    each_category = str(
+        getattr(getattr(league, "settings", None), "scoring_type", "") or "H2H_CATEGORY"
+    ).upper() == "H2H_CATEGORY"
+    n_cats = len(CATEGORIES)
+
     if current_week_matchup_outcomes and not override_team_ids:
         user_tid, opp_tid, outcome_counts = current_week_matchup_outcomes
         total = sum(outcome_counts.values())
@@ -1558,7 +1595,9 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             outcome_list = []
             for (yw, ow), count in outcome_counts.items():
                 prob = count / total
-                if yw > ow:
+                if each_category:
+                    outcome_list.append((yw, ow, max(0, n_cats - yw - ow), prob))
+                elif yw > ow:
                     outcome_list.append((1, 0, 0, prob))
                 elif yw < ow:
                     outcome_list.append((0, 1, 0, prob))
@@ -1719,10 +1758,34 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                 user_champ_tid, opp_champ_tid = int(ut), int(ot)
                 finals_skip_bracket_championship = True
 
+    rec_sum = {tid: [0.0, 0.0, 0.0] for tid in team_ids}
+
     for _ in range(effective_sims):
         wins = {tid: team_id_to_record[tid][0] for tid in team_ids}
         losses = {tid: team_id_to_record[tid][1] for tid in team_ids}
         ties = {tid: team_id_to_record[tid][2] for tid in team_ids}
+
+        def _play_week(home_id, away_id, week):
+            """One simulated week of one matchup, added to the running records."""
+            proj_home = projected.get(home_id, {}).get(week, {})
+            proj_away = projected.get(away_id, {}).get(week, {})
+            hw, aw, ct = _simulate_matchup_cats(proj_home, proj_away, matchup_variance)
+            if each_category:
+                wins[home_id] += hw
+                losses[home_id] += aw
+                ties[home_id] += ct
+                wins[away_id] += aw
+                losses[away_id] += hw
+                ties[away_id] += ct
+            elif hw > aw:
+                wins[home_id] += 1
+                losses[away_id] += 1
+            elif aw > hw:
+                wins[away_id] += 1
+                losses[home_id] += 1
+            else:
+                ties[home_id] += 1
+                ties[away_id] += 1
 
         # Current week: use matchup outcome distribution for user's matchup, or apply record_override, or simulate
         if current_week_matchups:
@@ -1768,34 +1831,18 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                         losses[home_id] += uw
                         ties[home_id] += ut
                 else:
-                    proj_home = projected.get(home_id, {}).get(current_week, {})
-                    proj_away = projected.get(away_id, {}).get(current_week, {})
-                    winner_id, loser_id, is_tie = _simulate_matchup_winner(
-                        home_id, away_id, proj_home, proj_away,
-                        variance_multiplier=matchup_variance
-                    )
-                    if is_tie:
-                        ties[home_id] += 1
-                        ties[away_id] += 1
-                    else:
-                        wins[winner_id] += 1
-                        losses[loser_id] += 1
+                    _play_week(home_id, away_id, current_week)
 
         # Future weeks: simulate all matchups
         for week in future_weeks:
             for home_id, away_id in schedule_by_week.get(week, []):
-                proj_home = projected.get(home_id, {}).get(week, {})
-                proj_away = projected.get(away_id, {}).get(week, {})
-                winner_id, loser_id, is_tie = _simulate_matchup_winner(
-                    home_id, away_id, proj_home, proj_away,
-                    variance_multiplier=matchup_variance
-                )
-                if is_tie:
-                    ties[home_id] += 1
-                    ties[away_id] += 1
-                else:
-                    wins[winner_id] += 1
-                    losses[loser_id] += 1
+                _play_week(home_id, away_id, week)
+
+        # The projected record is the mean of these final records across seasons.
+        for tid in team_ids:
+            rec_sum[tid][0] += wins[tid]
+            rec_sum[tid][1] += losses[tid]
+            rec_sum[tid][2] += ties[tid]
 
         # Final standings: sort by win percentage = (W + 0.5*T) / total games, then all-play tiebreaker
         def sort_key(tid):
@@ -1863,6 +1910,9 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             "in_playoffs": in_playoffs,
             "seed_probs": seed_probs,
             "record": team_id_to_record[tid],
+            # Mean final regular-season record across the simulated seasons, on the same
+            # scale as `record` (categories in an each-category league).
+            "proj_record": tuple(round(x / total_sims, 1) for x in rec_sum[tid]),
             "championship_finalist_team_ids": championship_finalist_team_ids,
         })
     if return_projected:

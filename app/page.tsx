@@ -72,13 +72,13 @@ const ANSWERS: Array<[string, string, string, string]> = [
   [
     "Am I winning this week?",
     "A real probability for the current matchup, category by category, updating as games finish rather than after they do.",
-    "/matchup",
+    "/scoreboard#odds",
     "See the matchup",
   ],
   [
     "Which pickup actually helps?",
     "Every free agent scored against your exact matchup, not a generic ranking — the best add for this week is rarely the best player.",
-    "/streamers",
+    "/scoreboard#streamers",
     "Find a streamer",
   ],
   [

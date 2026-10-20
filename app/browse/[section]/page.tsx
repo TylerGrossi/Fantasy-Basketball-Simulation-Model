@@ -123,16 +123,16 @@ function weekStats(league: League, teamId: number): Stats {
       tone: rec.win > rec.loss ? "good" : rec.win < rec.loss ? "bad" : "plain",
       note: "categories",
     },
-    "/matchup": matchupStat,
-    "/streamers": {
+    "/scoreboard#odds": matchupStat,
+    "/scoreboard#streamers": {
       value: String(league.freeAgents.length),
       note: "free agents",
     },
-    "/bench": {
+    "/scoreboard#bench": {
       value: String(withGames),
       note: withGames === 1 ? "player has games" : "players have games",
     },
-    "/roster": { value: String(you.players.length), note: "players" },
+    "/scoreboard#roster": { value: String(you.players.length), note: "players" },
   };
 }
 

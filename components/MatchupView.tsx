@@ -44,6 +44,11 @@ interface Props {
    */
   youAbbrev?: string;
   oppAbbrev?: string;
+  /**
+   * Rendered as a section of the one-page Current Matchup: the scoreboard above already
+   * names both teams and carries the live badge, so they are not repeated here.
+   */
+  embedded?: boolean;
 }
 
 const RATIO_PAIRS: Record<string, [string, string]> = {
@@ -64,6 +69,7 @@ export default function MatchupView({
   youAbbrev,
   oppAbbrev,
   forecast = null,
+  embedded = false,
 }: Props) {
   const you = isHome ? matchup.home : matchup.away;
   const opp = isHome ? matchup.away : matchup.home;
@@ -120,8 +126,12 @@ export default function MatchupView({
 
   return (
     <>
-      <Header youName={youName} oppName={oppName} />
-      <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
+      {!embedded && (
+        <>
+          <Header youName={youName} oppName={oppName} />
+          <LiveBadge simulated={simulated} {...live} generatedAt={league.generatedAt} />
+        </>
+      )}
 
       <div className="metrics">
         <Metric
@@ -149,7 +159,7 @@ export default function MatchupView({
       <h2>Category analysis</h2>
       <CategoryAnalysis categories={league.categories} probs={outcome.categoryProbs} />
 
-      <h2>Detailed projections</h2>
+      <h2 id="projections">Detailed projections</h2>
       <ProjectionTable
         league={league}
         probs={outcome.categoryProbs}
@@ -158,10 +168,6 @@ export default function MatchupView({
         oppMu={oppMoments.mu}
         oppVar={oppMoments.var}
       />
-      <p className="caption">
-        Projections are end-of-matchup totals. The interval is the 10th–90th percentile,
-        computed exactly from the projection rather than sampled.
-      </p>
     </>
   );
 }

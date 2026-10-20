@@ -29,9 +29,10 @@ export interface BenchPlayerImpact {
 }
 
 export interface BenchAnalysis {
-  playAll: { win: number; expectedCats: number };
+  /** `categoryProbs`: P(win) per scored category, aligned to `league.categories`. */
+  playAll: { win: number; expectedCats: number; categoryProbs: number[] };
   /** Everyone sits: only what is already banked counts. */
-  benchAll: { win: number; expectedCats: number };
+  benchAll: { win: number; expectedCats: number; categoryProbs: number[] };
   benchAllBetter: boolean;
   perPlayer: BenchPlayerImpact[];
 }
@@ -71,8 +72,8 @@ export function analyzeBench(
   perPlayer.sort((a, b) => b.deltaCats - a.deltaCats);
 
   return {
-    playAll: { win: play.win, expectedCats: play.expectedCats },
-    benchAll: { win: bench.win, expectedCats: bench.expectedCats },
+    playAll: { win: play.win, expectedCats: play.expectedCats, categoryProbs: play.categoryProbs },
+    benchAll: { win: bench.win, expectedCats: bench.expectedCats, categoryProbs: bench.categoryProbs },
     benchAllBetter: bench.expectedCats > play.expectedCats,
     perPlayer,
   };

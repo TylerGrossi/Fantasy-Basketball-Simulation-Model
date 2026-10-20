@@ -1,11 +1,19 @@
+import BenchView from "@/components/BenchView";
 import { PlayerBoxTable } from "@/components/BoxScoreSheet";
+import MatchupDeck from "@/components/MatchupDeck";
+import MatchupView from "@/components/MatchupView";
+import RosterView from "@/components/RosterView";
 import Scoreboard from "@/components/Scoreboard";
+import StreamersView from "@/components/StreamersView";
+import WeekSchedule from "@/components/WeekSchedule";
+import { forecastFor } from "@/lib/predictions";
 import ScoreboardTabs from "@/components/ScoreboardTabs";
 import { buildWeekRecap } from "@/components/WeekRecap";
 import WeekSelect from "@/components/WeekSelect";
 import { periodLabel } from "@/lib/league";
 import {
   loadBoxScores,
+  loadPredictions,
   loadLeague,
   myTeam,
   resolveMatchup,
@@ -134,43 +142,135 @@ export default async function Page({
   const lines = (id: number) => box?.periods[String(league.period)]?.[String(id)] ?? [];
   const gp = (id: number) => lines(id).reduce((a, l) => a + (l.gp || 0), 0);
 
+  /*
+   * CURRENT MATCHUP: ONE PAGE (owner, 2026-10-20). What used to be five pages —
+   * Scoreboard, Matchup, Streamers, Bench, Roster — is one scroll, in the order you use it:
+   *
+   *   1. the scoreboard, then Box Score / Schedule / Roster behind tabs
+   *   2. win probability and category analysis
+   *   3. detailed projections
+   *   4. streamers
+   *   5. bench (play everyone vs sit everyone)
+   *
+   * The old URLs redirect to the matching section. Every live section shares one live-
+   * totals poller (lib/useLiveTotals), so four sections cost one ESPN request, not four.
+   * One trimmed league (with free agents, for Streamers) is handed to all of them.
+   */
+  const deckLeague = trimLeague(league, { matchupTeamId: me.id, freeAgents: true });
+  const you = r.isHome ? r.matchup.home : r.matchup.away;
+  const oppSide = r.isHome ? r.matchup.away : r.matchup.home;
+  const forecast = forecastFor(await loadPredictions(), league, league.period, me.id);
+
   return (
     <>
       <WeekSelect weeks={weeks} selected={league.period} current={league.period} />
-      {/* Unlike the recap above, the live week composes the tabs from INSIDE `Scoreboard`
-          — the board renders twice (above the tabs on mobile, in the panel on desktop) and
-          both copies have to come from its one `useLiveTotals`. The box tables are still
-          built here, on the server, and handed down. */}
-      <Scoreboard
-        key={league.period}
-        live={!demo}
-        league={slim}
-        matchup={r.matchup}
-        isHome={r.isHome}
-        teamId={me.id}
-        youName={r.youName}
-        oppName={r.oppName}
-        youAcq={youAcq}
-        oppAcq={oppAcq}
-        youGp={gp(me.id)}
-        oppGp={gp(r.oppId)}
-        mineLabel={abbrev(me.id)}
-        oppLabel={abbrev(r.oppId)}
-        mine={
-          <PlayerBoxTable
-            title={`${r.youName} box score`}
-            stats={box?.stats ?? league.stats}
-            lines={lines(me.id)}
-          />
-        }
-        opp={
-          <PlayerBoxTable
-            title={`${r.oppName} box score`}
-            stats={box?.stats ?? league.stats}
-            lines={lines(r.oppId)}
-          />
-        }
-      />
+
+      <nav className="cm-jump" aria-label="Sections">
+        <a href="#scoreboard">Scoreboard</a>
+        <a href="#odds">Win probability</a>
+        <a href="#projections">Projections</a>
+        <a href="#streamers">Streamers</a>
+        <a href="#bench">Bench</a>
+      </nav>
+
+      <section id="scoreboard" className="cm-sec">
+        <Scoreboard
+          key={league.period}
+          live={!demo}
+          league={deckLeague}
+          matchup={r.matchup}
+          isHome={r.isHome}
+          teamId={me.id}
+          youName={r.youName}
+          oppName={r.oppName}
+          youAcq={youAcq}
+          oppAcq={oppAcq}
+          youGp={gp(me.id)}
+          oppGp={gp(r.oppId)}
+          mineLabel={abbrev(me.id)}
+          oppLabel={abbrev(r.oppId)}
+        />
+        <MatchupDeck
+          box={
+            lines(me.id).length === 0 && lines(r.oppId).length === 0 ? (
+              <p className="caption">
+                No box score yet — player lines appear once this week&rsquo;s games are
+                played and the data refreshes.
+              </p>
+            ) : (
+            <>
+              <PlayerBoxTable
+                title={`${r.youName} box score`}
+                stats={box?.stats ?? league.stats}
+                lines={lines(me.id)}
+              />
+              <PlayerBoxTable
+                title={`${r.oppName} box score`}
+                stats={box?.stats ?? league.stats}
+                lines={lines(r.oppId)}
+              />
+            </>
+            )
+          }
+          schedule={
+            <WeekSchedule
+              league={deckLeague}
+              sides={[
+                { label: r.youName, players: you.players },
+                { label: r.oppName, players: oppSide.players },
+              ]}
+            />
+          }
+          roster={
+            <RosterView
+              league={deckLeague}
+              you={you}
+              opp={oppSide}
+              youName={r.youName}
+              oppName={r.oppName}
+            />
+          }
+        />
+      </section>
+
+      <section id="odds" className="cm-sec">
+        <h2 className="cm-h">Matchup Odds</h2>
+        <MatchupView
+          embedded
+          live={!demo}
+          league={deckLeague}
+          matchup={r.matchup}
+          isHome={r.isHome}
+          teamId={me.id}
+          youName={r.youName}
+          oppName={r.oppName}
+          youAbbrev={abbrev(me.id)}
+          oppAbbrev={abbrev(r.oppId)}
+          forecast={forecast}
+        />
+      </section>
+
+      <section id="streamers" className="cm-sec">
+        <h2 className="cm-h">Streamers</h2>
+        <StreamersView
+          live={!demo}
+          league={deckLeague}
+          matchup={r.matchup}
+          isHome={r.isHome}
+          teamId={me.id}
+        />
+      </section>
+
+      <section id="bench" className="cm-sec">
+        <h2 className="cm-h">Bench Strategy</h2>
+        <BenchView
+          live={!demo}
+          league={deckLeague}
+          matchup={r.matchup}
+          isHome={r.isHome}
+          teamId={me.id}
+        />
+      </section>
     </>
   );
 }

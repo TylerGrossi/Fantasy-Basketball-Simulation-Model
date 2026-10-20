@@ -1,33 +1,9 @@
-import RosterView from "@/components/RosterView";
-import { loadLeague, myTeam, resolveMatchup } from "@/lib/loadLeague";
+import { redirect } from "next/navigation";
 
-export default async function Page() {
-  const league = await loadLeague();
-  const me = await myTeam(league);
-  const r = resolveMatchup(league, me.id);
-
-  if (!r) {
-    return (
-      <>
-        <h1>Rosters</h1>
-        <p className="caption">No matchup found for {me.name}.</p>
-      </>
-    );
-  }
-
-  const you = r.isHome ? r.matchup.home : r.matchup.away;
-  const opp = r.isHome ? r.matchup.away : r.matchup.home;
-
-  return (
-    <>
-      <h1>Rosters</h1>
-      <RosterView
-        league={league}
-        you={you}
-        opp={opp}
-        youName={r.youName}
-        oppName={r.oppName}
-      />
-    </>
-  );
+/**
+ * Folded into the one-page Current Matchup (owner, 2026-10-20). Kept as a redirect so
+ * bookmarks and links still land on the right section.
+ */
+export default function Page() {
+  redirect("/scoreboard#roster");
 }

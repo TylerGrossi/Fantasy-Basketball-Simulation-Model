@@ -565,7 +565,7 @@ function PlayerDetail({
  * baseline "above average" is just a longer bar.
  */
 function PercentileBar({ row }: { row: PercentileRow }) {
-  const { spec, value, percentile, n } = row;
+  const { spec, value, percentile, n, rank, tied } = row;
   const text = formatStat(spec, value);
 
   if (percentile == null) {
@@ -603,7 +603,7 @@ function PercentileBar({ row }: { row: PercentileRow }) {
   return (
     <div
       className="pct-row"
-      title={`${spec.label}: ${text} — ${percentile}th percentile of ${n} qualified players${
+      title={`${spec.label}: ${text} — ranked ${tied ? "T-" : ""}${ordinal(rank ?? 0)} of ${n}, ${percentile}th percentile${
         spec.lowerIsBetter ? " (fewer is better)" : ""
       }`}
     >
@@ -696,4 +696,11 @@ function WindowTable({ p }: { p: PoolPlayer }) {
       </table>
     </div>
   );
+}
+
+/** 1 -> "1st", 12 -> "12th", 22 -> "22nd". */
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 }
