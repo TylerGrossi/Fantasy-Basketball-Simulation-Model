@@ -164,7 +164,9 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
     picks: [],
   });
   const mockOn = mock.active;
-  const [view, setView] = useStored<"board" | "plan">(`${store}-view`, "board");
+  const [view, setView] = useStored<"board" | "plan" | "recap">(`${store}-view`, "board");
+  // "recap" moved to its own page (/draft-recap); a stored "recap" falls back to the board.
+  const shownView = view === "recap" ? "board" : view;
   // ?view=plan / ?view=board opens a tab directly (bookmarkable, and testable headless).
   useEffect(() => {
     const v = new URLSearchParams(window.location.search).get("view");
@@ -253,7 +255,9 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
   const livePicks = live?.picks.length ?? 0;
   // While the feed is connected its count IS the draft; manual marks only stand in for a
   // feed that is off or failing. (Taking the max let stale test marks push the pick ahead.)
-  const feedUp = liveOn && live != null && !liveErr;
+  // ESPN's league API returns NO picks while a draft is live (they arrive only after it
+  // ends: learned on draft night, 2026-10-19), so an empty feed must not override marks.
+  const feedUp = liveOn && live != null && !liveErr && livePicks > 0;
   const currentPick = mockOn ? mock.picks.length + 1 : feedUp ? livePicks + 1 : owner.size + 1;
   const draftOver = currentPick > nTeams * rounds;
   const nextMine = myPicks.find((p) => p >= currentPick) ?? myPicks[myPicks.length - 1];
@@ -502,7 +506,7 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
       {/* ---- Toolbar: view, mode, where the draft is ---- */}
       <div className={`dg-toolbar${mockOn ? " is-mock" : ""}`}>
         <div className="dg-seg" role="tablist" aria-label="View">
-          <button type="button" role="tab" aria-selected={view === "board"} className={`dg-seg-b${view === "board" ? " on" : ""}`} onClick={() => setView("board")}>
+          <button type="button" role="tab" aria-selected={shownView === "board"} className={`dg-seg-b${shownView === "board" ? " on" : ""}`} onClick={() => setView("board")}>
             Board
           </button>
           <button type="button" role="tab" aria-selected={view === "plan"} className={`dg-seg-b${view === "plan" ? " on" : ""}`} onClick={() => setView("plan")}>
@@ -649,7 +653,7 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
         </div>
       )}
 
-      {view === "plan" ? (
+      {shownView === "plan" ? (
         <DraftPlan
           rows={rows}
           myPicks={myPicks}

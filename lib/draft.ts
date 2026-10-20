@@ -26,6 +26,10 @@ export interface DraftLeague {
   draftDate?: number;
   secondsPerPick?: number;
   pickOrder: number[];
+  /** Regular-season length, playoff field and the actual schedule (for the Recap's sim). */
+  regularWeeks?: number;
+  playoffTeams?: number;
+  schedule?: { period: number; home: number; away: number }[];
 }
 
 export interface DraftData {

@@ -108,7 +108,7 @@ def _r(x, n=3):
 
 def fetch_league(stat_ids):
     base = f"{FANTASY}/{YEAR}/segments/0/leagues/{LEAGUE_ID}"
-    d = _json(base + "?view=mSettings&view=mTeam&view=mDraftDetail", cookies=True)
+    d = _json(base + "?view=mSettings&view=mTeam&view=mDraftDetail&view=mMatchup", cookies=True)
     s = d["settings"]
     id_to_name = {v: k for k, v in stat_ids.items()}
     id_to_name.update(RATIO_IDS)
@@ -138,6 +138,14 @@ def fetch_league(stat_ids):
     mine = next((t["id"] for t in d["teams"]
                  if swid and swid in [o.upper() for o in t.get("owners", [])]), None)
     ds = s.get("draftSettings") or {}
+    sched = s.get("scheduleSettings") or {}
+    reg_weeks = int(sched.get("matchupPeriodCount") or 0)
+    # Regular-season matchups only (the Recap's season projection simulates these).
+    schedule = [
+        {"period": m["matchupPeriodId"], "home": m["home"]["teamId"], "away": m["away"]["teamId"]}
+        for m in d.get("schedule", []) or []
+        if m.get("away") and (not reg_weeks or m.get("matchupPeriodId", 0) <= reg_weeks)
+    ]
     return {
         "id": LEAGUE_ID,
         "season": YEAR,
@@ -153,6 +161,9 @@ def fetch_league(stat_ids):
         "draftDate": ds.get("date"),
         "secondsPerPick": ds.get("timePerSelection"),
         "pickOrder": ds.get("pickOrder") or [],
+        "regularWeeks": reg_weeks,
+        "playoffTeams": int(sched.get("playoffTeamCount") or 0),
+        "schedule": schedule,
     }
 
 
@@ -370,6 +381,10 @@ def build():
     # Last season's team, from the old league's pool, to name trades/signings.
     old_team = {p["playerId"]: team_abbrev(p["nbaTeam"])
                 for p in league_json["seasonData"].get("playerPool", []) if p.get("playerId")}
+    # Late-season splits (last30 / last15 per-game lines) from the 2025-26 export, for the
+    # "recent" adjustment below.
+    old_splits = {p["playerId"]: p for p in league_json["seasonData"].get("playerPool", [])
+                  if p.get("playerId")}
 
     rows = []
     for p in players:
@@ -439,6 +454,18 @@ def build():
         adj = adjustments.get(p.get("fullName", ""))
         if adj:
             applied.add(p.get("fullName", ""))
+            # RECENT FORM: blend the projection toward a late-season per-game line
+            # ("last15" or "last30" from the 2025-26 export) by `recentWeight` — for a role
+            # that grew late in the season, which ESPN's full-season-based number misses.
+            # Percentages follow automatically: makes and attempts are blended together.
+            split = (old_splits.get(pid) or {}).get(adj.get("recent", "")) if "recent" in adj else None
+            if split:
+                w = float(adj.get("recentWeight", 0.5))
+                for stat in COUNTING + ["DD"]:
+                    if stat in split:
+                        proj[stat] = _r((1 - w) * proj[stat] + w * float(split[stat]))
+            elif "recent" in adj:
+                print(f"  ! {p.get('fullName')}: no {adj['recent']} split in the 2025-26 export")
             if "minScale" in adj:
                 k = float(adj["minScale"])
                 for stat in COUNTING + ["DD"]:
@@ -449,6 +476,9 @@ def build():
             if adj.get("note"):
                 drivers.insert(0, f"Adjusted: {adj['note']}")
         status = p.get("injuryStatus") or "ACTIVE"
+        if adj and adj.get("status"):
+            # Override ESPN's injury status when it lags the news (e.g. "ACTIVE").
+            status = str(adj["status"]).upper()
         if status not in ("ACTIVE", "NORMAL"):
             drivers.append(f"Injury status: {status.replace('_', ' ').title()}")
 

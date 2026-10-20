@@ -1,9 +1,5 @@
 {
-  "_comment": "Manual overrides applied by scripts/build_draft.py on top of ESPN's projections, for news newer than ESPN's numbers. Keyed by full name. projGp replaces ESPN's projected games; minScale multiplies every counting stat (role change); note is shown on the player's card. Re-run the export after editing.",
-  "Stephen Curry": {
-    "projGp": 62,
-    "note": "Right ankle sprain at open practice Oct 18 (Kerr: 'fine', not serious; opener Oct 21 TBD). Docked from ESPN's 66 to 62 games: ~2 for the ankle, ~2 for re-aggravation risk at 38 after last season's 27-game knee absence."
-  },
+  "_comment": "Manual overrides applied by scripts/build_draft.py on top of ESPN's projections, for news newer than ESPN's numbers. Keyed by full name. projGp replaces ESPN's projected games; minScale multiplies every counting stat (role change); recent ('last15' or 'last30') + recentWeight blends the projection toward that late-season per-game line; status overrides ESPN's injury status when it lags the news; note is shown on the player's card. Re-run the export after editing.",
   "Paul George": {
     "projGp": 44,
     "minScale": 0.82,
@@ -13,5 +9,17 @@
     "projGp": 46,
     "minScale": 0.86,
     "note": "Torn left ACL March 2025; hasn't played in 19 months, age 34. Says he has no restrictions, but cut ESPN's 59 games to 46 and production scaled 0.86 for ramp-up, minutes management and re-injury risk."
+  },
+  "Derik Queen": {
+    "recent": "last15",
+    "recentWeight": 0.5,
+    "note": "Ended 2025-26 in a bigger role: last 15 days 15.3 pts / 9.1 reb / 1.9 stl / 1.3 blk on 12.4 FGA (7 games), vs 11.7 / 7.1 / 1.0 / 0.9 for the season. ESPN's projection follows the full season, so it is blended 50% toward the late-season line (half-credit for a 7-game sample)."
+  },
+  "Stephen Curry": {
+    "status": "ACTIVE"
+  },
+  "Caleb Wilson": {
+    "minScale": 1.12,
+    "note": "Rookie (CHI). ESPN's line (17.9 pts / 8.1 reb / 1.4 blk) reads conservative next to the outside ranks (ESPN 57, FantasyPros 73, ADP 72) that put him well above this board's #95. Production scaled x1.12 for a bigger role than ESPN assumes."
   }
 }

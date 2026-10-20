@@ -10,7 +10,7 @@
  *
  * The desktop header reads: Season Summary · Current Matchup · League · Tools · History ·
  * Agent, then the Settings gear (rendered separately in Nav.tsx, not from this list). In
- * the OFFSEASON the first slot is Draft Guide instead — see navFor.
+ * the OFFSEASON the first slot is Draft Recap instead — see navFor.
  *
  * MOBILE IS INDEX-AND-DRILL. The bottom icons for This Week, Season and Tools do not open
  * a page — they open that section's INDEX (`/browse/<key>`), a list where every row names
@@ -136,6 +136,7 @@ export const FLAT_NAV: NavEntry[] = [
       { label: "Compare", href: "/compare" },
       { label: "Lineup", href: "/lineup" },
       { label: "Cheat Sheets", href: "/cheat-sheets" },
+      { label: "Draft Recap", href: "/draft-recap" },
       { label: "Draft Guide", href: "/draft" },
       { label: "Playoff Odds", href: "/playoffs" },
     ],
@@ -196,6 +197,7 @@ export const TOOLS_PAGES: NavPage[] = [
   { label: "Compare", href: "/compare", blurb: "Two players side by side" },
   { label: "Lineup", href: "/lineup", blurb: "Who to start, and what each swap costs" },
   { label: "Cheat Sheets", href: "/cheat-sheets", blurb: "Ranked columns per position" },
+  { label: "Draft Recap", href: "/draft-recap", blurb: "Who won the draft" },
   { label: "Draft", href: "/draft", blurb: "The board, by projected value" },
   { label: "Playoff Odds", href: "/playoffs", blurb: "Championship odds from a simulated bracket" },
 ];
@@ -297,10 +299,10 @@ export const IN_SEASON_ONLY = ["/playoffs", "/streamers", "/bench"];
  * anyone with the link or a bookmark, and `sectionFor` still resolves it to its section
  * so a direct visit keeps its sub-row. Hidden from the menus, not deleted.
  *
- * /draft came back 2026-10-19: the board now runs on ESPN's own projections
- * (scripts/build_draft.py) rather than the unfinished home-grown model.
+ * /draft (the Draft Guide) is hidden again 2026-10-19 now that the draft is done; its
+ * header slot went to /draft-recap. The route still works for next year.
  */
-export const HIDDEN_FROM_NAV: string[] = [];
+export const HIDDEN_FROM_NAV: string[] = ["/draft"];
 
 /**
  * Pages kept out of the MOBILE navigation only — they lay out poorly on a phone and are
@@ -328,7 +330,8 @@ export const HIDDEN_ON_MOBILE = ["/lineup"];
  * the index itself, so an un-hidden draft board would lead the list rather than replace
  * the screen the Tools icon opens.
  */
-const OFFSEASON_FIRST = "/draft";
+// Draft Recap since the 2026-27 draft (2026-10-19); it was the Draft Guide before it.
+const OFFSEASON_FIRST = "/draft-recap";
 
 /**
  * The nav for a given moment in the season: always minus HIDDEN_FROM_NAV, and in the
@@ -363,7 +366,7 @@ export function navFor(seasonOver: boolean): { flat: NavEntry[]; sections: Secti
   const desktop: NavEntry[] = seasonOver
     ? FLAT_NAV.map((e) => {
         if (e.kind === "link" && e.href === "/season")
-          return { kind: "link", label: "Draft Guide", href: OFFSEASON_FIRST };
+          return { kind: "link", label: "Draft Recap", href: OFFSEASON_FIRST };
         if (e.kind === "menu" && e.label === "Tools")
           return { ...e, items: e.items.filter((i) => i.href !== OFFSEASON_FIRST) };
         if (e.kind === "menu" && e.label === "League")

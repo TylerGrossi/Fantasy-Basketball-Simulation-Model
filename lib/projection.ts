@@ -918,6 +918,25 @@ export function scoreProjections(
     };
   });
 
+  /*
+   * REPLACEMENT-LEVEL BASELINE (owner, 2026-10-19). The z-scale centres on the AVERAGE
+   * draftable player, so in a deep pool most draftable players read negative (258 of 300),
+   * which looked like "this player is bad". Shift every value so the LAST player drafted
+   * (the poolSize-th by season value) is 0: value now means "over replacement", the way
+   * Basketball Monster reports it. A constant shift, so ranks, tiers, stars and grades are
+   * unchanged; per-category z (the bars) still centres on the average.
+   */
+  const byTotal = [...rows].sort((a, b) => b.total - a.total);
+  const replTotal = byTotal[Math.min(poolSize, byTotal.length) - 1]?.total ?? 0;
+  const byPerGame = [...rows].sort((a, b) => b.perGame - a.perGame);
+  const replPerGame = byPerGame[Math.min(poolSize, byPerGame.length) - 1]?.perGame ?? 0;
+  for (const r of rows) {
+    r.total -= replTotal;
+    r.perGame -= replPerGame;
+    r.actualValue -= replPerGame;
+    if (!Number.isNaN(r.actualTotal)) r.actualTotal -= replTotal;
+  }
+
   if (rankBy !== "blend") {
     const metric = (r: DraftRow) => (rankBy === "total" ? r.total : r.perGame);
     rows.sort((a, b) => metric(b) - metric(a));
