@@ -61,6 +61,7 @@ type SortKey =
   | "hb"
   | "hbLast"
   | "value"
+  | "value25"
   | "gp"
   | "name";
 type Marks = { taken: number[]; mine: number[] };
@@ -421,6 +422,7 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
       hb: (r) => r.hbRank ?? NA,
       hbLast: (r) => r.hbLastRank ?? NA,
       value: (r) => -r.total,
+      value25: (r) => (Number.isNaN(r.actualTotal) ? NA : -r.actualTotal),
       gp: (r) => -r.projGp,
       name: () => 0,
     };
@@ -479,7 +481,7 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
     const m = r.market ?? r.cons;
     return m >= nextMine - nTeams * 2 && m <= nextMine + nTeams * 2;
   };
-  const colCount = allCols ? 14 : 11;
+  const colCount = allCols ? 15 : 12;
   const liveText = !liveOn
     ? "Sync off"
     : liveErr
@@ -921,8 +923,11 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
                   <SortTh k="board" cur={sort} desc={desc} on={sortBy} title="This board: your league's categories, ESPN projections">
                     Board
                   </SortTh>
-                  <SortTh k="value" cur={sort} desc={desc} on={sortBy} title="Season value: z-sum x projected games">
-                    Value
+                  <SortTh k="value25" cur={sort} desc={desc} on={sortBy} title="2025-26 ACTUAL value: last season's line on the same scale, x games actually played">
+                    25-26 Value
+                  </SortTh>
+                  <SortTh k="value" cur={sort} desc={desc} on={sortBy} title="Projected 2026-27 value: projected z-sum x projected games">
+                    Proj Value
                   </SortTh>
                   <SortTh k="gp" cur={sort} desc={desc} on={sortBy} title="Projected games">
                     GP
@@ -995,6 +1000,12 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
                           {!nearPick(r) ? "—" : r.val <= -100 ? "≤-100%" : `${signed(Math.min(r.val, 100), 0)}%`}
                         </td>
                         <td className="num dg-dim">{r.rank}</td>
+                        <td
+                          className={`num ${Number.isNaN(r.actualTotal) ? "dg-dim" : r.actualTotal >= 0 ? "" : "bad"}`}
+                          title={Number.isNaN(r.actualTotal) ? "No 2025-26 line" : `${r.gp} games played in 2025-26`}
+                        >
+                          {Number.isNaN(r.actualTotal) ? "—" : signed(r.actualTotal, 1)}
+                        </td>
                         <td className="num dg-valcell">
                           <span
                             className="dg-vbar"

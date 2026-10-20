@@ -153,6 +153,11 @@ export interface DraftRow extends ProjectedLine {
   total: number;
   /** The same z-sum computed from this season's ACTUAL line — the projection's delta. */
   actualValue: number;
+  /**
+   * Last season's ACTUAL value on the same scale as `total`: the actual line's z-sum x
+   * games actually played (relative to the same median). NaN when there is no line.
+   */
+  actualTotal: number;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -906,6 +911,10 @@ export function scoreProjections(
       perGame,
       total: perGame * (l.projGp / refGp),
       actualValue: sum(zActual[i]),
+      actualTotal:
+        l.gp > 0 && Object.keys(l.actual ?? {}).length > 0
+          ? sum(zActual[i]) * (l.gp / refGp)
+          : NaN,
     };
   });
 
