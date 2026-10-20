@@ -67,22 +67,18 @@ export default function PlayerConsistency({
             <Metric
               label="Median night"
               value={`${stats.median >= 0 ? "+" : ""}${stats.median.toFixed(1)}`}
-              sub="typical game"
             />
             <Metric
               label="Spread"
               value={`± ${stats.sd.toFixed(1)}`}
-              sub="std dev, game to game"
             />
             <Metric
               label="Above own avg"
               value={`${Math.round(stats.aboveOwn * 100)}%`}
-              sub="of his games"
             />
             <Metric
               label="Above pool avg"
               value={`${Math.round(stats.abovePool * 100)}%`}
-              sub="startable nights"
             />
           </div>
 
@@ -96,12 +92,11 @@ export default function PlayerConsistency({
   );
 }
 
-function Metric({ label, value, sub }: { label: string; value: string; sub: string }) {
+function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="pd-con-metric">
       <div className="pd-con-l">{label}</div>
       <div className="pd-con-v">{value}</div>
-      <div className="pd-con-s">{sub}</div>
     </div>
   );
 }

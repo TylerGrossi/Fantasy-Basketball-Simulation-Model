@@ -38,7 +38,12 @@ from data import (
     flatten_stat_dict,
     get_week_date_range,
 )
-from simulation import calculate_league_stats, simulate_playoff_probabilities
+from simulation import (
+    _get_full_raw_schedule,
+    _team_ids_from_raw_schedule_matchup,
+    calculate_league_stats,
+    simulate_playoff_probabilities,
+)
 
 # ESPN-style periods: regular weeks 1-19, then playoff matchup 1 = periods 20-21,
 # matchup 2 = 22-23.
@@ -76,6 +81,14 @@ def get_week_box_scores(league_id, year, espn_s2, swid, week):
     ever fetched from ESPN once per run, no matter how many callers ask for it.
     """
     league = get_league_cached(league_id, year, espn_s2, swid)
+    # ESPN answers a request for a week it hasn't reached with the CURRENT week's
+    # matchups, so mid-season every future week would re-count this week's stats.
+    # Only checked during the regular season: in the playoffs app and ESPN period
+    # numbers diverge (callers guard those), and in the offseason the current period
+    # is a huge phantom value that lets every week through anyway.
+    current = int(getattr(league, "currentMatchupPeriod", 0) or 0)
+    if 0 < current <= REGULAR_SEASON_WEEKS and week > current:
+        return []
     return league.box_scores(matchup_period=week)
 
 
@@ -260,41 +273,67 @@ def get_team_schedule_data(league_id, year, espn_s2, swid, team_id):
     for r in range(1, len(PLAYOFF_SCORING_DATES) + 1):
         periods.append((REGULAR_SEASON_WEEKS + 1 + (r - 1) * 2, f"Playoff Round {r}"))
 
+    # Who plays whom comes from ESPN's full season schedule, keyed by matchupPeriodId.
+    # `league.box_scores(matchup_period=N)` is NOT a schedule: for a period ESPN hasn't
+    # opened yet it returns the CURRENT period's matchups, so before tip-off every week
+    # read as a rematch of week 1. Box scores are only trusted for the stats of the
+    # exact pairing the schedule names.
+    teams_by_id = {t.team_id: t for t in league.teams}
+    current_espn_period = int(getattr(league, "currentMatchupPeriod", 0) or 0)
+    scheduled = {}  # ESPN matchupPeriodId -> (opponent id, am I home)
+    for sm in _get_full_raw_schedule(league):
+        hid, aid = _team_ids_from_raw_schedule_matchup(sm)
+        if hid is None or aid is None or team_id not in (hid, aid):
+            continue  # a bye, or someone else's game
+        scheduled[sm.get("matchupPeriodId")] = (aid if hid == team_id else hid, hid == team_id)
+
     rows = []
     for period, label in periods:
-        try:
-            boxscores = get_week_box_scores(league_id, year, espn_s2, swid, period)
-        except Exception:
-            continue
+        # A playoff round spans two app periods but is ONE ESPN matchupPeriodId
+        # (same arithmetic as build_data.matchup_period_id_for / periodLabel).
+        espn_period = period if period <= REGULAR_SEASON_WEEKS else (
+            REGULAR_SEASON_WEEKS + (period - REGULAR_SEASON_WEEKS - 1) // 2 + 1)
+        if espn_period not in scheduled or scheduled[espn_period][0] not in teams_by_id:
+            continue  # no opponent yet (an unseeded playoff round) or a bye
+        opp_id, is_home = scheduled[espn_period]
+        opp = teams_by_id[opp_id]
+        my_stats, opp_stats = {}, {}
+        boxscores = []
+        # A future week's "box score" is the current week's, so a rematch would match
+        # it — only look once ESPN has reached the week. (In the offseason the current
+        # period is a huge phantom value, which correctly lets every week through.)
+        if not current_espn_period or espn_period <= current_espn_period:
+            try:
+                boxscores = get_week_box_scores(league_id, year, espn_s2, swid, period)
+            except Exception:
+                boxscores = []
         for m in boxscores:
-            hid, aid = m.home_team.team_id, m.away_team.team_id
-            if team_id not in (hid, aid):
+            if {m.home_team.team_id, m.away_team.team_id} != {team_id, opp_id}:
                 continue
-            is_home = hid == team_id
-            my_stats = flatten_stat_dict(m.home_stats if is_home else m.away_stats)
-            opp = m.away_team if is_home else m.home_team
-            opp_stats = flatten_stat_dict(m.away_stats if is_home else m.home_stats)
-            played = (float(my_stats.get("PTS", 0) or 0) + float(opp_stats.get("PTS", 0) or 0)) > 0
-
-            if period > REGULAR_SEASON_WEEKS:
-                idx = (period - REGULAR_SEASON_WEEKS - 1) // 2
-                s, e = PLAYOFF_SCORING_DATES[idx] if 0 <= idx < len(PLAYOFF_SCORING_DATES) else (None, None)
-            else:
-                s, e = get_week_date_range(period, year)
-            dates = f"{s:%b %d} - {e:%b %d}" if s and e else ""
-
-            row = {"Matchup": label + (f" ({dates})" if dates else ""),
-                   "Result": "", "Score": "", "Win %": "",
-                   "Opponent": f"{'@ ' if not is_home else ''}{opp.team_name} ({rec(opp)})",
-                   "Manager": managers(opp), "_period": period}
-            if played:
-                yw, ow, tie = _category_record(my_stats, opp_stats)
-                row["Result"] = "W" if yw > ow else "L" if ow > yw else "T"
-                row["Score"] = f"{yw}-{ow}-{tie}"
-            else:
-                row["Win %"] = f"{_log5(my_wr, winrate(opp)) * 100:.0f}%"
-            rows.append(row)
+            mine_home = m.home_team.team_id == team_id
+            my_stats = flatten_stat_dict(m.home_stats if mine_home else m.away_stats)
+            opp_stats = flatten_stat_dict(m.away_stats if mine_home else m.home_stats)
             break
+        played = (float(my_stats.get("PTS", 0) or 0) + float(opp_stats.get("PTS", 0) or 0)) > 0
+
+        if period > REGULAR_SEASON_WEEKS:
+            idx = (period - REGULAR_SEASON_WEEKS - 1) // 2
+            s, e = PLAYOFF_SCORING_DATES[idx] if 0 <= idx < len(PLAYOFF_SCORING_DATES) else (None, None)
+        else:
+            s, e = get_week_date_range(period, year)
+        dates = f"{s:%b %d} - {e:%b %d}" if s and e else ""
+
+        row = {"Matchup": label + (f" ({dates})" if dates else ""),
+               "Result": "", "Score": "", "Win %": "",
+               "Opponent": f"{'@ ' if not is_home else ''}{opp.team_name} ({rec(opp)})",
+               "Manager": managers(opp), "_period": period}
+        if played:
+            yw, ow, tie = _category_record(my_stats, opp_stats)
+            row["Result"] = "W" if yw > ow else "L" if ow > yw else "T"
+            row["Score"] = f"{yw}-{ow}-{tie}"
+        else:
+            row["Win %"] = f"{_log5(my_wr, winrate(opp)) * 100:.0f}%"
+        rows.append(row)
     rows.sort(key=lambda r: r["_period"])
     return rows
 

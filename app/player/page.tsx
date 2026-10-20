@@ -1,5 +1,5 @@
 import PlayerCardView from "@/components/PlayerCardView";
-import { loadLeague, trimLeague } from "@/lib/loadLeague";
+import { loadArchivedPools, loadLeague, trimLeague } from "@/lib/loadLeague";
 
 /**
  * `?name=` opens the card on a specific player — the target of every `<PlayerLink>` in
@@ -15,8 +15,14 @@ export default async function Page({
   const sp = await searchParams;
   const league = await loadLeague();
   // Only what this page's client component needs — see trimLeague.
-  const slim = trimLeague(league, { playerPool: true });
-  const pool = slim.seasonData.playerPool ?? [];
+  const trimmed = trimLeague(league, { playerPool: true });
+  // Each row's three-season `history` is 72 KB of the pool's 195 KB, and nothing on the
+  // card reads it (only the projection model and the Agent do, both server-side). It was
+  // being serialised into every card's page for nothing.
+  const pool = (trimmed.seasonData.playerPool ?? []).map(({ history: _h, ...p }) => p);
+  const slim = { ...trimmed, seasonData: { ...trimmed.seasonData, playerPool: pool } };
+  // Past seasons for the percentile panel's season picker.
+  const archives = await loadArchivedPools(league.season);
   const asked = sp.name?.trim();
   const initialName = asked && pool.some((p) => p.name === asked) ? asked : undefined;
 
@@ -29,7 +35,7 @@ export default async function Page({
         <h1>Player Card</h1>
         <p className="caption">Search any player and see their full profile.</p>
       </div>
-      <PlayerCardView league={slim} initialName={initialName} />
+      <PlayerCardView league={slim} archives={archives} initialName={initialName} />
     </>
   );
 }

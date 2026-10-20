@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import Nav from "@/components/Nav";
+import NavProgress from "@/components/NavProgress";
 import { loadLeague } from "@/lib/loadLeague";
 import "./globals.css";
 
@@ -78,6 +79,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             `useSearchParams` opts a component out of static prerendering unless it sits
             under a Suspense boundary — without this the build fails on /_not-found. */}
         <Suspense>
+          <NavProgress />
           <Nav seasonOver={seasonOver} />
         </Suspense>
         {/*

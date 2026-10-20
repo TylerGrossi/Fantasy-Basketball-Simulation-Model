@@ -1186,6 +1186,10 @@ export function systemInstruction(
     "history) you may answer directly from your own expertise; verify with web_search if " +
     "the detail is specific, recent, or uncertain. Call multiple tools when useful (e.g. " +
     "lookup_player AND web_search their injury status).\n\n" +
+    "ROOKIES AND EXPERIENCE: it is the 2026-27 season, so the 2025 draft class (Cooper " +
+    "Flagg, Dylan Harper, Ace Bailey and the rest) are now SECOND-year players, not " +
+    "rookies. Only call a player a rookie when a tool marks him '(rookie)' or shows 0 " +
+    "years of experience; otherwise use the experience the tool reports, never memory.\n\n" +
     APP_TOUR +
     "TRADE REALISM - this matters. Fantasy value is a z-score, but real trades are NOT " +
     "just about matching total value. Elite, top-tier players (roughly the top ~15-20 in " +
@@ -1199,7 +1203,9 @@ export function systemInstruction(
     "honest that a lopsided 'two-for-one for a superstar' offer would be rejected.\n\n" +
     "Be concise and opinionated: give a clear recommendation and cite the concrete " +
     "value, stat, or source that backs it - don't just dump data. Use markdown (bold, " +
-    "short lists) for readability. " +
+    "short lists) for readability. NEVER use emoji or emoticons of any kind - not as " +
+    "bullets, headings, reactions or markers (no checkmarks, fire, arrows, medals, " +
+    "trophies). Plain text and markdown only. " +
     (seasonOver
       ? `The ${season - 1}-${String(season).slice(2)} season is COMPLETE; the league ` +
         "numbers you get from the tools are final. Use web_search for anything current."
@@ -1210,5 +1216,11 @@ export function systemInstruction(
 
 /** "Name #pick (ADP n)" for a draft highlight, or "none". */
 function pickText(x?: DraftedPick): string {
-  return x ? `${x.r.name} #${x.pick} (ADP ${x.r.adp != null ? x.r.adp.toFixed(0) : "n/a"})` : "none";
+  // The rookie flag is stated outright, never left to the model: it remembers last
+  // season's rookies AS rookies (it called second-year Cooper Flagg one, 2026-10-20).
+  return x
+    ? `${x.r.name}${x.r.rookie ? " (rookie)" : ""} #${x.pick} (ADP ${
+        x.r.adp != null ? x.r.adp.toFixed(0) : "n/a"
+      })`
+    : "none";
 }

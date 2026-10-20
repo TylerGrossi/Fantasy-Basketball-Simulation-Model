@@ -162,6 +162,19 @@ def build_roster(roster, team_name, year, injury_data, window):
     else:
         merged["Games Left"] = 0
 
+    # "Games Left" above is COUNTED games: on a day more players have games than there
+    # are starting slots, the lowest scorers lose that day. Right for the projection, wrong
+    # as the GL column — a bench player with three games read as having one. So the plain
+    # schedule count (still injury-aware, no slot cap) is exported beside it for display.
+    sched_games = {}
+    if start is not None and end is not None:
+        by_day = D._get_games_by_day_for_roster(
+            roster, injury_data, window_start=start, window_end=end,
+        )
+        for players_on_day in by_day.values():
+            for pname, _ in players_on_day:
+                sched_games[pname] = sched_games.get(pname, 0) + 1
+
     by_name = {getattr(p, "name", None): p for p in roster}
     out = []
     for _, r in merged.iterrows():
@@ -172,6 +185,7 @@ def build_roster(roster, team_name, year, injury_data, window):
             "name": r["Player"],
             "nbaTeam": r.get("NBA_Team", ""),
             "gamesLeft": games,
+            "nbaGamesLeft": max(games, sched_games.get(r["Player"], 0)),
             "avg": [_round(v, 3) for v in vals],
             "status": str(getattr(p, "injuryStatus", "") or "") if p else "",
             "injured": bool(D.is_player_injured(p)) if p else False,
@@ -805,6 +819,11 @@ def fetch_recent_activity(league):
     headers = {"x-fantasy-filter": json.dumps(filters)}
 
     rows = []
+    # The same transaction can come back under MANY scoring periods — the DRAFT one is
+    # returned for every day of the season, which once put the 104 draft picks into the
+    # export 167 times over (17,368 rows, 2.2 MB of a 2.5 MB league.json that every page
+    # parses). Each transaction id is taken once.
+    seen = set()
     for period in range(league.firstScoringPeriod, league.finalScoringPeriod + 1):
         try:
             data = league.espn_request.league_get(
@@ -817,6 +836,10 @@ def fetch_recent_activity(league):
         for tx in data.get("transactions", []):
             if tx.get("status") != "EXECUTED":
                 continue
+            tx_id = tx.get("id") or (tx.get("type"), tx.get("proposedDate"), tx.get("teamId"))
+            if tx_id in seen:
+                continue
+            seen.add(tx_id)
             ttype = tx.get("type", "")
             try:
                 team_name = league.get_team_data(tx.get("teamId")).team_name
@@ -1155,8 +1178,15 @@ def build_period_results(
     if regular_season_weeks is not None:
         acq_totals, acq_limit_per_day = fetch_acquisition_totals(league)
 
+    # ESPN answers a period it hasn't reached with the CURRENT period's games, so every
+    # future week would export this week's totals under its own number.
+    current = int(getattr(league, "currentMatchupPeriod", 0) or 0)
+
     out = []
     for p in range(1, max(wanted) + 1):
+        if current and regular_season_weeks is not None and (
+                matchup_period_id_for(p, regular_season_weeks) > current):
+            continue
         try:
             games = league.box_scores(matchup_period=p)
         except Exception as exc:  # noqa: BLE001

@@ -7,13 +7,34 @@ export default async function Page() {
   const league = await loadLeague();
   const me = await myTeam(league);
   const pr = league.seasonData?.powerRankings;
+  /*
+   * Before the first matchup is scored the export still writes a row per team, but every
+   * field is zero (rank 0, 0.0%, 0-0-0). A table of zeros says nothing, so the all-play
+   * sections drop out until there is a played week; Value Power Rankings below is built
+   * from the player pool and still stands on its own.
+   */
+  const played = pr?.teams.some((t) => t.record.some((n) => n > 0));
   const pool = league.seasonData?.playerPool ?? [];
 
-  if (!pr?.teams.length) {
+  if (!pr || !played) {
     return (
       <>
         <h1>Power Rankings</h1>
-        <p className="caption">No power-ranking data — run the data export.</p>
+        <p className="caption">
+          {pr?.teams.length
+            ? "No matchups played yet — all-play rankings start after week 1."
+            : "No power-ranking data — run the data export."}
+        </p>
+        {pool.length > 0 && (
+          <>
+            <h2>Value Power Rankings</h2>
+            <StarterRankingsPanel
+              pool={pool}
+              teamNames={league.teams.map((t) => t.name)}
+              defaultTeam={me.name}
+            />
+          </>
+        )}
       </>
     );
   }

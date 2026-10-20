@@ -1,5 +1,6 @@
 "use client";
 
+import GamesLeftCell from "./GamesLeftCell";
 import { useMemo } from "react";
 import type { LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
@@ -135,7 +136,7 @@ export default function BenchView({
               <tr key={r.player.name}>
                 <td><PlayerLink name={r.player.name} /></td>
                 <td>{r.player.nbaTeam}</td>
-                <td className="num">{r.player.gamesLeft}</td>
+                <GamesLeftCell player={r.player} />
                 <td
                   className="num"
                   style={{

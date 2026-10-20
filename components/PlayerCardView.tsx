@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
+import type { ArchivedPool } from "@/lib/loadLeague";
 import GameLog from "./GameLog";
 import InjuryLog from "./InjuryLog";
 import PlayerSearch from "./PlayerSearch";
@@ -65,11 +66,27 @@ const BASIS_LABEL: Record<ValueBasis, string> = {
   "15D": "15 Day Average",
 };
 
+/** "2025-26" from ESPN's season year 2026. */
+const seasonLabel = (s: number) => `${s - 1}-${String(s % 100).padStart(2, "0")}`;
+
+/** One choice in the percentile panel's season picker. */
+interface SeasonSource {
+  season: number;
+  /** The player's row and the pool it is ranked against, both from that season. */
+  player: PoolPlayer;
+  pool: PoolPlayer[];
+  /** ESPN's projection rather than games played — labelled so in the heading. */
+  projected: boolean;
+}
+
 export default function PlayerCardView({
   league,
+  archives = [],
   initialName,
 }: {
   league: LeagueData;
+  /** Finished seasons' pools, newest first — the picker's earlier years. */
+  archives?: ArchivedPool[];
   /**
    * Who to open on, from `/player?name=…` — how every player name elsewhere in the app
    * links here. Already validated against the pool by the server page, so an unknown
@@ -142,6 +159,7 @@ export default function PlayerCardView({
           pool={pool}
           bio={bio}
           season={league.season}
+          archives={archives}
           onPick={setName}
         />
       )}
@@ -204,6 +222,7 @@ function PlayerDetail({
   pool,
   bio,
   season,
+  archives,
   onPick,
 }: {
   p: PoolPlayer;
@@ -211,6 +230,7 @@ function PlayerDetail({
   bio: Bio;
   /** The export's season YEAR — ESPN keys its athlete/schedule records by it. */
   season: number;
+  archives: ArchivedPool[];
   /** Switch the whole card to another player — the scatter's dots are clickable. */
   onPick: (name: string) => void;
 }) {
@@ -256,6 +276,7 @@ function PlayerDetail({
    * comparing them, here the point is reading one line in detail.
    */
   const [basis, setBasis] = useState<ValueBasis>("Regular");
+  const [pickedSeason, setPickedSeason] = useState<number | null>(null);
   const [tab, setTab] = useState<TabKey>("profile");
 
   /*
@@ -272,8 +293,36 @@ function PlayerDetail({
    * question this data cannot answer, while "does he have enough games there to rank" is
    * the same question the bars and the window table already decide on.
    */
+  /*
+   * The seasons the percentile panel can show, newest first.
+   *
+   * This season's row only counts as this season when it IS this season's numbers. A
+   * player who hasn't played yet carries last season's line (statSource "last"), and the
+   * archive has that same season ranked against its own full-season pool — so the
+   * archive's version wins, and the current row is only a fallback for a player the
+   * archive never had.
+   */
+  const sources = useMemo(() => {
+    const out: SeasonSource[] = [];
+    const curSeason = p.statSource === "last" ? season - 1 : season;
+    out.push({ season: curSeason, player: p, pool, projected: p.statSource === "proj" });
+    for (const a of archives) {
+      const row = a.pool.find((x) =>
+        p.playerId != null ? x.playerId === p.playerId : x.name === p.name
+      );
+      if (!row) continue;
+      const dup = out.findIndex((s) => s.season === a.season);
+      if (dup >= 0) out[dup] = { season: a.season, player: row, pool: a.pool, projected: false };
+      else out.push({ season: a.season, player: row, pool: a.pool, projected: false });
+    }
+    return out;
+  }, [p, pool, season, archives]);
+  // Same reasoning as `active` below: the pick can outlive the player it was made on.
+  const src = sources.find((s) => s.season === pickedSeason) ?? sources[0];
+  const rp = src.player;
+
   const available = VALUE_BASES.filter(
-    (b) => b === "Regular" || gamesFor(p, b) >= MIN_GP[b]
+    (b) => b === "Regular" || gamesFor(rp, b) >= MIN_GP[b]
   );
   /*
    * The selection survives switching players, so it can point at a window the NEW player
@@ -281,10 +330,12 @@ function PlayerDetail({
    * frame of the wrong window first, and this reads the same either way.
    */
   const active = available.includes(basis) ? basis : "Regular";
-
   // Every bar on the card, ranked against the league under the chosen basis. Recomputed
   // only when the player or the basis changes — it is a full pass over the pool per stat.
-  const rows = useMemo(() => percentileRows(pool, p, active), [pool, p, active]);
+  const rows = useMemo(
+    () => percentileRows(src.pool, rp, active),
+    [src.pool, rp, active]
+  );
   const byKey = new Map(rows.map((r) => [r.spec.key, r]));
 
   /*
@@ -369,9 +420,30 @@ function PlayerDetail({
               control: the window picker stays in the heading at every width.
             */}
             <h2 className="pd-rank-h">
-              <span className="pd-rank-yr">
-                {season - 1}-{String(season % 100).padStart(2, "0")}{" "}
-              </span>
+              {/* The year names the season the bars are drawn from, not the current
+                  one: a player who hasn't played yet is ranked on last season's line
+                  (statSource "last"), and stamping this season on it misread as his
+                  2026-27 numbers. With more than one season it is a picker, and stays
+                  visible on a phone — it is a control there, not just a label. */}
+              {sources.length > 1 ? (
+                <>
+                  <select
+                    className="pd-rank-sel"
+                    value={src.season}
+                    onChange={(e) => setPickedSeason(Number(e.target.value))}
+                    aria-label="Season"
+                  >
+                    {sources.map((s) => (
+                      <option key={s.season} value={s.season}>
+                        {seasonLabel(s.season)}
+                      </option>
+                    ))}
+                  </select>{" "}
+                </>
+              ) : (
+                <span className="pd-rank-yr">{seasonLabel(src.season)} </span>
+              )}
+              {src.projected && "Projected "}
               {available.length > 1 ? (
                 <select
                   className="pd-rank-sel"
@@ -479,14 +551,15 @@ function PlayerDetail({
  *
  * COLOUR IS DIVERGING, not sequential — the question a percentile answers is "which side
  * of league average, and by how far", which is polarity about a baseline. Three steps:
- * cobalt below, neutral around the middle, clay above. The two poles are the app's own
+ * cobalt below, neutral at the middle, clay above. The two poles are the app's own
  * cobalt and clay, which clear CVD separation comfortably (ΔE 28 under protanopia) —
  * blue against orange is the one pair colour-blindness leaves alone.
  *
- * Intensity is deliberately NOT graded within a side, the way Baseball Savant grades it.
- * Length already carries magnitude precisely and the bubble prints the exact number, so
- * shading would be a third copy of the same variable — and the shades it needs cannot
- * hold a 2:1 contrast floor against this app's near-white card anyway.
+ * Intensity IS graded, Baseball Savant's way: the fill blends from the neutral toward
+ * its pole by distance from 50, so a 65th sits pale and a 95th sits deep. Three flat
+ * steps painted 61 and 99 the same red, which read as "equally good" at a glance. The
+ * neutral itself already clears the 2:1 floor against the card, so every blend between
+ * it and a pole does too.
  *
  * The 50th-percentile tick is what makes the diverging read work: without a marked
  * baseline "above average" is just a longer bar.
@@ -516,8 +589,13 @@ function PercentileBar({ row }: { row: PercentileRow }) {
     );
   }
 
-  const tone =
-    percentile >= 60 ? "hi" : percentile <= 40 ? "lo" : "mid";
+  // 0 at the 50th, 1 at either end. `color-mix` in OKLab so the blend steps evenly in
+  // lightness instead of going muddy through the middle the way sRGB mixing does.
+  const strength = Math.min(Math.abs(percentile - 50) / 50, 1);
+  const pole = percentile >= 50 ? "var(--pct-hi)" : "var(--pct-lo)";
+  const fill = `color-mix(in oklab, ${pole} ${Math.round(strength * 100)}%, var(--pct-mid))`;
+  // White text once the blend is dark enough to carry it; ink on the pale near-average end.
+  const tone = strength >= 0.4 ? "strong" : "pale";
   // Floored so a 0th-percentile bar is still a visible mark rather than nothing at all,
   // which would read as missing data — the case `percentile == null` above handles.
   const width = Math.max(percentile, 3);
@@ -533,7 +611,10 @@ function PercentileBar({ row }: { row: PercentileRow }) {
       <span className="pct-value mono">{text}</span>
       <span className="pct-track">
         <span className="pct-tick" aria-hidden="true" />
-        <span className={`pct-fill pct-${tone}`} style={{ width: `${width}%` }}>
+        <span
+          className={`pct-fill pct-${tone}`}
+          style={{ width: `${width}%`, background: fill }}
+        >
           <span className="pct-bubble mono">{percentile}</span>
         </span>
       </span>

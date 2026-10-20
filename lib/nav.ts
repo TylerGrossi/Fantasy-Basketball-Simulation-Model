@@ -8,9 +8,9 @@
  * League menu and History is a header tab of its own. That divergence is intentional,
  * carried over from the original.
  *
- * The desktop header reads: Season Summary · Current Matchup · League · Tools · History ·
- * Agent, then the Settings gear (rendered separately in Nav.tsx, not from this list). In
- * the OFFSEASON the first slot is Draft Recap instead — see navFor.
+ * The desktop header reads: League Home · Current Matchup · League · Player Card · Tools ·
+ * History · Agent, then the Settings gear (rendered separately in Nav.tsx, not from this
+ * list). In the OFFSEASON the first slot is Draft Recap instead — see navFor.
  *
  * MOBILE IS INDEX-AND-DRILL. The bottom icons for This Week, Season and Tools do not open
  * a page — they open that section's INDEX (`/browse/<key>`), a list where every row names
@@ -85,7 +85,10 @@ export const HISTORY_PAGES: NavPage[] = [
 
 /** Desktop header: brand, then these, then the Settings gear. */
 export const FLAT_NAV: NavEntry[] = [
-  { kind: "link", label: "Season Summary", href: "/season" },
+  // League Home leads in season (owner, 2026-10-20): ESPN's league front page — standings,
+  // this week's scores, recent moves, risers. It replaced Season Summary in this slot;
+  // Season Summary moved to the end of the League menu.
+  { kind: "link", label: "League Home", href: "/league" },
   {
     kind: "menu",
     label: "Current Matchup",
@@ -115,6 +118,7 @@ export const FLAT_NAV: NavEntry[] = [
       { label: "Power Rankings", href: "/rankings" },
       { label: "Rosters", href: "/league-rosters" },
       { label: "Recent Moves", href: "/recent-moves" },
+      { label: "Season Summary", href: "/season" },
     ],
   },
   // Player Card is its own header link, after League (owner, 2026-10-19), not a Tools item: it is the
@@ -174,6 +178,7 @@ export const FLAT_NAV: NavEntry[] = [
 export const SEASON_PAGES: NavPage[] = [
   // Schedule leads, matching the desktop League menu where it leads for the same reason:
   // "what happened / what's next" is a more common question than any stat table under it.
+  { label: "League Home", href: "/league", blurb: "Standings, scores, moves, risers" },
   { label: "Schedule", href: "/schedule", blurb: "Week by week results" },
   { label: "Summary", href: "/season", blurb: "Standings, champion, schedule luck" },
   { label: "Season Stats", href: "/season-stats", blurb: "Category leaders and every player's line" },
@@ -360,19 +365,17 @@ export function navFor(seasonOver: boolean): { flat: NavEntry[]; sections: Secti
       : pages;
   /*
    * The header's first slot is SEASONAL (owner request, 2026-10-19). In season it is
-   * Season Summary; in the offseason the season it summarises is finished and the draft
-   * is the next thing that happens, so the Draft Guide takes the slot and leaves the
-   * Tools menu (one place, not two), and Season Summary drops to the end of League so a
-   * finished season's standings are still one click away.
+   * League Home; in the offseason there is no week to show, and the draft is the next
+   * thing that happens, so the draft page takes the slot and leaves the Tools menu (one
+   * place, not two). Season Summary sits at the end of League in both, so a finished
+   * season's standings are always one click away.
    */
   const desktop: NavEntry[] = seasonOver
     ? FLAT_NAV.map((e) => {
-        if (e.kind === "link" && e.href === "/season")
+        if (e.kind === "link" && e.href === "/league")
           return { kind: "link", label: "Draft Recap", href: OFFSEASON_FIRST };
         if (e.kind === "menu" && e.label === "Tools")
           return { ...e, items: e.items.filter((i) => i.href !== OFFSEASON_FIRST) };
-        if (e.kind === "menu" && e.label === "League")
-          return { ...e, items: [...e.items, { label: "Season Summary", href: "/season" }] };
         return e;
       })
     : FLAT_NAV;

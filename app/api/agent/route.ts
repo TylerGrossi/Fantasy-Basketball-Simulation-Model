@@ -33,6 +33,25 @@ export const dynamic = "force-dynamic";
  */
 export const maxDuration = 300;
 
+/**
+ * The Agent never shows emoji (owner's rule, 2026-10-20; the site has none anywhere).
+ * The system prompt says so, but a model does not always listen — this is the guarantee.
+ * Removes pictographs plus the joiners/variation selectors/skin tones that glue them
+ * together, along with the one space that usually follows ("🔥 Hot" -> "Hot").
+ * Digits, `#` and `*` are emoji-capable in Unicode but are left alone: they are only
+ * emoji when followed by U+FE0F, which is stripped here. Text arrives in whole parts,
+ * so a multi-codepoint emoji is never split across two calls.
+ */
+const EMOJI =
+  /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}‍︎️⃣]+ ?/gu;
+
+/** Pictographic in Unicode's eyes, but ordinary typography to a reader. */
+const KEEP = new Set(["©", "®", "™"]);
+
+function stripEmoji(text: string): string {
+  return text.replace(EMOJI, (m) => (KEEP.has(m.trim()) ? m : ""));
+}
+
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -87,7 +106,7 @@ export async function POST(req: Request) {
           runTool,
           preferred,
         })) {
-          send(evt);
+          send(evt.type === "text" ? { ...evt, value: stripEmoji(evt.value) } : evt);
         }
       } catch (err) {
         // Never swallow this. The client can only ever say "something went wrong", so if

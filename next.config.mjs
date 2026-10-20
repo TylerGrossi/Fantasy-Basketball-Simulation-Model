@@ -1,7 +1,21 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * This project's own folder, stated outright. Left to infer it, Next found a stray
+ * package-lock.json two levels up (OneDrive\Projects\) and took THAT as the workspace
+ * root — so the dev server watched and resolved against every project in the OneDrive
+ * folder, and every request paid for it (~1.2s even for an API route that returns a 400
+ * immediately; 2026-10-20).
+ */
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  outputFileTracingRoot: projectRoot,
+  turbopack: { root: projectRoot },
 
   /**
    * Build output directory. Stays `.next`, INSIDE the project — see the warning below
@@ -30,5 +44,16 @@ const nextConfig = {
    * running dev server's chunks).
    */
   distDir: process.env.NEXT_DIST_DIR || ".next",
+
+  /**
+   * DEV ONLY: how many compiled pages `next dev` keeps in memory. The defaults (5 pages,
+   * dropped after 60s idle) are for big apps; with ~30 routes they meant moving around the
+   * menu kept throwing away pages compiled a minute ago and recompiling them — a multi-
+   * second stall on a page you had just seen. Keep them all, for an hour.
+   */
+  onDemandEntries: {
+    maxInactiveAge: 60 * 60 * 1000,
+    pagesBufferLength: 100,
+  },
 };
 export default nextConfig;

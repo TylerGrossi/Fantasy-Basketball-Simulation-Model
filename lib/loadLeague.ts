@@ -1,18 +1,44 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { LeagueData, Matchup, Team } from "./league";
+import type { LeagueData, Matchup, PoolPlayer, Team } from "./league";
 import type { PreWeekLog } from "./predictions";
 import type { CareerLog } from "./career";
 import type { ConsistencyPool } from "./espnLive";
 import { resolveTeam } from "./team";
 
 /**
+ * Parsed data files, kept for the life of the server process.
+ *
+ * Every page is rendered per request (the team cookie makes them dynamic), and the
+ * layout and the page each call `loadLeague()` — so a click used to read and JSON.parse
+ * the whole export twice before anything was sent. Now the file is parsed once and
+ * reused until its modified time changes: on Vercel the data ships with the deployment
+ * and never changes, and locally a fresh export is picked up on the next request.
+ *
+ * The cached object is SHARED across requests, so callers must not mutate it — copy
+ * before sorting (`[...rows].sort(...)`), as every page already does.
+ */
+const jsonCache = new Map<string, { mtimeMs: number; value: Promise<unknown> }>();
+
+async function readJson<T>(file: string): Promise<T> {
+  const { mtimeMs } = await stat(file);
+  const hit = jsonCache.get(file);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.value as Promise<T>;
+  const value = readFile(file, "utf8").then((s) => JSON.parse(s) as T);
+  jsonCache.set(file, { mtimeMs, value });
+  // A failed read must not stick: drop it so the next request tries again.
+  value.catch(() => jsonCache.delete(file));
+  return value;
+}
+
+const dataFile = (name: string) => path.join(process.cwd(), "public", "data", name);
+
+/**
  * Server-side league snapshot. Read at render time so every page ships with real data in
  * the HTML — no loading spinner for the first paint, and no client fetch to see anything.
  */
 export async function loadLeague(): Promise<LeagueData> {
-  const file = path.join(process.cwd(), "public", "data", "league.json");
-  const raw = JSON.parse(await readFile(file, "utf8")) as LeagueData;
+  const raw = await readJson<LeagueData>(dataFile("league.json"));
   // Normalise the optional sections. An older or partially-generated export was enough to
   // crash a production BUILD (`Cannot read properties of undefined`) rather than just
   // render an empty page — defaults make a stale file degrade instead of failing.
@@ -54,8 +80,7 @@ export interface BoxScores {
  */
 export async function loadBoxScores(): Promise<BoxScores | null> {
   try {
-    const file = path.join(process.cwd(), "public", "data", "boxscores.json");
-    return JSON.parse(await readFile(file, "utf8")) as BoxScores;
+    return await readJson<BoxScores>(dataFile("boxscores.json"));
   } catch {
     return null;
   }
@@ -69,8 +94,7 @@ export async function loadBoxScores(): Promise<BoxScores | null> {
  */
 export async function loadPredictions(): Promise<PreWeekLog | null> {
   try {
-    const file = path.join(process.cwd(), "public", "data", "predictions.json");
-    return JSON.parse(await readFile(file, "utf8")) as PreWeekLog;
+    return await readJson<PreWeekLog>(dataFile("predictions.json"));
   } catch {
     return null;
   }
@@ -83,8 +107,7 @@ export async function loadPredictions(): Promise<PreWeekLog | null> {
  */
 export async function loadCareer(): Promise<CareerLog | null> {
   try {
-    const file = path.join(process.cwd(), "public", "data", "career.json");
-    return JSON.parse(await readFile(file, "utf8")) as CareerLog;
+    return await readJson<CareerLog>(dataFile("career.json"));
   } catch {
     return null;
   }
@@ -99,11 +122,66 @@ export async function loadCareer(): Promise<CareerLog | null> {
  */
 export async function loadConsistency(): Promise<ConsistencyPool | null> {
   try {
-    const file = path.join(process.cwd(), "public", "data", "consistency.json");
-    return JSON.parse(await readFile(file, "utf8")) as ConsistencyPool;
+    return await readJson<ConsistencyPool>(dataFile("consistency.json"));
   } catch {
     return null;
   }
+}
+
+/** One finished season's player pool, from public/data/archive/league-<season>.json. */
+export interface ArchivedPool {
+  /** ESPN's season year: 2026 = the 2025-26 season. */
+  season: number;
+  pool: PoolPlayer[];
+}
+
+/*
+ * The fields the Player Card's percentile panel reads (lib/percentiles.ts). An archived
+ * export is ~650 KB, almost all of it the parts no previous-season bar needs (matchups,
+ * schedules, each row's three-season `history`), and this ships to the client.
+ */
+const ARCHIVE_KEYS = [
+  "name", "playerId", "nbaTeam", "position", "owner", "status", "gp",
+  "value", "recent", "trend", "recent15", "trend15", "fgPct", "ftPct", "tpPct",
+  "PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGM", "FGA", "FTM", "FTA", "3PA",
+  "DD", "TW", "last30", "last15",
+] as const;
+
+/**
+ * Every archived season before `current`, newest first. Each season is archived by the
+ * season switch (league-<season>.json), so new years appear here on their own. An empty
+ * list when there is no archive — the card then offers the current season only.
+ */
+export async function loadArchivedPools(current: number): Promise<ArchivedPool[]> {
+  const dir = path.join(process.cwd(), "public", "data", "archive");
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const seasons = names
+    .map((n) => /^league-(\d{4})\.json$/.exec(n)?.[1])
+    .filter((s): s is string => !!s)
+    .map(Number)
+    .filter((s) => s < current)
+    .sort((a, b) => b - a);
+
+  const out: ArchivedPool[] = [];
+  for (const season of seasons) {
+    try {
+      const raw = await readJson<LeagueData>(path.join(dir, `league-${season}.json`));
+      const pool = (raw.seasonData?.playerPool ?? []).map((p) => {
+        const slim: Record<string, unknown> = {};
+        for (const k of ARCHIVE_KEYS) if (k in p) slim[k] = p[k as keyof PoolPlayer];
+        return slim as unknown as PoolPlayer;
+      });
+      if (pool.length) out.push({ season, pool });
+    } catch {
+      // A malformed archive drops that one season, not the page.
+    }
+  }
+  return out;
 }
 
 /**

@@ -48,9 +48,9 @@ import {
  * is one tap from anywhere. Season Summary took the freed slot and leads the grid.
  */
 const TILES = [
-  // Season Summary leads: it is the "how did it go" page, and in the offseason it is the
-  // first thing anyone opens the app for.
-  { href: "/season", label: "Season Summary", Icon: TrophyIcon },
+  // League Home leads in season (2026-10-20), as it does in the desktop header. Season
+  // Summary is one tap further, in the Season index.
+  { href: "/league", label: "League Home", Icon: TrophyIcon },
   { href: "/scoreboard", label: "Current Matchup", Icon: ChartIcon },
   { href: "/schedule", label: "Schedule", Icon: CalendarIcon },
   { href: "/season-stats", label: "Season Stats", Icon: ClipboardDataIcon },

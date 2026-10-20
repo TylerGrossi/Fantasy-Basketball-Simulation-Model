@@ -42,6 +42,52 @@ if (process.platform !== "win32" || process.env.CI || process.env.VERCEL) {
   process.exit(0);
 }
 
+/**
+ * FIRST CHOICE: keep build output out of OneDrive entirely.
+ *
+ * Pinning (below) stops dehydration, but OneDrive still UPLOADS every file a build writes
+ * and holds a lock on each while it does — `next dev` then fails mid-compile with
+ * `EBUSY: resource busy or locked, open '.next\server\app\…'`, pages hang or never load,
+ * and OneDrive burns ~2 cores the whole time. Measured 2026-10-20.
+ *
+ * So `.next` stays at its path inside the project but is a JUNCTION to a folder under
+ * %LOCALAPPDATA%, which OneDrive never sees. The relocated-distDir failure described
+ * above doesn't apply: beside the real folder sits a second junction, `node_modules`,
+ * pointing back at the project's, so Node's walk up from any output file still finds
+ * `react/jsx-runtime` — and finds the SAME copy the project uses.
+ *
+ * Falls through to the pin when a junction can't be made, so nothing gets worse.
+ */
+const outside = path.join(
+  process.env.LOCALAPPDATA || path.join(root, ".."),
+  "fbbsim-build",
+  path.basename(dist)
+);
+const isJunction = (() => {
+  try {
+    return fs.lstatSync(dist).isSymbolicLink();
+  } catch {
+    return false;
+  }
+})();
+if (isJunction && fs.existsSync(outside)) {
+  console.log(`ensure-dist: ${path.basename(dist)} -> ${outside} (outside OneDrive)`);
+  process.exit(0);
+}
+try {
+  fs.mkdirSync(outside, { recursive: true });
+  const nm = path.join(path.dirname(outside), "node_modules");
+  if (!fs.existsSync(nm)) fs.symlinkSync(path.join(root, "node_modules"), nm, "junction");
+  // A plain dist dir (old build output, or a fresh clone) is replaced by the link; it
+  // only ever holds regenerable output.
+  fs.rmSync(dist, { recursive: true, force: true });
+  fs.symlinkSync(outside, dist, "junction");
+  console.log(`ensure-dist: ${path.basename(dist)} -> ${outside} (outside OneDrive)`);
+  process.exit(0);
+} catch (e) {
+  console.warn(`ensure-dist: could not relocate ${path.basename(dist)} (${e.message}); pinning instead`);
+}
+
 fs.mkdirSync(dist, { recursive: true });
 
 /**

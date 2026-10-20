@@ -9,7 +9,17 @@ import { matchupOutcome, withCurrentTotals } from "./probability";
 export interface PlayerRow {
   name: string;
   nbaTeam: string;
+  /**
+   * COUNTED games left: on a day more of the roster plays than there are starting
+   * slots, the lowest scorers lose that day. What the projections multiply by — not what
+   * to show as "games left" (see `scheduledGames`).
+   */
   gamesLeft: number;
+  /**
+   * His team's games left in the window (injury-aware, no slot cap) — the GL column.
+   * Absent on exports built before it was added.
+   */
+  nbaGamesLeft?: number;
   /** Per-game averages (season blended with last 30). Moments derive from this. */
   avg: StatVector;
   status: string;
@@ -497,4 +507,9 @@ export function winProbability(
     sideMoments(side, current),
     sideMoments(oppSide, oppCurrent)
   );
+}
+
+/** The GL column's number: the player's scheduled games, falling back to counted games. */
+export function scheduledGames(p: PlayerRow): number {
+  return p.nbaGamesLeft ?? p.gamesLeft;
 }

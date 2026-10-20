@@ -1,5 +1,6 @@
 import LineupView, { type LineupPlayer } from "@/components/LineupView";
 import { loadLeague, myTeam, resolveMatchup } from "@/lib/loadLeague";
+import { scheduledGames } from "@/lib/league";
 
 /** ESPN starts ten; everyone past that is bench. */
 const STARTER_SLOTS = 10;
@@ -58,7 +59,8 @@ export default async function Page() {
     value: valueOf.get(p.name) ?? 0,
     recent: recentOf.get(p.name) ?? valueOf.get(p.name) ?? 0,
     recent15: recent15Of.get(p.name) ?? valueOf.get(p.name) ?? 0,
-    gamesLeft: p.gamesLeft,
+    // Display only on this page, so the schedule count — see scheduledGames.
+    gamesLeft: scheduledGames(p),
     injured: p.injured,
     status: p.status,
     avg: p.avg,

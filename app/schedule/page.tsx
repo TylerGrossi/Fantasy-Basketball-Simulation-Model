@@ -158,7 +158,7 @@ export default async function Page() {
             >
               <span className="msched-wk">{weekTag(r.period)}</span>
               <span className={played ? `msched-score ${tone}` : "msched-preview"}>
-                {played ? r.score || r.winPct || "—" : "Preview"}
+                {played ? r.score || "—" : "Preview"}
               </span>
               <span className="msched-opp">
                 <span className="msched-team">
@@ -216,7 +216,7 @@ export default async function Page() {
                     {r.result || "—"}
                   </span>
                 </td>
-                <td className="num">{r.score || r.winPct || "—"}</td>
+                <td className="num">{r.score || "—"}</td>
                 <ScheduleAllPlay week={byPeriod.get(r.period)} />
               </tr>
             ))}

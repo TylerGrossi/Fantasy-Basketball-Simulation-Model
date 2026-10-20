@@ -119,13 +119,18 @@ every what-if (bench, streamer, trade) is instant with no server round trip.
   files mid-build, so a server that started cleanly starts 500ing on every route with
   `Cannot find module './611.js'` or `ENOENT: routes-manifest.json`. Tell them apart by
   attributes, not by the message: `Get-ChildItem .next -Recurse -Force -File | ? Attributes
-  -match ReparsePoint` — any hits mean OneDrive, not a stale build. `scripts/ensure-dist.mjs`
-  (wired to `predev`/`prebuild`) pins `.next` as "always keep on this device" so this can't
-  happen; it must pin the **directory**, since that is what new files inherit from. Don't
-  "fix" it by moving distDir outside the project — Node resolves the `require('react/…')`
-  calls Next emits from the output file's own directory, so every route 500s with
-  `Cannot find module 'react/jsx-runtime'` instead. Just run `npm run dev`, never
-  `npx next dev`, or the pin step is skipped.
+  -match ReparsePoint` — any hits mean OneDrive, not a stale build. Pinning `.next` ("always
+  keep on this device") stopped the dehydration but NOT the uploads: OneDrive still locked
+  each new file to sync it, so `next dev` died mid-compile with `EBUSY: resource busy or
+  locked` and pages hung or never loaded, with OneDrive burning ~2 cores (2026-10-20). So
+  `scripts/ensure-dist.mjs` (wired to `predev`/`prebuild`) now makes `.next` a **junction**
+  to `%LOCALAPPDATA%\fbbsim-build\.next`, which OneDrive never sees, with a second junction
+  `fbbsim-build\node_modules` → the project's `node_modules`. That second link is what makes
+  it work where a plain out-of-project distDir failed: Node resolves the
+  `require('react/…')` calls Next emits by walking up from the output file, and without it
+  every route 500s with `Cannot find module 'react/jsx-runtime'`. If the junction can't be
+  made it falls back to the pin. Just run `npm run dev`, never `npx next dev`, or this step
+  is skipped. Deleting `.next` is safe: the next `npm run dev` re-creates the link.
 
 ### Phase status
 

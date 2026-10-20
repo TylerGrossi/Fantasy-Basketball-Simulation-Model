@@ -3349,7 +3349,7 @@ table.sheet.lu-table .lu-pos {
    does — a longer track is a more readable one. */
 .pd-split {
   display: grid;
-  grid-template-columns: 24.5rem minmax(0, 1fr);
+  grid-template-columns: 31rem minmax(0, 1fr);
   gap: 1.1rem;
   /* Stretch, not `start`: the two panels are bordered cards sitting side by side, and a
      short left card left a ragged step where its border stopped halfway down the right
@@ -3407,7 +3407,9 @@ table.sheet.lu-table .lu-pos {
   appearance: none;
   -webkit-appearance: none;
   border: 0;
-  border-bottom: 1px dotted var(--line-strong);
+  /* Solid and in ink, not a dotted hairline: the faint version didn't read as
+     changeable at all. Still the heading's own colour — the underline is the cue. */
+  border-bottom: 2px solid var(--ink-3);
   border-radius: 0;
   background: transparent;
   padding: 0 0.1rem 0.05rem;
@@ -3415,7 +3417,7 @@ table.sheet.lu-table .lu-pos {
   color: inherit;
   cursor: pointer;
 }
-.pd-rank-sel:hover { border-bottom-color: var(--ink-2); }
+.pd-rank-sel:hover { border-bottom-color: var(--ink); }
 .pd-rank-sel:focus-visible {
   outline: 2px solid var(--cobalt);
   outline-offset: 2px;
@@ -3443,7 +3445,7 @@ table.sheet.lu-table .lu-pos {
 .pd-head .pv-shot { flex: 0 0 auto; width: 104px; height: 104px; }
 .pd-id { min-width: 0; }
 /* One line, always. Sized for the longest real NBA names ("Shai Gilgeous-Alexander",
-   "Nickeil Alexander-Walker") against a 24.5rem rail; the ellipsis is a guard against
+   "Nickeil Alexander-Walker") against a 31rem rail; the ellipsis is a guard against
    something longer, not an expected state. */
 .pd-name {
   font-weight: 800;
@@ -3674,10 +3676,16 @@ table.sheet.lu-table .lu-pos {
 
    The midpoint is the lightest neutral that still clears the 2:1 visibility floor against
    this card (2.05:1). It cannot be literally white: a white bar on a near-white card is
-   an invisible bar, which would read as missing data rather than as average. */
-.pct-lo { background: #2f6fed; }
-.pct-mid { background: #b0b2b9; }
-.pct-hi { background: #c0392b; }
+   an invisible bar, which would read as missing data rather than as average.
+
+   The bar's own colour is a blend between these, set inline per bar (PercentileBar):
+   neutral toward the pole by distance from the 50th, so the shade grades the way
+   Savant's does. */
+:root {
+  --pct-lo: #2f6fed;
+  --pct-mid: #b0b2b9;
+  --pct-hi: #c0392b;
+}
 /* The percentile rides the END of its own bar, so the number and the length it encodes
    are never read apart. The ring is the 2px surface gap an overlapping mark needs. */
 .pct-bubble {
@@ -3699,8 +3707,8 @@ table.sheet.lu-table .lu-pos {
   align-items: center;
   justify-content: center;
 }
-/* The neutral band is too light to carry white text. */
-.pct-mid .pct-bubble { color: var(--ink); }
+/* The near-average end of the blend is too light to carry white text. */
+.pct-pale .pct-bubble { color: var(--ink); }
 .pct-value {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -5859,7 +5867,10 @@ table.sheet.ls-cats td:last-child {
      own shape and anchoring the bottom shows every player framed the same way. */
   aspect-ratio: 600 / 436;
   border-radius: 8px;
-  background-size: cover;
+  /* 104%, not `cover`: some ESPN headshots carry a thin dark strip along their top edge,
+     and an exact fit showed it as a line across the tile. Overscaling from the bottom
+     anchor pushes the top few percent (and a sliver of each side) out of the frame. */
+  background-size: 104% auto;
   background-position: center bottom;
   background-color: var(--surface-2);
 }
@@ -6768,7 +6779,7 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
 /* ------------------------------------------------- player card: window table
 
    Season / 30 day / 15 day as three rows, replacing three big value tiles. Eight narrow
-   numeric columns in a 24.5rem rail, so everything is sized down and the padding is
+   numeric columns in a 31rem rail, so everything is sized down and the padding is
    minimal — the table is meant to be scanned as a block, not read cell by cell. */
 .pd-wt-wrap { margin-bottom: 0.2rem; }
 .pd-wt {
@@ -6950,7 +6961,9 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
    same question asked two ways, so they share a heading rather than each claiming one. */
 .pd-sheet-two {
   display: grid;
-  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  /* 31rem = the bio rail's width in .pd-split, so this row's divide lines up with the
+     one above it instead of stepping in from it. */
+  grid-template-columns: minmax(0, 31rem) minmax(0, 1fr);
   gap: 1.1rem;
   /* Stretch, not `start`: two bordered cards side by side with their bottoms at
      different heights reads as a rendering fault, not as a layout. */
@@ -6987,7 +7000,7 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
 .pd-con-metric {
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--paper);
+  background: #ffffff;
   padding: 0.6rem 0.7rem 0.65rem;
   text-align: center;
 }
@@ -7006,7 +7019,6 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
   color: var(--ink);
   margin: 0.15rem 0 0.05rem;
 }
-.pd-con-s { font-size: 0.6rem; color: var(--ink-3); }
 
 /* -------------------------------------------------- player card: category shape */
 
@@ -7017,7 +7029,7 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
   height: auto;
   /* Bounded by the card, never by its own intrinsic size — the viewBox is
      square, so an unbounded width becomes an equally unbounded height. */
-  max-width: min(17rem, 100%);
+  max-width: min(21rem, 100%);
   margin: 0 auto;
 }
 .pd-shape-ax {
@@ -7485,3 +7497,368 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
     margin-top: 0.1rem;
   }
 }
+
+/*
+ * The route loading outline (app/loading.tsx). Held invisible for 180ms so a quick page
+ * goes straight to its content; a slower one gets the outline instead of a frozen screen.
+ * Plain blocks in the surface tone, no shimmer — the sheet has no decoration elsewhere.
+ */
+.page-loading {
+  opacity: 0;
+  animation: pl-in 160ms ease-out 180ms forwards;
+}
+@keyframes pl-in {
+  to { opacity: 1; }
+}
+.page-loading > div,
+.pl-tiles > div,
+.pl-table > div {
+  background: var(--surface-2);
+  border-radius: 8px;
+}
+.page-loading .pl-title {
+  width: 11rem;
+  height: 1.9rem;
+  margin: 0.4rem 0 1.2rem;
+}
+.page-loading .pl-tiles {
+  background: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1.4rem;
+}
+.pl-tiles > div {
+  height: 6.5rem;
+  border: 1px solid var(--line-2);
+}
+.page-loading .pl-table {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+}
+.pl-table > div {
+  height: 1rem;
+  margin: 0.95rem 0;
+}
+@media (max-width: 767px) {
+  .page-loading .pl-tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-loading {
+    animation-duration: 1ms;
+  }
+}
+
+/*
+ * Navigation progress (components/NavProgress.tsx): starts on the click, eases toward
+ * the end without reaching it, and is removed when the new page arrives. It never claims
+ * to know how far along the server is — it only says "your click registered".
+ */
+.nav-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 0;
+  background: var(--cobalt);
+  z-index: 1000;
+  pointer-events: none;
+  animation: nav-progress 8s cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
+}
+@keyframes nav-progress {
+  0% { width: 0; }
+  10% { width: 35%; }
+  100% { width: 92%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-progress { animation: none; width: 60%; }
+}
+
+/* GL cell's counted-games figure ("3 (1)") — see GamesLeftCell. Secondary to the
+   schedule count it sits beside, so muted and a step smaller. */
+.gl-counted { color: var(--ink-3); font-size: 0.85em; cursor: help; }
+
+/* ------------------------------------------------------------------ League Home
+   ESPN's league front page, in this app's vocabulary: three columns — you and your
+   week, the league's news, the table. Cards are the Player Card's sheet (hairline,
+   12px radius, card ground); nothing new in the palette. */
+.lh {
+  display: grid;
+  grid-template-columns: 20rem minmax(0, 1fr) 23rem;
+  gap: 1.1rem;
+  align-items: start;
+  /* No page <h1> above it (the header card carries the title), so the grid supplies the
+     gap under the site header itself. */
+  margin-top: 1.25rem;
+}
+.lh-col { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
+.lh-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 1rem 1.15rem 0.9rem;
+  min-width: 0;
+}
+.lh-h {
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.lh-h-note { font-size: 0.72rem; font-weight: 500; color: var(--ink-3); }
+.lh-sub-h {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0.4rem;
+}
+.lh-more {
+  display: block;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--line-2);
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--cobalt);
+  text-decoration: none;
+}
+.lh-more:hover { text-decoration: underline; }
+.lh-foot-note { margin: 0.6rem 0 0; font-size: 0.68rem; color: var(--ink-3); }
+
+/* Header card: the league's name and the four facts that frame the week. */
+.lh-head { border-top: 4px solid var(--cobalt); }
+.lh-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  margin: 0 0 0.8rem;
+}
+.lh-title { margin: 0; font-size: 1.6rem; line-height: 1.2; }
+.lh-asof { font-size: 0.74rem; color: var(--ink-3); white-space: nowrap; }
+.lh-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.6rem 1.2rem;
+  margin: 0;
+}
+.lh-facts dt {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.lh-facts dd { margin: 0.1rem 0 0; font-size: 0.88rem; color: var(--ink); }
+
+/* My Team */
+.lh-me { text-align: center; margin: 0.2rem 0 0.8rem; }
+.lh-me-name { font-size: 1.35rem; font-weight: 800; color: var(--ink); }
+.lh-me-sub { font-size: 0.82rem; color: var(--ink-2); margin-top: 0.15rem; }
+.lh-me-week {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  background: var(--row-highlight);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.82rem;
+}
+.lh-me-week:hover { box-shadow: inset 0 0 0 1px var(--cobalt); }
+.lh-me-week-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-me-week-r { display: flex; flex-direction: column; align-items: flex-end; flex: 0 0 auto; }
+.lh-me-win { font-size: 0.68rem; color: var(--cobalt); }
+.lh-inj { margin-top: 0.85rem; }
+.lh-inj-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  padding: 0.2rem 0;
+}
+.lh-inj-s { font-size: 0.68rem; font-weight: 700; color: var(--ink-2); }
+.lh-inj-s.out { color: var(--bad); }
+.lh-inj-s.day { color: var(--clay); }
+.lh-links {
+  display: flex;
+  justify-content: center;
+  gap: 1.1rem;
+  margin-top: 0.85rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--line-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.lh-links a { color: var(--cobalt); text-decoration: none; }
+.lh-links a:hover { text-decoration: underline; }
+
+/* Scores: one block per matchup, a hairline between. */
+.lh-game { padding: 0.5rem 0; border-bottom: 1px solid var(--line-2); }
+.lh-game:last-child { border-bottom: 0; }
+.lh-game-you { background: var(--row-highlight); margin: 0 -0.5rem; padding: 0.5rem; border-radius: 6px; }
+.lh-game-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.7rem;
+  align-items: baseline;
+  padding: 0.12rem 0;
+}
+.lh-game-team {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lh-game-team.you { color: var(--cobalt); }
+.lh-game-win { font-size: 0.7rem; color: var(--ink-3); }
+.lh-game-rec { font-size: 0.95rem; font-weight: 700; color: var(--ink); min-width: 4.2rem; text-align: right; }
+
+/* Recent Activity */
+table.sheet.lh-moves td { white-space: nowrap; }
+.lh-when { color: var(--ink-2); }
+.lh-time { color: var(--ink-3); font-size: 0.85em; }
+
+/* Rising & Falling */
+.lh-trends { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.4rem; }
+.lh-trend-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--line-2);
+}
+.lh-trend-row:last-child { border-bottom: 0; }
+.lh-trend-who { display: flex; flex-direction: column; min-width: 0; font-size: 0.85rem; }
+.lh-trend-own { font-size: 0.68rem; color: var(--ink-3); }
+.lh-trend-own.fa { color: var(--good); font-weight: 600; }
+.lh-trend-d { font-weight: 700; font-size: 0.85rem; }
+.lh-trend-d.up { color: var(--good); }
+.lh-trend-d.dn { color: var(--bad); }
+
+/* Standings */
+table.sheet.lh-stand { width: 100%; }
+table.sheet.lh-stand th,
+table.sheet.lh-stand td { padding-left: 0.35rem; padding-right: 0.35rem; }
+.lh-stand-team { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-seed { display: inline-block; width: 1.2rem; color: var(--ink-3); font-size: 0.75rem; }
+
+/* Mid widths: two columns — you and the table down the left, the league's news on the
+   right. */
+@media (max-width: 1250px) {
+  .lh { grid-template-columns: 21rem minmax(0, 1fr); }
+  .lh-main { grid-column: 2; grid-row: 1 / span 2; }
+  .lh-left, .lh-right { grid-column: 1; }
+}
+/* Phone: one column, cards in reading order rather than column order — the header first,
+   then your week, the table, and the league's news. The columns dissolve
+   (`display: contents`) so every card can be ordered on its own. */
+@media (max-width: 900px) {
+  /* `stretch`: the desktop grid's `align-items: start` would otherwise carry over and
+     shrink every card to its content's width. */
+  .lh { display: flex; flex-direction: column; gap: 1rem; align-items: stretch; margin-top: 0.75rem; }
+  .lh-col { display: contents; }
+  .lh-head { order: 1; }
+  .lh-left > :nth-child(1) { order: 2; }
+  .lh-left > :nth-child(2) { order: 3; }
+  .lh-right > * { order: 4; }
+  .lh-main > :nth-child(2) { order: 5; }
+  .lh-main > :nth-child(3) { order: 6; }
+  .lh-trends { grid-template-columns: 1fr; gap: 1rem; }
+}
+
+/* League Home as a dashboard: every column ends on the same line. The columns stretch to
+   the row's height and each column's LAST card takes the remainder; its "more" link is
+   pushed to the card's foot so the added height belongs to the card, not a gap under it.
+   The gap the link's own margin used to give moves to whatever sits above it. */
+.lh { align-items: stretch; }
+.lh-card { display: flex; flex-direction: column; }
+.lh-col > :last-child { flex: 1 1 auto; }
+.lh-card > .lh-more { margin-top: auto; }
+.lh-card > :nth-last-child(2) { margin-bottom: 0.75rem; }
+
+/* Category edge: your share of each track in cobalt, theirs in clay. */
+.lh-edge {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.35rem 1.6rem;
+}
+.lh-edge-row {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr) 2.8rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.12rem 0;
+}
+.lh-edge-cat { font-size: 0.72rem; font-weight: 700; color: var(--ink-2); }
+.lh-edge-track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--clay);
+  overflow: hidden;
+}
+.lh-edge-you { position: absolute; left: 0; top: 0; bottom: 0; background: var(--cobalt); }
+.lh-edge-p { font-size: 0.78rem; font-weight: 700; text-align: right; color: var(--ink-2); }
+.lh-edge-p.up { color: var(--cobalt); }
+.lh-edge-p.dn { color: var(--clay); }
+
+/* Best Available */
+.lh-fa-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--line-2);
+}
+.lh-fa-row:last-child { border-bottom: 0; }
+.lh-fa-v { font-weight: 700; font-size: 0.85rem; color: var(--ink); }
+.lh-fa-slot {
+  flex: 0 0 2.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.lh-fa-row > .lh-trend-who { flex: 1 1 auto; }
+
+/* Power Rankings / preseason favorites */
+.lh-pr-row {
+  display: grid;
+  grid-template-columns: 1.2rem minmax(0, 1fr) auto 3rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.32rem 0.35rem;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 0.82rem;
+}
+.lh-pr-row:last-child { border-bottom: 0; }
+.lh-pr-row.you { background: var(--row-highlight); border-radius: 4px; }
+.lh-pr-team { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.lh-pr-p { text-align: right; font-weight: 700; color: var(--ink); }
+.lh-pr-d { font-size: 0.72rem; font-weight: 700; color: var(--ink-3); min-width: 1.6rem; text-align: right; }
+.lh-pr-d.up { color: var(--good); }
+.lh-pr-d.dn { color: var(--bad); }
+.lh-pr-bar { width: 4.5rem; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.lh-pr-bar > span { display: block; height: 100%; background: var(--cobalt); }

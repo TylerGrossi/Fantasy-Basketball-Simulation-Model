@@ -1,4 +1,5 @@
-import type { LeagueData, PlayerRow, TeamSide } from "@/lib/league";
+import { scheduledGames, type LeagueData, type PlayerRow, type TeamSide } from "@/lib/league";
+import GamesLeftCell from "./GamesLeftCell";
 import PlayerLink from "./PlayerLink";
 
 /**
@@ -52,8 +53,8 @@ export default function RosterView({
                 <tr key={`${team}-${p.name}`}>
                   <td><PlayerLink name={p.name} /></td>
                   <td>{team}</td>
-                  <td>{p.status || "OUT"}</td>
-                  <td className="num">{p.gamesLeft}</td>
+                  <td>{statusText(p.status || "OUT")}</td>
+                  <GamesLeftCell player={p} />
                 </tr>
               ))}
             </tbody>
@@ -73,7 +74,8 @@ function RosterTable({
 }) {
   const cols = SHOWN.filter((s) => league.stats.includes(s));
   const sorted = [...players].sort((a, b) => {
-    if (b.gamesLeft !== a.gamesLeft) return b.gamesLeft - a.gamesLeft;
+    const gl = scheduledGames(b) - scheduledGames(a);
+    if (gl !== 0) return gl;
     return b.avg[league.stats.indexOf("PTS")] - a.avg[league.stats.indexOf("PTS")];
   });
 
@@ -98,17 +100,30 @@ function RosterTable({
             <tr key={p.name} className={p.injured ? "row-muted" : undefined}>
               <td><PlayerLink name={p.name} /></td>
               <td>{p.nbaTeam}</td>
-              <td className="num">{p.gamesLeft}</td>
+              <GamesLeftCell player={p} />
               {cols.map((c) => (
                 <td key={c} className="num">
                   {p.avg[league.stats.indexOf(c)].toFixed(1)}
                 </td>
               ))}
-              <td>{p.status}</td>
+              <td>{statusText(p.status)}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
+}
+
+/**
+ * ESPN's status as words: "DAY_TO_DAY" -> "Day to Day". ACTIVE stays as ESPN writes it
+ * (owner's call) — only the underscored enums read as raw data.
+ */
+function statusText(raw: string): string {
+  if (!raw || raw === "ACTIVE") return raw;
+  return raw
+    .toLowerCase()
+    .split("_")
+    .map((w, i) => (i > 0 && w === "to" ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(" ");
 }
