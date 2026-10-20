@@ -39,7 +39,6 @@ from data import (
     get_week_date_range,
 )
 from simulation import (
-    _get_full_raw_schedule,
     _team_ids_from_raw_schedule_matchup,
     calculate_league_stats,
     simulate_playoff_probabilities,
@@ -238,6 +237,40 @@ def _log5(pa, pb):
     return (pa - pa * pb) / denom if denom > 0 else 0.5
 
 
+def _season_schedule(league):
+    """
+    Every matchup of the season (ESPN's raw `schedule` rows), fetched once per League.
+
+    NOT `simulation._get_full_raw_schedule`: that asks for `view=mSchedule` only and turns
+    any failure into an empty list, silently. In the 2026-10-20 refresh it came back empty
+    for every team, the schedule section dropped out of league.json, and the page said "No
+    schedule data" with nothing in the log to say why. The views the working callers use
+    — `mMatchup` (scripts/build_draft.py's schedule, and espn-api's own league load) and
+    `mMatchupScore` (app/api/live) — are tried first, `mSchedule` last, and each attempt
+    reports what it got. An empty result is not cached, so a later caller tries again.
+    """
+    cached = getattr(league, "_season_schedule_rows", None)
+    if cached:
+        return cached
+    req = getattr(league, "espn_request", None)
+    if req is None:
+        print("  ! season schedule: League has no espn_request", flush=True)
+        return []
+    for views in (["mMatchup", "mMatchupScore"], ["mMatchup"], ["mSchedule"]):
+        try:
+            data = req.league_get(params={"view": views})
+            data = data[0] if isinstance(data, list) and data else data
+            rows = (data or {}).get("schedule") or [] if isinstance(data, dict) else []
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! season schedule via {'+'.join(views)}: {exc}", flush=True)
+            continue
+        print(f"  season schedule via {'+'.join(views)}: {len(rows)} matchups", flush=True)
+        if rows:
+            league._season_schedule_rows = rows
+            return rows
+    return []
+
+
 def get_team_schedule_data(league_id, year, espn_s2, swid, team_id):
     """
     A team's full-season schedule: each matchup, the category result/score for
@@ -281,7 +314,7 @@ def get_team_schedule_data(league_id, year, espn_s2, swid, team_id):
     teams_by_id = {t.team_id: t for t in league.teams}
     current_espn_period = int(getattr(league, "currentMatchupPeriod", 0) or 0)
     scheduled = {}  # ESPN matchupPeriodId -> (opponent id, am I home)
-    for sm in _get_full_raw_schedule(league):
+    for sm in _season_schedule(league):
         hid, aid = _team_ids_from_raw_schedule_matchup(sm)
         if hid is None or aid is None or team_id not in (hid, aid):
             continue  # a bye, or someone else's game
