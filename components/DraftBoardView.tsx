@@ -617,7 +617,7 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
                 setMock({ ...mock, style: e.target.value as MockStyle, picks: [], seed: Math.floor(Math.random() * 1e9) })
               }
             >
-              <option value="espn">ESPN rank</option>
+              <option value="espn">ESPN ADP</option>
               <option value="mixed">Mixed</option>
               <option value="experts">Experts</option>
             </select>

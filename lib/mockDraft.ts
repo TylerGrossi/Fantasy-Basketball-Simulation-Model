@@ -54,7 +54,7 @@ export function houseBias(r: DraftRow): number {
 }
 
 export const PERSONALITY_LABEL: Record<Personality, string> = {
-  adp: "ESPN rank",
+  adp: "ESPN ADP",
   expert: "Experts",
   sharp: "Sharp",
 };
@@ -99,7 +99,10 @@ function gauss(r: () => number): number {
 function listRank(r: DraftRow, p: Personality): number {
   if (p === "sharp") return r.rank;
   if (p === "expert") return r.fpRank ?? r.adp ?? r.espnRank ?? 400;
-  return r.espnRank ?? r.adp ?? 400;
+  // ADP first (owner, 2026-10-19): it is what drafters actually DO. ESPN's roto rank had
+  // Giannis 19th against an ADP of 5.8, so rank-driven bots let him slide to round 3,
+  // which never happens in a real room. Rank is only the fallback for unranked-by-ADP players.
+  return r.adp ?? r.espnRank ?? 400;
 }
 
 const isBig = (r: DraftRow) => r.eligibleSlots.includes("C");
