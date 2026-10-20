@@ -15,6 +15,7 @@
  *    prose beats JSON here: it costs fewer tokens and the model quotes it more faithfully.
  */
 
+import { getDraftSeason, gradeFor, loadDraftData, neutralRows, type DraftedPick } from "./draftSeason";
 import type { LeagueData, PoolPlayer, StandingRow, ScoreboardRow } from "./league";
 // The same helpers /scoreboard and /matchup use, so the agent's numbers are the page's
 // numbers rather than a second implementation that can drift from it.
@@ -254,6 +255,33 @@ const SORT_COLUMNS: Record<string, keyof PoolPlayer> = {
 };
 
 export const TOOL_DECLARATIONS: ToolDeclaration[] = [
+  {
+    name: "draft_recap",
+    description:
+      "The 2026-27 DRAFT, graded: every team's place, letter grade, projected value (round-weighted value over replacement), projected season category record and playoff odds (10,000 simulated seasons of the real schedule), best pick and biggest reach versus ESPN ADP. Use for 'who won the draft', 'how did my draft go', draft grades, or which team looks strongest after the draft.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    name: "draft_results",
+    description:
+      "The 2026-27 draft pick by pick. With a team: that team's every pick (round, overall pick, player, position, ESPN ADP, how far before/after ADP, projected value) plus its strongest and weakest projected categories. Without a team: every team's first four picks.",
+    parameters: {
+      type: "object",
+      properties: {
+        team: { type: "string", description: "Fantasy team name, full or partial. Omit for all teams." },
+      },
+    },
+  },
+  {
+    name: "player_projection",
+    description:
+      "One player's 2026-27 PROJECTION from the draft board: projected per-game line and games, projected value (over replacement) and his actual 2025-26 value on the same scale, board rank on this league's categories, ESPN rank and ADP, FantasyPros rank, any manual adjustment (injury, role) with its reason, and which team drafted him and where. Use for season-long outlook questions; lookup_player is the in-season stats view.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string", description: 'Player name, full or partial (e.g. "Wembanyama").' } },
+      required: ["name"],
+    },
+  },
   {
     name: "lookup_player",
     description:
@@ -977,6 +1005,85 @@ export function createToolRunner(
         ].join("\n");
       }
 
+      case "draft_recap": {
+        const ds = await getDraftSeason();
+        if (!ds) return "The draft results are not published by ESPN yet.";
+        const n = ds.teams.length;
+        return [
+          "2026-27 DRAFT RECAP. Graded neutrally on the league's own categories (equal weights, no punts). " +
+            "Ranked by projected value: each roster's value over replacement, weighted by draft round " +
+            "(late picks count less). Record and playoff odds come from 10,000 simulated seasons of the real schedule " +
+            `(${ds.data.league.playoffTeams || 4} teams make the playoffs; record is categories won-lost of 19 weeks x 15).`,
+          ...ds.teams.map(
+            (t) =>
+              `${t.place}. ${t.name}${t.mine ? " (THE USER'S TEAM)" : ""}: grade ${gradeFor(t.place, n)}, ` +
+              `projected value ${t.projValue.toFixed(1)}, projected record ` +
+              (t.season ? `${t.season.catW.toFixed(0)}-${t.season.catL.toFixed(0)}, playoffs ${(t.season.playoffPct * 100).toFixed(0)}%` : "n/a") +
+              `, best pick ${pickText(t.steal)}, biggest reach ${pickText(t.reach)}`
+          ),
+        ].join("\n");
+      }
+
+      case "draft_results": {
+        const ds = await getDraftSeason();
+        if (!ds) return "The draft results are not published by ESPN yet.";
+        const q = str("team").toLowerCase();
+        if (!q) {
+          return ds.teams
+            .map((t) => `${t.name}${t.mine ? " (user)" : ""}: ` + t.picks.slice(0, 4).map((x) => `#${x.pick} ${x.r.name}`).join(", "))
+            .join("\n");
+        }
+        const t = ds.teams.find((x) => x.name.toLowerCase().includes(q)) ??
+          (/(my|mine|me|user)/.test(q) ? ds.teams.find((x) => x.mine) : undefined);
+        if (!t) return `No team matching "${str("team")}". Teams: ${ds.teams.map((x) => x.name).join(", ")}.`;
+        const cats = t.season ? Object.entries(t.season.catWinPct).sort((a, b) => b[1] - a[1]) : [];
+        return [
+          `${t.name}${t.mine ? " (THE USER'S TEAM)" : ""} draft, place ${t.place} of ${ds.teams.length}, projected value ${t.projValue.toFixed(1)}:`,
+          ...t.picks.map(
+            (x) =>
+              `R${x.round} #${x.pick} ${x.r.name} (${x.r.eligibleSlots.join("/") || x.r.position}, ${x.r.nbaTeam}) - ` +
+              `ADP ${x.r.adp != null ? x.r.adp.toFixed(0) : "n/a"}` +
+              (x.vsAdp != null ? ` (${x.vsAdp >= 0 ? `${x.vsAdp.toFixed(0)} picks later than ADP` : `${(-x.vsAdp).toFixed(0)} picks earlier than ADP`})` : "") +
+              `, projected value ${x.r.total.toFixed(1)}`
+          ),
+          cats.length
+            ? `Projected weekly category win rates - strongest: ${cats.slice(0, 3).map(([c, v]) => `${c} ${(v * 100).toFixed(0)}%`).join(", ")}; ` +
+              `weakest: ${cats.slice(-3).map(([c, v]) => `${c} ${(v * 100).toFixed(0)}%`).join(", ")}.`
+            : "",
+        ].join("\n");
+      }
+
+      case "player_projection": {
+        const data = await loadDraftData();
+        const rows = neutralRows(data);
+        const q = str("name").toLowerCase();
+        const r =
+          rows.find((x) => x.name.toLowerCase() === q) ??
+          rows.find((x) => x.name.toLowerCase().includes(q)) ??
+          rows.find((x) => q.split(/\s+/).every((w) => x.name.toLowerCase().includes(w)));
+        if (!r) return `No 2026-27 projection for "${str("name")}" (the board covers ESPN's top ~300).`;
+        let drafted = "undrafted (free agent)";
+        try {
+          const ds = await getDraftSeason();
+          const hit = ds?.teams.flatMap((t) => t.picks.map((x) => ({ t, x }))).find((y) => y.x.r.playerId === r.playerId);
+          if (hit) drafted = `drafted by ${hit.t.name}${hit.t.mine ? " (the user)" : ""} at #${hit.x.pick} (round ${hit.x.round})`;
+        } catch {
+          /* draft feed optional here */
+        }
+        const p = r.proj;
+        return [
+          `${r.name} (${r.eligibleSlots.join("/") || r.position}, ${r.nbaTeam}${r.age != null ? `, age ${r.age}` : ""}) - ${drafted}.`,
+          `2026-27 projection: ${r.projGp} games, ${p.PTS.toFixed(1)} pts, ${p.REB.toFixed(1)} reb, ${p.AST.toFixed(1)} ast, ` +
+            `${p.STL.toFixed(1)} stl, ${p.BLK.toFixed(1)} blk, ${p["3PM"].toFixed(1)} 3pm on ${p["3PA"].toFixed(1)} 3pa, ` +
+            `${p.TO.toFixed(1)} to, ${p.DD.toFixed(2)} DD, FG% ${(r.projFgPct * 100).toFixed(1)}, FT% ${(r.projFtPct * 100).toFixed(1)}, 3P% ${(r.projTpPct * 100).toFixed(1)}.`,
+          `Projected value ${r.total.toFixed(1)} over replacement (board rank ${r.rank}); 2025-26 actual value ` +
+            `${Number.isNaN(r.actualTotal) ? "n/a (no NBA line last season)" : r.actualTotal.toFixed(1)}.`,
+          `ESPN rank ${r.espnRank ?? "n/a"}, ESPN ADP ${r.adp != null ? r.adp.toFixed(1) : "n/a"}, FantasyPros ${r.fpRank ?? "n/a"}.`,
+          r.drivers.length ? `Notes: ${r.drivers.join(" | ")}` : "",
+          `Per-category z vs the average drafted player: ${Object.entries(r.z).map(([c, v]) => `${c} ${v >= 0 ? "+" : ""}${v.toFixed(1)}`).join(", ")}.`,
+        ].join("\n");
+      }
+
       case "web_search":
         return webSearch(str("query"));
 
@@ -994,7 +1101,15 @@ export function createToolRunner(
  * ever accept, which is the fastest way to make the whole assistant feel naive.
  */
 
-export function systemInstruction(teamName: string, seasonOver: boolean, season: number) {
+export function systemInstruction(
+  teamName: string,
+  seasonOver: boolean,
+  season: number,
+  categories: string[] = []
+) {
+  const cats = categories.length
+    ? categories
+    : ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%", "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"];
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -1010,9 +1125,13 @@ export function systemInstruction(teamName: string, seasonOver: boolean, season:
     "memory. If you catch yourself about to say an event 'hasn't happened yet', stop and " +
     "web_search it first - it very likely already has.\n\n" +
     "You are a concise, knowledgeable fantasy basketball assistant for an ESPN " +
-    `9-category head-to-head league. The user's team is "${teamName}".\n\n` +
-    "Scoring categories: FG%, FT%, 3PM, REB, AST, STL, BLK, TO (turnovers - LOWER is " +
-    'better), PTS, and double-doubles (DD). "Value" is a 9-category z-score rating: ' +
+    `head-to-head each-category league (2026-27 season). The user's team is "${teamName}".\n\n` +
+    `The league scores ${cats.length} categories, each a separate win or loss every week: ` +
+    `${cats.join(", ")}. TO (turnovers) is LOWER-is-better; DD is double-doubles; TW is team ` +
+    "wins (games the player's NBA team wins while he plays). Volume counts here (FGM, FGA, " +
+    "3PA are categories), so high-usage scorers are worth more than in standard 9-cat, and " +
+    "non-shooting bigs lose ground in the three three-point categories. " +
+    'In the in-season tools, "Value" is a 9-category z-score rating: ' +
     "higher is better, ~0 is replacement level, and positive means a useful fantasy " +
     'player. A player\'s "15-day" / "30-day" trend is how their recent value compares ' +
     "to their season value (positive = heating up, negative = cooling off).\n\n" +
@@ -1032,6 +1151,11 @@ export function systemInstruction(teamName: string, seasonOver: boolean, season:
     "   - teams: team_roster, league_rosters, team_category_ranks, list_teams\n" +
     "   - the season: power_rankings, current_matchup, team_schedule, recent_moves, " +
     "playoff_odds\n" +
+    "   - the 2026-27 DRAFT: draft_recap (who won the draft, grades, projected records and " +
+    "playoff odds), draft_results (any team's picks, steals and reaches), player_projection " +
+    "(any player's 2026-27 projection, projected value, ADP and who drafted him). Use these " +
+    "for anything about the draft or a player's season-long outlook; the user drafted 5th " +
+    "and their team is marked as the user's in the results.\n" +
     "player_game_detail is the ONLY tool that sees a player's individual GAMES - his last " +
     "ten lines, his month-by-month splits, home/away, rest and back-to-backs, how he does " +
     "against good, average and bad defences, and his consistency (median night, " +
@@ -1082,4 +1206,9 @@ export function systemInstruction(teamName: string, seasonOver: boolean, season:
       : "The season is in progress; league numbers come from the most recent export, so " +
         "use web_search for today's news, injuries and lineups.")
   );
+}
+
+/** "Name #pick (ADP n)" for a draft highlight, or "none". */
+function pickText(x?: DraftedPick): string {
+  return x ? `${x.r.name} #${x.pick} (ADP ${x.r.adp != null ? x.r.adp.toFixed(0) : "n/a"})` : "none";
 }

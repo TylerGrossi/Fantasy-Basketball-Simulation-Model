@@ -157,6 +157,13 @@ export interface PlayoffOddsRow {
 }
 
 export interface PoolPlayer {
+  /**
+   * Which season this player's line describes (scripts/build_data.py, 2026-27 switch):
+   * "current" = this season's actuals; "last" = LAST season's line, shown until he plays
+   * this season; "proj" = ESPN's projection (a rookie, no last season). Absent on older
+   * exports, which were always "current".
+   */
+  statSource?: "current" | "last" | "proj" | "blend";
   name: string;
   nbaTeam: string;
   position: string;

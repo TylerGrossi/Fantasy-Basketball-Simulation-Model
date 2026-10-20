@@ -5853,11 +5853,14 @@ table.sheet.ls-cats td:last-child {
    overlap its neighbours rather than shrink. */
 .sr-shot {
   width: 100%;
-  max-width: 3.9em;
-  aspect-ratio: 1 / 1;
+  max-width: 4.6em;
+  /* ESPN headshots are 600x436 (landscape). A SQUARE tile with `cover` zoomed in and cropped
+     each photo differently (shoulders cut, heads at different heights). Matching the photo's
+     own shape and anchoring the bottom shows every player framed the same way. */
+  aspect-ratio: 600 / 436;
   border-radius: 8px;
   background-size: cover;
-  background-position: center top;
+  background-position: center bottom;
   background-color: var(--surface-2);
 }
 .sr-shot-blank { background-image: none; }
@@ -6265,6 +6268,8 @@ table.sheet.dg-pl-table td, table.sheet.dg-pl-table th { padding: 0.22rem 0.5rem
 .dg-pl-res { border-left: 1px solid var(--line); min-width: 9rem; }
 .dg-pl-res .dg-pl-nm { display: block; color: var(--ink); font-weight: 600; }
 .dg-pl-table tfoot td { border-top: 1px solid var(--line); font-size: 0.74rem; }
+/* Player Card: which season the numbers are from (early 2026-27: last season's line) */
+.pd-source { font-size: 0.68rem; color: var(--clay); font-weight: 600; margin: 0.1rem 0 0.15rem; }
 /* Draft recap */
 .dg-tile-text { font-size: 0.86rem !important; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dg-tile-sub { font-family: var(--mono); font-size: 0.6rem; color: var(--ink-3); white-space: nowrap; }

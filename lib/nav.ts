@@ -117,6 +117,9 @@ export const FLAT_NAV: NavEntry[] = [
       { label: "Recent Moves", href: "/recent-moves" },
     ],
   },
+  // Player Card is its own header link, after League (owner, 2026-10-19), not a Tools item: it is the
+  // page opened most, and a player lookup is not a "tool" on a roster.
+  { kind: "link", label: "Player Card", href: "/player" },
   {
     kind: "menu",
     label: "Tools",
@@ -130,7 +133,6 @@ export const FLAT_NAV: NavEntry[] = [
      * needing to be re-added by hand.
      */
     items: [
-      { label: "Player Card", href: "/player" },
       { label: "Player Value", href: "/player-value" },
       { label: "Trade Simulator", href: "/trade" },
       { label: "Compare", href: "/compare" },

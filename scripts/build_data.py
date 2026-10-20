@@ -522,12 +522,17 @@ def build_player_pool(app):
     Powers Player Value, Player Card, Compare and the Trade Simulator — all four are
     views over this one list, so it is exported once rather than per page.
     """
+    # Player pages show REAL numbers: this season's once a player has played, LAST season's
+    # until then (owner, 2026-10-19). The matchup engine keeps the projection blend.
+    D.PRIOR_MODE = "last_season"
     try:
         pool = app.get_player_pool(config.ESPN_LEAGUE_ID, config.ESPN_SEASON_YEAR,
                                    config.ESPN_S2, config.ESPN_SWID)
     except Exception as exc:  # noqa: BLE001
         print(f"  ! player pool failed: {exc}")
         return []
+    finally:
+        D.PRIOR_MODE = "projection"
     ages = fetch_player_ages()
     # Career history, for the draft projection's minutes/availability split. Fetched for
     # the whole pool in one threaded pass rather than per player on demand.
@@ -594,6 +599,10 @@ def build_player_pool(app):
         # it a 9-game line and a 74-game line look equally certain, and the projection
         # has no basis on which to regress one harder than the other.
         row["gp"] = int(_round(p.get("GP", 0), 0) or 0)
+        # Which season the line is from, for the player pages' label: "current" (this
+        # season), "last" (2025-26 shown until he plays), "proj" (rookie projection).
+        if p.get("StatSource"):
+            row["statSource"] = p["StatSource"]
         bio = ages.get(row["playerId"]) or {}
         if "age" in bio:
             row["age"] = bio["age"]
@@ -1446,7 +1455,7 @@ def main():
     injury = D.get_espn_injury_data()
 
     league_period = S.current_matchup_period_effective(league)
-    season_over = datetime.now().date() > date(2026, 4, 5)
+    season_over = datetime.now().date() > config.SEASON_END_DATE  # 2026-27: Apr 4, 2027
     period = args.period if args.period is not None else (
         23 if season_over else league_period
     )
@@ -1569,7 +1578,12 @@ def main():
     (OUT_DIR / "league.json").write_text(blob, encoding="utf-8")
     print(f"wrote {OUT_DIR / 'league.json'}")
 
-    if box_scores:
+    # ALWAYS written, even with no games yet: skipping it when empty let a previous
+    # league's box scores survive the 2026-27 switch and render under the new teams'
+    # names (team ids are reused across leagues). Last season's file is archived at
+    # public/data/archive/boxscores-2026.json.
+    if True:
+        box_scores = box_scores or {}
         box_blob = json.dumps(
             {"generatedAt": payload["generatedAt"], "stats": STATS, "periods": box_scores},
             separators=(",", ":"),

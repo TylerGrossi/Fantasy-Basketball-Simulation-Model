@@ -31,6 +31,7 @@ from datetime import date
 import pandas as pd
 
 from config import ESPN_LEAGUE_ID, ESPN_S2, ESPN_SEASON_YEAR, ESPN_SWID
+from config import PLAYOFF_SCORING_DATES  # the season's calendar lives in config.py
 from data import (
     build_stat_df,
     connect_to_espn,
@@ -42,10 +43,8 @@ from simulation import calculate_league_stats, simulate_playoff_probabilities
 # ESPN-style periods: regular weeks 1-19, then playoff matchup 1 = periods 20-21,
 # matchup 2 = 22-23.
 REGULAR_SEASON_WEEKS = 19
-PLAYOFF_SCORING_DATES = (
-    (date(2026, 3, 9), date(2026, 3, 22)),   # Playoff matchup 1 (two-week scoring)
-    (date(2026, 3, 23), date(2026, 4, 5)),   # Playoff matchup 2
-)
+# PLAYOFF_SCORING_DATES comes from config.py (2026-27: Mar 8-21 and Mar 22-Apr 4, 2027).
+# 2025-26's were Mar 9-22 and Mar 23-Apr 5, 2026.
 
 
 def resolve_view_window(view_period, year):
@@ -519,7 +518,7 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId",
              "LineupSlot", "AcquisitionType", "Value",
              "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD", "TW",
-             "GP"] + _AGG_KEYS
+             "GP", "StatSource"] + _AGG_KEYS
             + [c for c in season_df.columns
                if c.startswith("L30_") or c.startswith("L15_")])
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))

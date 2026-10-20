@@ -32,15 +32,49 @@ GEMINI_API_KEY = GEMINI_API_KEY.strip()
 # ESPN connection - non-secret identifiers (the auth cookies are in config_secrets.py).
 # The sidebar only asks which team to analyze.
 # =============================================================================
-ESPN_LEAGUE_ID = 267469544
-ESPN_SEASON_YEAR = 2026
+# 2026-27: "Connell 2026-2027 Fantasy" (8 teams), switched over 2026-10-19 after the draft.
+ESPN_LEAGUE_ID = 1330923505
+ESPN_SEASON_YEAR = 2027
 
-# The league the DRAFT GUIDE is built for — deliberately separate from the league above,
-# which the rest of the app still reads (the 2025-26 season it describes is over, and this
-# is a different league the owner joined for 2026-27). Read by scripts/build_draft.py and,
-# via make_env.py, by app/api/draft for the live pick feed. Same ESPN account, same cookies.
-DRAFT_LEAGUE_ID = 1330923505
-DRAFT_SEASON_YEAR = 2027
+# The previous league ("RIP THIBS", 2025-26, team VJ Maxx). Its season is now HISTORY:
+# it lives in public/data/career.json (scripts/build_history.py finds every league by SWID)
+# and its last full export is archived at public/data/archive/league-2026.json.
+PREVIOUS_LEAGUE_ID = 267469544
+PREVIOUS_SEASON_YEAR = 2026
+
+# The draft league — the same league as above since the 2026-27 switch. Kept as its own
+# setting because the Draft Guide/Recap (scripts/build_draft.py, app/api/draft) read it.
+DRAFT_LEAGUE_ID = ESPN_LEAGUE_ID
+DRAFT_SEASON_YEAR = ESPN_SEASON_YEAR
+
+# =============================================================================
+# 2026-27 calendar, read off ESPN (2026-10-19): scoring day n = opening night + (n-1),
+# verified against all 174 days of the NBA schedule ESPN publishes. Matchups run Mon-Sun
+# (week 1 starts on opening night, a Tuesday). The All-Star break (Feb 19-24) makes week
+# 18 a two-week matchup. Playoff rounds are two weeks each (matchups 20 and 21; the app
+# calls them periods 20-21 and 22-23). The fantasy season ends on scoring day 167.
+# =============================================================================
+from datetime import date as _date, timedelta as _td
+
+SEASON_OPENING_DATE = _date(2026, 10, 20)
+SEASON_END_DATE = _date(2027, 4, 4)            # last playoff scoring day (day 167)
+ALL_STAR_DOUBLE_WEEK = 18                      # the regular-season matchup that spans 2 weeks
+PLAYOFF_SCORING_DATES = (
+    (_date(2027, 3, 8), _date(2027, 3, 21)),   # playoff round 1 (two-week scoring)
+    (_date(2027, 3, 22), _date(2027, 4, 4)),   # playoff round 2
+)
+
+
+def regular_week_dates(week):
+    """(start, end) of regular-season matchup `week` (1-19) in the 2026-27 calendar."""
+    first_monday = _date(2026, 10, 26)
+    if week <= 1:
+        return SEASON_OPENING_DATE, first_monday - _td(days=1)
+    start = first_monday + _td(days=7 * (week - 2))
+    if week > ALL_STAR_DOUBLE_WEEK:
+        start += _td(days=7)
+    end = start + _td(days=13 if week == ALL_STAR_DOUBLE_WEEK else 6)
+    return start, end
 
 # =============================================================================
 # Gemini (Google AI Studio) - powers the free-tier AI Assistant page. The API key lives in
@@ -75,8 +109,8 @@ GEMINI_MODELS = [
 GEMINI_MODEL = GEMINI_MODELS[0]  # kept for any single-model reference
 
 # Team analyzed by default (pre-selected in the sidebar dropdown).
-DEFAULT_TEAM_NAME = "VJ Maxx"
-DEFAULT_TEAM_ID = 6
+DEFAULT_TEAM_NAME = "Team Grossi"   # 2026-27 league (was "VJ Maxx", id 6, in 2025-26)
+DEFAULT_TEAM_ID = 8
 
 # Maximum players whose stats can count on any single day (league setting)
 MAX_PLAYERS_PER_DAY = 10

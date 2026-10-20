@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildLineup, type DraftLeague, type LiveDraft } from "@/lib/draft";
 import { gradeTeams, letterFor, type MockState } from "@/lib/mockDraft";
 import { scoreProjections, type DraftRow, type ProjectedLine } from "@/lib/projection";
-import { roundWeight, type SeasonResult } from "@/lib/seasonSim";
+import { HIGHLIGHT_MAX_ROUND, roundWeight, type SeasonResult } from "@/lib/seasonSim";
 
 /**
  * The Recap tab: who won the draft.
@@ -34,7 +34,7 @@ type Source = "live" | "mock";
  * then "not the 70s"). Later picks are fliers that get dropped, so a big ADP gap there
  * says little — a 23-pick "steal" at #101, or Herro at #76.
  */
-export const HIGHLIGHT_MAX_ROUND = 8;
+// HIGHLIGHT_MAX_ROUND (8) lives in lib/seasonSim.ts, shared with lib/draftSeason.ts.
 
 // roundWeight lives in lib/seasonSim.ts (the server-side season route needs it too).
 

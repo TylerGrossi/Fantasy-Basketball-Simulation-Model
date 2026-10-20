@@ -77,6 +77,13 @@ const GAMES_PER_WEEK = 82 / 25;
 export const SIM_VERSION = 3;
 
 /**
+ * Best pick / biggest reach consider rounds 1-8 only (owner, 2026-10-19): later picks are
+ * fliers that get dropped, so a big ADP gap there says little. Shared by the Recap page
+ * and lib/draftSeason.ts.
+ */
+export const HIGHLIGHT_MAX_ROUND = 8;
+
+/**
  * How much a drafted pick counts, by round: flat through round 2, then about -0.075 a
  * round, floored at 0.25. Late picks get dropped, so they count less (owner, 2026-10-19).
  * Shared by the Recap page and app/api/draft/season.

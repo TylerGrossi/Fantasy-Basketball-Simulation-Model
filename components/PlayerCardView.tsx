@@ -314,6 +314,10 @@ function PlayerDetail({
           <div className="pd-id">
             <div className="pd-name">{p.name}</div>
             <div className="pd-team">{ident}</div>
+            {p.statSource === "last" && (
+              <div className="pd-source">2025-26 stats until he plays in 2026-27</div>
+            )}
+            {p.statSource === "proj" && <div className="pd-source">2026-27 projection (no NBA stats yet)</div>}
             <div className="pd-status">
               <span>
                 <span className={`pd-dot ${sev || "ok"}`} />

@@ -7,6 +7,8 @@
  * It was labelling that option with `league.teams[0]` instead, which showed
  * "Default (Born In The Darkness)" while every page was in fact analysing VJ Maxx.
  *
- * Mirrors DEFAULT_TEAM_NAME in engine/config.py.
+ * Mirrors DEFAULT_TEAM_NAME in engine/config.py. 2026-27: "Team Grossi" in the new league
+ * (it was "VJ Maxx" in 2025-26). The team cookie stores a NAME, so an old "VJ Maxx" cookie
+ * matches nothing in the new league and falls back here, never to a wrong team.
  */
-export const DEFAULT_TEAM_NAME = "VJ Maxx";
+export const DEFAULT_TEAM_NAME = "Team Grossi";

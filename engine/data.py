@@ -181,6 +181,14 @@ def get_week_date_range(week, year):
     Map fantasy matchup period to (start_date, end_date).
     NBA season typically starts ~Oct 21. Week 1 = Oct 21-27, Week 2 = Oct 28-Nov 3, etc.
     """
+    # The configured season uses its real calendar (config.regular_week_dates: opening
+    # night, the All-Star double week). Other years keep the old approximation.
+    import config as _cfg
+    if year == getattr(_cfg, "ESPN_SEASON_YEAR", None) and hasattr(_cfg, "regular_week_dates"):
+        try:
+            return _cfg.regular_week_dates(int(week))
+        except (ValueError, TypeError):
+            return None, None
     season_year = year - 1 if year >= 2020 else year
     try:
         start = date(season_year, 10, 21) + timedelta(days=(week - 1) * 7)
@@ -593,31 +601,128 @@ def get_current_totals(matchup, team_id):
 _REAL_POSITIONS = {"PG", "SG", "SF", "PF", "C", "G", "F"}
 
 
+PRIOR_GAMES = 8  # weight of the preseason projection, in games (see build_stat_df)
+
+# What a "_total" frame falls back on for a player with no games THIS season:
+#   "projection"  - blend in ESPN's preseason projection (matchup engine: best predictor)
+#   "last_season" - show his actual LAST-season line instead, unblended (player pages:
+#                   owner, 2026-10-19 — "show 25-26 until there is new data for 26-27").
+# scripts/build_data.py switches it to "last_season" around the player-pool build only.
+PRIOR_MODE = "projection"
+_LAST_SEASON = None
+
+
+def _last_season_lines():
+    """playerId -> last season's per-game line, from the archived previous-season export."""
+    global _LAST_SEASON
+    if _LAST_SEASON is None:
+        _LAST_SEASON = {}
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            import config as _cfg
+            f = (_Path(__file__).resolve().parent.parent / "public" / "data" / "archive"
+                 / f"league-{getattr(_cfg, 'PREVIOUS_SEASON_YEAR', 0)}.json")
+            for p in _json.loads(f.read_text(encoding="utf8"))["seasonData"].get("playerPool", []):
+                if p.get("playerId") is not None and (p.get("gp") or 0) > 0:
+                    _LAST_SEASON[int(p["playerId"])] = p
+        except Exception:  # noqa: BLE001 — optional: no archive, no fallback
+            pass
+    return _LAST_SEASON
+_DRAFT_EST = None
+
+
+def _draft_estimates():
+    """DD/TW per game from public/data/draft.json (ESPN projects neither), by playerId."""
+    global _DRAFT_EST
+    if _DRAFT_EST is None:
+        _DRAFT_EST = {}
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            f = _Path(__file__).resolve().parent.parent / "public" / "data" / "draft.json"
+            for l in _json.loads(f.read_text(encoding="utf8")).get("lines", []):
+                if l.get("playerId") is not None:
+                    _DRAFT_EST[int(l["playerId"])] = {
+                        "DD": float(l["proj"].get("DD", 0)), "TW": float(l["proj"].get("TW", 0))}
+        except Exception:  # noqa: BLE001 — estimates are optional
+            pass
+    return _DRAFT_EST
+
+
+def _projected_per_game(p, year):
+    """ESPN's preseason per-game projection for `year`, plus DD/TW estimates, or None."""
+    block = (p.stats.get(f"{year}_projected", {}) or {})
+    tot = block.get("total", {}) or {}
+    avg = block.get("avg", {}) or {}
+    gp = safe_num(tot.get("GP", avg.get("GP", 0)))
+    if gp > 0 and tot:
+        out = {k: safe_num(v) / gp for k, v in tot.items() if k != "GP"}
+    elif avg:
+        out = {k: safe_num(v) for k, v in avg.items() if k != "GP"}
+    else:
+        return None
+    est = _draft_estimates().get(int(getattr(p, "playerId", -1) or -1))
+    if est:
+        out.setdefault("DD", est["DD"])
+        out.setdefault("TW", est["TW"])
+    return out
+
+
 def build_stat_df(roster, period_key, label, fantasy_team_name, year):
     """Build per-game stats dataframe from ESPN roster data."""
     rows = []
+    # EARLY-SEASON BLEND (2026-27 switch): the season-total frame mixes in ESPN's
+    # preseason projection, weighted as PRIOR_GAMES games, so a player with no games yet
+    # still has a line and one hot game does not set a player's average. Actual stats
+    # dominate as games accrue (8 games = 50/50, 40 games = 83% actual). Only the
+    # "_total" frame does this; the last-30/15/7 splits stay pure actuals.
+    use_prior = str(period_key).endswith("_total")
     for p in roster:
         period = p.stats.get(period_key, {}) or {}
         avg_block = period.get("avg", {}) or {}
         total_block = period.get("total", {}) or {}
         gp = safe_num(total_block.get("GP", avg_block.get("GP", 0)))
-        if gp <= 0:
-            continue
-        # TOTALS OVER GP, not ESPN's `avg` block.
-        #
-        # The avg block is not trustworthy on the short splits: for a player with a single
-        # game in the window ESPN returns real totals (GP 1, MIN 32, PTS 29) alongside an
-        # avg block of all zeros. Preferring it turned 29 points in a game into a line of
-        # noughts for 29 players on last-30 and 44 on last-15, every one of them landing at
-        # the same -9.4 "value" — the value of producing nothing.
-        #
-        # Totals divided by games is the same arithmetic ESPN's avg block claims to do, and
-        # it agrees with it wherever the avg block is populated (Jokic: 1799/65 = 27.68,
-        # exactly the avg block's figure).
-        if total_block:
-            per_game = {k: (safe_num(v) / gp) for k, v in total_block.items() if k != "GP"}
+        per_game = {}
+        if gp > 0:
+            # TOTALS OVER GP, not ESPN's `avg` block: on short splits ESPN returns real
+            # totals alongside an all-zero avg block (see git history for the incident).
+            if total_block:
+                per_game = {k: (safe_num(v) / gp) for k, v in total_block.items() if k != "GP"}
+            else:
+                per_game = {k: safe_num(v) for k, v in avg_block.items()}
+            per_game["DD"] = safe_num(total_block.get("DD", 0)) / gp
+            per_game["TW"] = safe_num(total_block.get("TW", 0)) / gp
+        source = "current" if gp > 0 else ""
+        if use_prior and PRIOR_MODE == "last_season":
+            # Player pages: real numbers only. This season's actuals once he has played;
+            # until then his LAST-season line; a rookie (no last season) his projection.
+            if gp <= 0:
+                last = _last_season_lines().get(int(getattr(p, "playerId", -1) or -1))
+                if last:
+                    per_game = {k: float(last.get(k, 0) or 0) for k in
+                                ("FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST",
+                                 "STL", "BLK", "TO", "PTS", "DD", "TW")}
+                    gp = float(last.get("gp", 0) or 0)
+                    source = "last"
+                else:
+                    prior = _projected_per_game(p, year)
+                    if not prior:
+                        continue
+                    per_game = prior
+                    source = "proj"
+            prior = None
         else:
-            per_game = {k: safe_num(v) for k, v in avg_block.items()}
+            prior = _projected_per_game(p, year) if use_prior else None
+            if prior:
+                source = "blend" if gp > 0 else "proj"
+        if prior:
+            w = gp / (gp + PRIOR_GAMES) if gp > 0 else 0.0
+            keys = set(prior) | set(per_game)
+            per_game = {k: w * per_game.get(k, 0.0) + (1 - w) * prior.get(k, 0.0) for k in keys}
+        elif not per_game:
+            # No line from any source (no games, no last season, no projection).
+            continue
         fgm = per_game.get("FGM", 0)
         fga = per_game.get("FGA", 0)
         ftm = per_game.get("FTM", 0)
@@ -652,8 +757,10 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
             "BLK": per_game.get("BLK", 0),
             "TO": per_game.get("TO", 0),
             "PTS": per_game.get("PTS", 0),
-            "DD": safe_num(total_block.get("DD", 0)) / gp,
-            "TW": safe_num(total_block.get("TW", 0)) / gp,
+            "DD": per_game.get("DD", 0),
+            "TW": per_game.get("TW", 0),
+            # Where this line came from: current | blend | proj | last (see PRIOR_MODE).
+            "StatSource": source,
         })
     return pd.DataFrame(rows)
 

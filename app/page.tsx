@@ -151,7 +151,7 @@ const DIRECTORY: Array<{
   {
     section: "Season",
     items: [
-      { href: "/season", name: "Season Summary", desc: "Final standings, champion, all-play and schedule luck." },
+      { href: "/season", name: "Season Summary", desc: "Standings, all-play and schedule luck, updated weekly." },
       { href: "/season-stats", name: "Season Stats", desc: "Category leaders and every player's line." },
       { href: "/league-stats", name: "League Stats", desc: "Every team's totals and where each of them ranks." },
       // Sits with the other league-wide numbers, matching its move out of Tools in the nav.
@@ -162,9 +162,9 @@ const DIRECTORY: Array<{
     ],
   },
   {
-    // Same order as the Tools dropdown in lib/nav.ts — the directory is meant to mirror
-    // the header, so a page is in the same place whichever one you read.
-    section: "Tools",
+    // Mirrors the header: Player Card (its own header link since 2026-10-19) leads, then
+    // the Tools dropdown in lib/nav.ts order, so a page is in the same place either way.
+    section: "Players & Tools",
     items: [
       { href: "/player", name: "Player Card", desc: "Profile, value, recent form, last ten games." },
       { href: "/player-value", name: "Player Value", desc: "Rostered players and free agents by 9-cat value." },
@@ -172,6 +172,7 @@ const DIRECTORY: Array<{
       { href: "/compare", name: "Compare", desc: "Two players side by side, category by category." },
       { href: "/lineup", name: "Lineup", desc: "Who to start, and what each swap costs you." },
       { href: "/cheat-sheets", name: "Cheat Sheets", desc: "Ranked columns per position, with your roster shaded." },
+      { href: "/draft-recap", name: "Draft Recap", desc: "Who won the draft: grades, playoff odds, steals and reaches." },
       { href: "/playoffs", name: "Playoff Odds", desc: "Championship probabilities from a simulated bracket.", inSeason: true },
       { href: "/agent", name: "Agent", desc: "Ask about the league in plain English." },
     ],

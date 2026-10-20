@@ -333,6 +333,10 @@ def line_from(avg, keys):
 
 def build():
     league_json = json.loads((ROOT / "public" / "data" / "league.json").read_text(encoding="utf8"))
+    # LAST season's player pool (teams, late-season splits) comes from the 2025-26 archive:
+    # since the 2026-27 switch, league.json describes the new season.
+    archive = ROOT / "public" / "data" / "archive" / "league-2026.json"
+    last_season = json.loads(archive.read_text(encoding="utf8")) if archive.exists() else league_json
     stat_ids = {k: int(v) for k, v in league_json["statIds"].items()}
     keys = {k: stat_ids[k] for k in COUNTING}
 
@@ -380,10 +384,10 @@ def build():
 
     # Last season's team, from the old league's pool, to name trades/signings.
     old_team = {p["playerId"]: team_abbrev(p["nbaTeam"])
-                for p in league_json["seasonData"].get("playerPool", []) if p.get("playerId")}
+                for p in last_season["seasonData"].get("playerPool", []) if p.get("playerId")}
     # Late-season splits (last30 / last15 per-game lines) from the 2025-26 export, for the
     # "recent" adjustment below.
-    old_splits = {p["playerId"]: p for p in league_json["seasonData"].get("playerPool", [])
+    old_splits = {p["playerId"]: p for p in last_season["seasonData"].get("playerPool", [])
                   if p.get("playerId")}
 
     rows = []

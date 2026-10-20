@@ -437,6 +437,29 @@ automatically. (A few literals remain at the top of the file for `create_scorebo
 and opacity blends.) Two-series chart colors (you vs. opponent) were validated for
 colorblind separation — keep that in mind if you re-hue them.
 
+## 2026-27 SWITCH (2026-10-19) — read this first
+
+The app now runs on the **2026-27 league** ("Connell 2026-2027 Fantasy", id 1330923505,
+8 teams, owner = "Team Grossi", team 8). 2025-26 ("RIP THIBS", VJ Maxx) is HISTORY:
+`career.json` (History pages) and `public/data/archive/league-2026.json` +
+`archive/boxscores-2026.json` (its last full export). Things that changed:
+
+- `engine/config.py` holds the league ids AND the 2026-27 calendar (opening night Oct 20,
+  week 18 = All-Star double week, playoffs Mar 8-21 / Mar 22-Apr 4, SEASON_END_DATE).
+  `data.get_week_date_range` and `season.PLAYOFF_SCORING_DATES` read it; `build_data`'s
+  season_over uses SEASON_END_DATE. Next season: update these, archive league.json.
+- Early season: `data.build_stat_df` blends ESPN's preseason projection into "_total"
+  frames (PRIOR_GAMES = 8) so the matchup engine has lines before games are played. The
+  PLAYER POOL instead shows real numbers (`PRIOR_MODE = "last_season"`): this season's
+  actuals once a player has played, else his 2025-26 line from the archive, else (rookie)
+  the projection — tagged `statSource`, labelled on the Player Card.
+- `boxscores.json` is ALWAYS rewritten (empty before games) — a stale previous-league file
+  rendered under the new team names.
+- Vercel needs `ESPN_LEAGUE_ID`/`ESPN_SEASON_YEAR` (and `DRAFT_*`) set to the new league.
+- Draft: Draft Guide (/draft, hidden) and Draft Recap (/draft-recap); the Recap's season
+  simulation runs server-side and is cached (`lib/draftSeason.ts`, shared with the Agent's
+  draft_recap / draft_results / player_projection tools).
+
 ## Current product state (season is over)
 
 The 2025–26 season ended **April 5, 2026** (`SEASON_END_DATE`, the last playoff

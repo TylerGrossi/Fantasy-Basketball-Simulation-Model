@@ -81,7 +81,7 @@ export async function POST(req: Request) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       try {
         for await (const evt of runAgent({
-          system: systemInstruction(me.name, league.seasonOver, league.season),
+          system: systemInstruction(me.name, league.seasonOver, league.season, league.categories),
           history,
           tools: TOOL_DECLARATIONS,
           runTool,
