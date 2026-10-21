@@ -1,14 +1,12 @@
 import Link from "next/link";
-import PlayerLink from "@/components/PlayerLink";
 import {
-  categoryRecord,
-  periodLabel,
-  scoreboardRows,
-  winProbability,
-  type LeagueData,
-  type Matchup,
-  type PoolPlayer,
-} from "@/lib/league";
+  LiveCategoryEdge,
+  LiveMatchupsProvider,
+  LiveMyWeek,
+  LiveScoresCard,
+} from "@/components/LeagueHomeLive";
+import PlayerLink from "@/components/PlayerLink";
+import { periodLabel, type LeagueData, type PoolPlayer } from "@/lib/league";
 import { loadLeague, loadWeek0, myTeam, type Week0Rank } from "@/lib/loadLeague";
 import { timeLabel } from "@/lib/moves";
 import { playerStatus } from "@/lib/playerPool";
@@ -36,13 +34,19 @@ const FA_SLOTS = ["PG", "SG", "SF", "PF", "C"] as const;
 export default async function Page() {
   const league = await loadLeague();
   const me = await myTeam(league);
-  const teamName = new Map(league.teams.map((t) => [t.id, t.name]));
   const pool = league.seasonData.playerPool ?? [];
   // Week 0 of the power rankings: the opening-day value snapshot (see loadWeek0).
   const draft = await loadWeek0();
 
-  const scores = league.matchups.map((m) => scoreLine(league, m));
-  const mine = scores.find((s) => s.homeId === me.id || s.awayId === me.id);
+  // What the live components need: the matchups (with rosters) and the projection
+  // inputs, without the player pool or the season tables — this crosses to the browser.
+  const liveLeague: LeagueData = {
+    ...league,
+    freeAgents: [],
+    periodResults: [],
+    seasonData: {},
+  };
+  const teamNames = Object.fromEntries(league.teams.map((t) => [t.id, t.name]));
 
   /*
    * A DASHBOARD: all three columns end on the same line. The columns stretch to the
@@ -51,16 +55,24 @@ export default async function Page() {
    * as the card's own space rather than a gap.
    */
   return (
+    <LiveMatchupsProvider league={liveLeague} meId={me.id}>
     <div className="lh">
       <div className="lh-col lh-left">
-        <MyTeamCard league={league} meId={me.id} score={mine} teamName={teamName} />
-        <ScoresCard scores={scores} meId={me.id} teamName={teamName} label={periodLabel(league)} />
+        <MyTeamCard league={league} meId={me.id}>
+          <LiveMyWeek league={liveLeague} meId={me.id} teamNames={teamNames} />
+        </MyTeamCard>
+        <LiveScoresCard
+          league={liveLeague}
+          meId={me.id}
+          teamNames={teamNames}
+          label={periodLabel(league)}
+        />
         <FreeAgentsCard pool={pool} />
       </div>
 
       <div className="lh-col lh-main">
         <HeaderCard league={league} />
-        <CategoryEdgeCard league={league} meId={me.id} teamName={teamName} />
+        <LiveCategoryEdge league={liveLeague} meId={me.id} teamNames={teamNames} />
         <MovesCard league={league} pool={pool} />
         <TrendsCard pool={pool} />
       </div>
@@ -71,61 +83,24 @@ export default async function Page() {
         <TitleOddsCard league={league} meId={me.id} />
       </div>
     </div>
+    </LiveMatchupsProvider>
   );
 }
-
-/* ------------------------------------------------------------------ scores */
-
-interface ScoreLine {
-  homeId: number;
-  awayId: number;
-  /** Category record from the HOME side: [won, lost, tied]. */
-  home: [number, number, number];
-  /** Model's P(home wins the matchup), from banked totals + remaining projection. */
-  homeWin: number;
-}
-
-function scoreLine(league: LeagueData, m: Matchup): ScoreLine {
-  const rec = categoryRecord(scoreboardRows(league, m.home.current, m.away.current));
-  const p = winProbability(league, m.home, m.away, m.home.current, m.away.current);
-  return {
-    homeId: m.homeId,
-    awayId: m.awayId,
-    home: [rec.win, rec.loss, rec.tie],
-    homeWin: p.win + p.tie / 2,
-  };
-}
-
-/** The same matchup seen from `teamId`'s side. */
-function sideOf(s: ScoreLine, teamId: number) {
-  const isHome = s.homeId === teamId;
-  const [w, l, t] = s.home;
-  return {
-    oppId: isHome ? s.awayId : s.homeId,
-    rec: isHome ? `${w}-${l}-${t}` : `${l}-${w}-${t}`,
-    oppRec: isHome ? `${l}-${w}-${t}` : `${w}-${l}-${t}`,
-    win: isHome ? s.homeWin : 1 - s.homeWin,
-  };
-}
-
-const pct = (p: number) => `${Math.round(p * 100)}%`;
 
 /* ----------------------------------------------------------------- my team */
 
 function MyTeamCard({
   league,
   meId,
-  score,
-  teamName,
+  children,
 }: {
   league: LeagueData;
   meId: number;
-  score?: ScoreLine;
-  teamName: Map<number, string>;
+  /** The live "This week vs" box (LiveMyWeek). */
+  children?: React.ReactNode;
 }) {
   const team = league.teams.find((t) => t.id === meId);
   if (!team) return null;
-  const side = score ? sideOf(score, meId) : null;
 
   // Your roster's injury report: anyone ESPN lists as other than active.
   const m = league.matchups.find((x) => x.homeId === meId || x.awayId === meId);
@@ -144,15 +119,7 @@ function MyTeamCard({
         </div>
       </div>
 
-      {side && (
-        <Link href="/scoreboard" className="lh-me-week">
-          <span className="lh-me-week-l">This week vs {teamName.get(side.oppId)}</span>
-          <span className="lh-me-week-r">
-            <b className="mono">{side.rec}</b>
-            <span className="lh-me-win mono">{pct(side.win)} to win</span>
-          </span>
-        </Link>
-      )}
+      {children}
 
       {hurt.length > 0 && (
         <div className="lh-inj">
@@ -171,61 +138,6 @@ function MyTeamCard({
         <Link href="/lineup">Lineup</Link>
         <Link href="/scoreboard">Matchup</Link>
       </div>
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------ scores */
-
-function ScoresCard({
-  scores,
-  meId,
-  teamName,
-  label,
-}: {
-  scores: ScoreLine[];
-  meId: number;
-  teamName: Map<number, string>;
-  label: string;
-}) {
-  return (
-    <section className="lh-card">
-      <h2 className="lh-h">
-        Scores <span className="lh-h-note">{label}</span>
-      </h2>
-      {scores.length === 0 ? (
-        <p className="caption">No matchups this week.</p>
-      ) : (
-        <div className="lh-scores">
-          {scores.map((s) => {
-            const home = sideOf(s, s.homeId);
-            const away = sideOf(s, s.awayId);
-            return (
-              <div
-                className={`lh-game${s.homeId === meId || s.awayId === meId ? " lh-game-you" : ""}`}
-                key={`${s.homeId}-${s.awayId}`}
-              >
-                {[
-                  { id: s.homeId, side: home },
-                  { id: s.awayId, side: away },
-                ].map(({ id, side }) => (
-                  <div className="lh-game-row" key={id}>
-                    <span className={`lh-game-team${id === meId ? " you" : ""}`}>
-                      {teamName.get(id)}
-                    </span>
-                    <span className="lh-game-win mono">{pct(side.win)}</span>
-                    <span className="lh-game-rec mono">{side.rec}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <p className="lh-foot-note">Category record · model&rsquo;s chance to win the week</p>
-      <Link href="/scoreboard" className="lh-more">
-        Full scoreboard
-      </Link>
     </section>
   );
 }
@@ -466,58 +378,6 @@ function StandingsCard({ league, meId }: { league: LeagueData; meId: number }) {
 }
 
 /* ----------------------------------------------------------- category edge */
-
-/**
- * Your matchup, one row per category: the model's chance you take it, from banked totals
- * plus the rest of the week's projection. The Scoreboard shows the totals; this is the
- * part of /matchup that fits on a front page — where the week will be won and lost.
- */
-function CategoryEdgeCard({
-  league,
-  meId,
-  teamName,
-}: {
-  league: LeagueData;
-  meId: number;
-  teamName: Map<number, string>;
-}) {
-  const m = league.matchups.find((x) => x.homeId === meId || x.awayId === meId);
-  if (!m) return null;
-  const home = m.homeId === meId;
-  const [you, opp] = home ? [m.home, m.away] : [m.away, m.home];
-  const out = winProbability(league, you, opp, you.current, opp.current);
-  const oppName = teamName.get(home ? m.awayId : m.homeId) ?? "Opponent";
-
-  return (
-    <section className="lh-card">
-      <h2 className="lh-h">
-        Your Matchup by Category{" "}
-        <span className="lh-h-note">
-          vs {oppName} · {out.expectedCats.toFixed(1)} cats expected
-        </span>
-      </h2>
-      <div className="lh-edge">
-        {league.categories.map((cat, i) => {
-          const p = out.categoryProbs[i] ?? 0.5;
-          const tone = p >= 0.6 ? "up" : p <= 0.4 ? "dn" : "even";
-          return (
-            <div className="lh-edge-row" key={cat}>
-              <span className="lh-edge-cat">{cat}</span>
-              {/* Your share of the track in cobalt, theirs in clay — the app's you/them pair. */}
-              <span className="lh-edge-track" aria-hidden="true">
-                <span className="lh-edge-you" style={{ width: `${p * 100}%` }} />
-              </span>
-              <span className={`lh-edge-p mono ${tone}`}>{pct(p)}</span>
-            </div>
-          );
-        })}
-      </div>
-      <Link href="/scoreboard#odds" className="lh-more">
-        Full matchup model
-      </Link>
-    </section>
-  );
-}
 
 /* ------------------------------------------------------------- free agents */
 

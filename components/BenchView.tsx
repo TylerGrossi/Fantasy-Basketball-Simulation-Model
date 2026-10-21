@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import type { LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeBench } from "@/lib/bench";
-import { useLiveTotals } from "@/lib/useLiveTotals";
+import { useLiveSides } from "@/lib/useLiveSides";
 import LiveBadge from "./LiveBadge";
 import PlayerLink from "./PlayerLink";
 
@@ -27,16 +27,8 @@ export default function BenchView({
   teamId,
   live: liveEnabled = true,
 }: Props) {
-  const you = isHome ? matchup.home : matchup.away;
-  const opp = isHome ? matchup.away : matchup.home;
-
-  const live = useLiveTotals(
-    league.period,
-    teamId,
-    you.current,
-    opp.current,
-    liveEnabled
-  );
+  // Live totals + each side's projection minus the games those totals already count.
+  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
 
   const youMoments = useMemo(() => sideMoments(you, live.you), [you, live.you]);
   const oppMoments = useMemo(() => sideMoments(opp, live.opp), [opp, live.opp]);

@@ -31,9 +31,11 @@ const BANDS: Array<[string, number, number]> = [
   ["var(--good)", 0.6, 1],
 ];
 
+/** A point on the arc, ROUNDED (see n2): every tick and the needle are drawn from these. */
 function polar(t: number, radius: number): [number, number] {
   const ang = Math.PI * t;
-  return [CX - radius * Math.cos(ang), CY - radius * Math.sin(ang)];
+  const r = (v: number) => Math.round(v * 100) / 100;
+  return [r(CX - radius * Math.cos(ang)), r(CY - radius * Math.sin(ang))];
 }
 
 export default function WinProbabilityGauge({ percent }: { percent: number }) {
@@ -49,7 +51,7 @@ export default function WinProbabilityGauge({ percent }: { percent: number }) {
         viewBox="0 0 360 212"
         width="100%"
         role="img"
-        aria-label={`Win probability ${pct.toFixed(0)} percent`}
+        aria-label={`Win probability ${pct.toFixed(1)} percent`}
         style={{ display: "block" }}
       >
         <path d={TRACK} fill="none" stroke="var(--line)" strokeWidth={BAND_W} strokeOpacity={0.5} />
@@ -103,7 +105,7 @@ export default function WinProbabilityGauge({ percent }: { percent: number }) {
             fill: "var(--ink)",
           }}
         >
-          {pct.toFixed(0)}%
+          {pct.toFixed(1)}%
         </text>
       </svg>
     </div>

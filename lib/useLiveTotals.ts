@@ -2,14 +2,44 @@
 
 import { useEffect, useState } from "react";
 import type { StatVector } from "./probability";
+import type { BoxLine } from "./loadLeague";
 
 export type LiveState = "snapshot" | "live" | "error" | "frozen";
 
 export interface LiveTotals {
+  /** Banked totals INCLUDING games in progress — what ESPN's scoreboard shows. */
   you: StatVector;
   opp: StatVector;
   state: LiveState;
   fetchedAt: string | null;
+  /** Live per-player matchup lines (Box Score). Null until the first fetch lands. */
+  youLines: BoxLine[] | null;
+  oppLines: BoxLine[] | null;
+  /**
+   * Players with a game played today. The models take those games out of the projection
+   * (lib/liveAdjust.ts) so live totals + projection count each game once. Null until the
+   * first fetch lands.
+   */
+  youPlayed: string[] | null;
+  oppPlayed: string[] | null;
+  /**
+   * Share of each NBA team's game today still to play (1 = not started, 0 = final), keyed
+   * by `PlayerRow.nbaTeam`. Lets the models take an in-progress game only PARTLY out of
+   * the projection. Null until the first fetch, or if ESPN's NBA scoreboard failed.
+   */
+  gameLeft: Record<string, number> | null;
+  /** Every matchup this period, live (League Home's scores). Null until the first fetch. */
+  games: LiveGame[] | null;
+}
+
+/** One matchup's live totals, from the same request. */
+export interface LiveGame {
+  homeId: number;
+  awayId: number;
+  home: StatVector;
+  away: StatVector;
+  homePlayedToday: string[];
+  awayPlayedToday: string[];
 }
 
 /**
@@ -43,6 +73,21 @@ export function useLiveTotals(
   const [opp, setOpp] = useState<StatVector>(snapshotOpp);
   const [state, setState] = useState<LiveState>(enabled ? "snapshot" : "frozen");
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [extra, setExtra] = useState<{
+    youLines: BoxLine[] | null;
+    oppLines: BoxLine[] | null;
+    youPlayed: string[] | null;
+    oppPlayed: string[] | null;
+    gameLeft: Record<string, number> | null;
+    games: LiveGame[] | null;
+  }>({
+    youLines: null,
+    oppLines: null,
+    youPlayed: null,
+    oppPlayed: null,
+    gameLeft: null,
+    games: null,
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -53,6 +98,14 @@ export function useLiveTotals(
       if (r.ok) {
         setYou(r.you);
         setOpp(r.opp);
+        setExtra({
+          youLines: r.youLines,
+          oppLines: r.oppLines,
+          youPlayed: r.youPlayed,
+          oppPlayed: r.oppPlayed,
+          gameLeft: r.gameLeft,
+          games: r.games,
+        });
         setFetchedAt(r.fetchedAt);
         setState("live");
       } else {
@@ -61,13 +114,24 @@ export function useLiveTotals(
     });
   }, [period, teamId, refreshMs, enabled]);
 
-  return { you, opp, state, fetchedAt };
+  return { you, opp, state, fetchedAt, ...extra };
 }
 
 /* ------------------------------------------------------------ shared poller */
 
 type LiveResult =
-  | { ok: true; you: StatVector; opp: StatVector; fetchedAt: string }
+  | {
+      ok: true;
+      you: StatVector;
+      opp: StatVector;
+      youLines: BoxLine[] | null;
+      oppLines: BoxLine[] | null;
+      youPlayed: string[] | null;
+      oppPlayed: string[] | null;
+      gameLeft: Record<string, number> | null;
+      games: LiveGame[] | null;
+      fetchedAt: string;
+    }
   | { ok: false };
 
 interface Poller {
@@ -104,7 +168,20 @@ function subscribe(
         if (!Array.isArray(data.you) || !Array.isArray(data.opp)) {
           throw new Error("malformed response");
         }
-        r = { ok: true, you: data.you, opp: data.opp, fetchedAt: new Date().toLocaleTimeString() };
+        r = {
+          ok: true,
+          you: data.you,
+          opp: data.opp,
+          // Null when an older deploy of the route does not send them.
+          youLines: Array.isArray(data.youLines) ? data.youLines : null,
+          oppLines: Array.isArray(data.oppLines) ? data.oppLines : null,
+          youPlayed: Array.isArray(data.youPlayedToday) ? data.youPlayedToday : null,
+          oppPlayed: Array.isArray(data.oppPlayedToday) ? data.oppPlayedToday : null,
+          gameLeft:
+            data.gameLeft && typeof data.gameLeft === "object" ? data.gameLeft : null,
+          games: Array.isArray(data.games) ? data.games : null,
+          fetchedAt: new Date().toLocaleTimeString(),
+        };
       } catch {
         r = { ok: false };
       }

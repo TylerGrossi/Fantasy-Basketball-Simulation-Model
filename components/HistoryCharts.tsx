@@ -173,7 +173,7 @@ export function CareerArcChart({ log }: { log: CareerLog }) {
                 className={`hc-hit hc-arc-hit${edge}`}
                 style={{
                   left: `${(i / seasons.length) * 100}%`,
-                  width: `${100 / seasons.length}%`,
+                  width: `${(100 / seasons.length).toFixed(2)}%`,
                 }}
               >
                 <span
@@ -258,7 +258,7 @@ export function ManagerRangeChart({ log }: { log: CareerLog }) {
               <span className="hc-hit hc-rank-track">
                 <span
                   className="hc-range"
-                  style={{ left: `${left}%`, width: `${width}%`, background: c }}
+                  style={{ left: `${left.toFixed(2)}%`, width: `${width.toFixed(2)}%`, background: c }}
                 />
                 <span
                   className="hc-dot hc-dot-inline"

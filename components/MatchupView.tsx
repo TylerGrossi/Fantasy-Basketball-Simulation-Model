@@ -10,10 +10,12 @@ import {
   sideMoments,
 } from "@/lib/league";
 import { matchupOutcome, projectionPercentile } from "@/lib/probability";
-import { gradeForecast, type Forecast } from "@/lib/predictions";
-import { useLiveTotals } from "@/lib/useLiveTotals";
+import { gradeForecast, type Forecast, type WinProbPoint } from "@/lib/predictions";
+import { formatGames } from "@/lib/liveAdjust";
+import { useLiveSides } from "@/lib/useLiveSides";
 import LiveBadge from "./LiveBadge";
 import WinProbabilityGauge from "./WinProbabilityGauge";
+import WinProbChart from "./WinProbChart";
 import CategoryAnalysis from "./CategoryAnalysis";
 import ScoreDistribution from "./ScoreDistribution";
 
@@ -32,6 +34,11 @@ interface Props {
    * with the recorder in place. See lib/predictions.ts.
    */
   forecast?: Forecast | null;
+  /**
+   * Win probability at each recorded moment this week (pre-week forecast + every data
+   * refresh), for the chart; the live value is added as "now". See winProbHistory.
+   */
+  history?: WinProbPoint[];
   youName: string;
   oppName: string;
   /**
@@ -70,17 +77,10 @@ export default function MatchupView({
   oppAbbrev,
   forecast = null,
   embedded = false,
+  history = [],
 }: Props) {
-  const you = isHome ? matchup.home : matchup.away;
-  const opp = isHome ? matchup.away : matchup.home;
-
-  const live = useLiveTotals(
-    league.period,
-    teamId,
-    you.current,
-    opp.current,
-    liveEnabled
-  );
+  // Live totals + each side's projection minus the games those totals already count.
+  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
 
   const youMoments = useMemo(() => sideMoments(you, live.you), [you, live.you]);
   const oppMoments = useMemo(() => sideMoments(opp, live.opp), [opp, live.opp]);
@@ -141,11 +141,13 @@ export default function MatchupView({
           good={outcome.expectedCats >= nCats / 2}
         />
         <Metric label="Most likely" value={`${mostLikely.k}-${nCats - mostLikely.k}`} />
-        <Metric label="Your games left" value={String(yourGames)} />
-        <Metric label="Opp games left" value={String(oppGames)} />
+        <Metric label="Your games left" value={formatGames(yourGames)} />
+        <Metric label="Opp games left" value={formatGames(oppGames)} />
       </div>
 
-      <div className="two-up">
+      {/* Three across: now (gauge), how it could end (distribution), how it got here
+          (the week's chart). Stacks on narrower screens. */}
+      <div className="three-up">
         <div>
           <h2>Win probability</h2>
           <WinProbabilityGauge percent={outcome.win * 100} />
@@ -153,6 +155,15 @@ export default function MatchupView({
         <div>
           <h2>Score distribution</h2>
           <ScoreDistribution distribution={outcome.distribution} total={nCats} />
+        </div>
+        <div>
+          <h2>This week</h2>
+          <WinProbChart
+            points={history}
+            liveWin={live.state === "live" ? outcome.win : null}
+            weekStart={league.weekSchedule?.start}
+            weekEnd={league.weekSchedule?.end}
+          />
         </div>
       </div>
 

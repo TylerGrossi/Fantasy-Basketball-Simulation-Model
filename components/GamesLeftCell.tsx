@@ -1,4 +1,5 @@
 import { scheduledGames, type PlayerRow } from "@/lib/league";
+import { formatGames } from "@/lib/liveAdjust";
 
 /**
  * The GL cell: the player's scheduled games, plus — when the daily slot cap means some of
@@ -13,13 +14,13 @@ export default function GamesLeftCell({ player }: { player: PlayerRow }) {
   const counted = player.gamesLeft;
   return (
     <td className="num">
-      {scheduled}
-      {counted < scheduled && (
+      {formatGames(scheduled)}
+      {counted < scheduled - 0.05 && (
         <span
           className="gl-counted"
-          title={`${scheduled} games on his schedule, ${counted} counted — on the other nights more of your roster plays than you have starting slots, and higher scorers take them.`}
+          title={`${formatGames(scheduled)} games on his schedule, ${formatGames(counted)} counted — on the other nights more of your roster plays than you have starting slots, and higher scorers take them.`}
         >
-          {" "}({counted})
+          {" "}({formatGames(counted)})
         </span>
       )}
     </td>

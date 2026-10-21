@@ -2531,8 +2531,8 @@ table.sheet.lu-table .lu-pos {
 }
 .lp-dir {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 2.4rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2rem;
 }
 .lp-dir-col h3 {
   font-size: 0.74rem;
@@ -2544,8 +2544,13 @@ table.sheet.lu-table .lu-pos {
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--line);
 }
+/* Every entry the same height — a name and at most two lines of description — so the rows
+   line up across the four columns even where a description is short. */
 .lp-dir-item {
   display: block;
+  box-sizing: border-box;
+  height: 4.55rem;
+  overflow: hidden;
   padding: 0.6rem 0.7rem;
   margin: 0 -0.7rem;
   border-radius: 8px;
@@ -2560,7 +2565,10 @@ table.sheet.lu-table .lu-pos {
 }
 .lp-dir-item:hover .lp-dir-name { color: var(--cobalt); }
 .lp-dir-desc {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   margin-top: 0.1rem;
   font-size: 0.82rem;
   line-height: 1.45;
@@ -2952,66 +2960,11 @@ table.sheet.lu-table .lu-pos {
   .pv-f-gp { flex: 0 1 auto; }
 }
 
-/* -------- Player Value: the ranked card list -------- */
-.pv-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.pv-item {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  overflow: hidden;
-}
-.pv-item[open] { background: var(--surface-2); }
-.pv-sum {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1.1rem;
-  cursor: pointer;
-  list-style: none;
-  overflow: hidden;
-}
-.pv-sum::-webkit-details-marker { display: none; }
-/* The value bar sits BEHIND the row's text rather than beside it — a full-width row of
-   its own would double the list's height for one number. */
-.pv-fill { position: absolute; left: 0; top: 0; bottom: 0; opacity: 0.14; z-index: 0; }
-.pv-sum > span:not(.pv-fill),
-.pv-detail { position: relative; z-index: 1; }
-.pv-rank {
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--ink-3);
-  min-width: 2rem;
-}
-.pv-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-weight: 600;
-  color: var(--ink);
-  font-size: 1.02rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pv-meta { color: var(--ink-3); font-size: 0.64rem; white-space: nowrap; }
-.pv-val {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 1.05rem;
-  min-width: 3.2rem;
-  text-align: right;
-}
-.pv-trend { font-size: 0.68rem; min-width: 0.9rem; text-align: center; }
-.pv-trend.up { color: var(--good); }
-.pv-trend.down { color: var(--bad); }
-.pv-trend.flat { color: var(--ink-3); }
+/* -------- Player Value: the ranked table -------- */
+/* Name plus its injury badge on one line; the name column is sticky (sticky-2). */
+.pv-tname { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
 
-/* Expanded ESPN-style player card: headshot + identity, then the stat tiles. */
-.pv-detail { padding: 0.5rem 1.1rem 1rem; }
+/* Player identity block: headshot + name. Shared by Player Card, Compare and Draft Board. */
 .pv-card { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.9rem; }
 .pv-shot {
   flex: 0 0 auto;
@@ -3037,30 +2990,6 @@ table.sheet.lu-table .lu-pos {
 /* Meta text can shrink; the badges keep their own nowrap group so they never overlap. */
 .pv-cmeta { flex: 0 1 auto; min-width: 0; }
 .pv-badges { display: inline-flex; align-items: center; gap: 0.3rem; flex: 0 0 auto; }
-.pv-statgrid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 0.5rem;
-  margin-bottom: 0.7rem;
-}
-.pv-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background: var(--card);
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  padding: 0.55rem 0.2rem;
-}
-.pv-stat-l { font-size: 0.64rem; color: var(--ink-3); letter-spacing: 0.03em; }
-.pv-stat-v {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 1.15rem;
-  color: var(--ink);
-  margin-top: 0.2rem;
-}
-
 /* Availability badge + FA chip. */
 .pv-badge {
   flex: 0 0 auto;
@@ -4128,30 +4057,10 @@ table.sheet.lu-table .lu-pos {
   }
   .ms { width: 100%; min-width: 0 !important; }
   .ms-panel { max-width: none; }
-  /* The list collapses to one bordered box, the way the phone layout had it. */
-  .pv-list {
-    gap: 0;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    overflow: hidden;
-    background: var(--card);
-  }
-  .pv-item { border: 0; border-bottom: 1px solid var(--line-2); border-radius: 0; }
-  .pv-item:last-child { border-bottom: none; }
-  .pv-sum { padding: 0.5rem 0.7rem; }
-  .pv-name { font-size: 0.9rem; }
-  .pv-val { font-size: 0.92rem; min-width: 2.8rem; }
-  .pv-rank { font-size: 0.72rem; min-width: 1.5rem; }
-  .pv-detail { padding: 0.5rem 0.7rem 0.7rem; }
   .pv-card { gap: 0.7rem; margin-bottom: 0.6rem; }
   .pv-shot { width: 58px; height: 58px; }
   .pv-cname { font-size: 1rem; }
   .pv-csub { font-size: 0.72rem; margin-top: 0.2rem; }
-  /* Eight tiles on one row is unreadable on a phone — two rows of four. */
-  .pv-statgrid { grid-template-columns: repeat(4, 1fr); gap: 0.35rem; }
-  .pv-stat { padding: 0.3rem 0.1rem; border-radius: 6px; }
-  .pv-stat-l { font-size: 0.56rem; }
-  .pv-stat-v { font-size: 0.82rem; margin-top: 0.1rem; }
 
   .pv-cmp-player .pv-shot { width: 68px; height: 68px; }
   .pv-cmp-name { font-size: 1rem; }
@@ -4611,6 +4520,17 @@ table.sheet.lu-table .lu-pos {
   line-height: 1.3;
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+
+/* -------- Schedule: projected score for an unfinished week -------- */
+/* Muted and tagged, so a projection never reads as a result. */
+.sched-proj { color: var(--ink-3); white-space: nowrap; }
+.sched-proj-tag {
+  font-family: var(--sans, inherit);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 0.4rem;
 }
 
 /* -------- Season History: the weekly all-play bar -------- */
@@ -8048,3 +7968,42 @@ table.sheet.ws-table tfoot td {
   top: 0;
   z-index: 2;
 }
+
+/* Win probability over the week (WinProbChart). Recessive axes in mono, the tooltip a
+   small card that follows the hovered point. */
+.wpc { position: relative; margin: 0.4rem 0 1.4rem; }
+.wpc svg { display: block; overflow: visible; }
+.wpc-ax { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); }
+.wpc-tip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 12px));
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 2px 8px rgba(27, 29, 34, 0.08);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.wpc-tip b { color: var(--ink); font-size: 0.9rem; }
+
+/* Matchup Odds' top row: gauge | score distribution | the week's win-probability chart.
+   The chart is the narrowest of the three; two columns, then one, as the screen shrinks. */
+.three-up {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 0.9fr);
+  gap: 2rem;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .three-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  .three-up { grid-template-columns: 1fr; gap: 0.5rem; }
+}
+.three-up .wpc { margin: 0.4rem 0 0; }

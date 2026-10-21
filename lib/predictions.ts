@@ -124,3 +124,75 @@ export function gradeForecast(
   if (favoured === "even" || tied) return { favoured, right: null };
   return { favoured, right: favoured === "you" ? won : !won };
 }
+
+/* --------------------------------------------------- win probability over the week */
+
+/** One recorded reading of every matchup (scripts/build_data.py record_winprob_reading). */
+export interface WinProbReading {
+  at: string;
+  games: Array<{
+    homeId: number;
+    awayId: number;
+    homeCur: number[];
+    awayCur: number[];
+    homeMu: number[];
+    homeVar: number[];
+    awayMu: number[];
+    awayVar: number[];
+  }>;
+}
+
+export interface WinProbLog {
+  schemaVersion: number;
+  stats?: string[];
+  categories?: string[];
+  lowerIsBetter?: string[];
+  periods: Record<string, WinProbReading[]>;
+}
+
+/** One point on the week's win-probability chart. */
+export interface WinProbPoint {
+  /** ISO timestamp of the reading. */
+  at: string;
+  /** P(you win the week), 0-1 — the gauge's number at that moment. */
+  win: number;
+  /** "forecast" = the pre-week forecast; "reading" = a data refresh mid-week. */
+  kind: "forecast" | "reading";
+}
+
+/**
+ * Your win probability at every recorded moment of a period: the pre-week forecast, then
+ * each data refresh's reading. Computed here with the same engine as the gauge
+ * (`matchupOutcome` on banked + projected moments), so a point on the chart is exactly
+ * what the page showed at that time.
+ */
+export function winProbHistory(
+  forecastLog: PreWeekLog | null,
+  log: WinProbLog | null,
+  meta: LeagueMeta,
+  period: number,
+  teamId: number
+): WinProbPoint[] {
+  const points: WinProbPoint[] = [];
+  const pre = forecastFor(forecastLog, meta, period, teamId);
+  if (pre) points.push({ at: pre.recordedAt, win: pre.win, kind: "forecast" });
+
+  const scoreMeta: LeagueMeta = {
+    stats: log?.stats ?? meta.stats,
+    categories: log?.categories ?? meta.categories,
+    lowerIsBetter: log?.lowerIsBetter ?? meta.lowerIsBetter,
+  };
+  for (const r of log?.periods?.[String(period)] ?? []) {
+    const g = r.games.find((x) => x.homeId === teamId || x.awayId === teamId);
+    if (!g) continue;
+    const home = g.homeId === teamId;
+    const side = (mu: number[], vr: number[], cur: number[]): Moments => ({
+      mu: mu.map((v, i) => v + (cur[i] ?? 0)),
+      var: vr.slice(),
+    });
+    const you = home ? side(g.homeMu, g.homeVar, g.homeCur) : side(g.awayMu, g.awayVar, g.awayCur);
+    const opp = home ? side(g.awayMu, g.awayVar, g.awayCur) : side(g.homeMu, g.homeVar, g.homeCur);
+    points.push({ at: r.at, win: matchupOutcome(scoreMeta, you, opp).win, kind: "reading" });
+  }
+  return points.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}

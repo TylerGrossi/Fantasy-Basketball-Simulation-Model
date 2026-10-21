@@ -1760,6 +1760,20 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
 
     rec_sum = {tid: [0.0, 0.0, 0.0] for tid in team_ids}
 
+    # Per remaining matchup, from the SAME simulated weeks as the odds, keyed
+    # (team_id, week): how often each (cat wins, cat losses) score came up, plus matchup
+    # wins/ties. The Schedule page's projected score (the most likely one) and win % for
+    # unplayed weeks come from here, so they cannot disagree with the playoff odds built
+    # from those very weeks.
+    week_acc = {}
+
+    def _note_week(week, tid, cw, cl, ct):
+        acc = week_acc.setdefault((tid, week), [{}, 0, 0, 0])
+        acc[0][(cw, cl)] = acc[0].get((cw, cl), 0) + 1
+        acc[1] += 1 if cw > cl else 0
+        acc[2] += 1 if cw == cl else 0
+        acc[3] += 1
+
     for _ in range(effective_sims):
         wins = {tid: team_id_to_record[tid][0] for tid in team_ids}
         losses = {tid: team_id_to_record[tid][1] for tid in team_ids}
@@ -1770,6 +1784,8 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             proj_home = projected.get(home_id, {}).get(week, {})
             proj_away = projected.get(away_id, {}).get(week, {})
             hw, aw, ct = _simulate_matchup_cats(proj_home, proj_away, matchup_variance)
+            _note_week(week, home_id, hw, aw, ct)
+            _note_week(week, away_id, aw, hw, ct)
             if each_category:
                 wins[home_id] += hw
                 losses[home_id] += aw
@@ -1913,6 +1929,19 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             # Mean final regular-season record across the simulated seasons, on the same
             # scale as `record` (categories in an each-category league).
             "proj_record": tuple(round(x / total_sims, 1) for x in rec_sum[tid]),
+            # week -> the most likely category score [W, L] and P(win) / P(tie) for each
+            # simulated matchup week. The user's current week is sampled from the live
+            # matchup distribution, not simulated here, so it is absent; that week's
+            # projection comes from the matchup snapshot instead.
+            "proj_weeks": {
+                week: {
+                    "score": list(max(acc[0].items(), key=lambda kv: kv[1])[0]),
+                    "win": round(acc[1] / acc[3], 4),
+                    "tie": round(acc[2] / acc[3], 4),
+                }
+                for (t_id, week), acc in sorted(week_acc.items(), key=lambda kv: kv[0][1])
+                if t_id == tid and acc[3]
+            },
             "championship_finalist_team_ids": championship_finalist_team_ids,
         })
     if return_projected:

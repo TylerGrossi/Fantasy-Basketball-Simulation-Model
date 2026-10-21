@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LeagueData, PlayerRow } from "@/lib/league";
 import { playerStatus } from "@/lib/playerPool";
+import { dayLabel, etDate } from "@/lib/dates";
 import PlayerLink from "./PlayerLink";
 
 /**
@@ -16,8 +17,6 @@ import PlayerLink from "./PlayerLink";
  * leave out — the "(1)" beside a GL of 3 on the other tables.
  */
 
-const ET = "America/New_York";
-const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function WeekSchedule({
   league,
@@ -33,7 +32,7 @@ export default function WeekSchedule({
   // straddle midnight, and a hydration mismatch over a highlight is not worth it.
   const [today, setToday] = useState<string | null>(null);
   useEffect(() => {
-    setToday(new Date().toLocaleDateString("en-CA", { timeZone: ET }));
+    setToday(etDate());
   }, []);
 
   const days = useMemo(() => (sched ? dayRange(sched.start, sched.end) : []), [sched]);
@@ -195,10 +194,4 @@ function dayRange(start: string, end: string): string[] {
     d.setUTCDate(d.getUTCDate() + 1);
   }
   return out;
-}
-
-/** "Tue 10/20". */
-function dayLabel(iso: string): string {
-  const d = new Date(`${iso}T12:00:00Z`);
-  return `${DOW[d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { etDate } from "@/lib/dates";
 
 /**
  * The LIVE half of the two-tier data split: current banked category totals for one
@@ -70,6 +71,116 @@ function vectorFrom(
   });
 }
 
+/** ESPN stat ids that are not scored categories but the box score shows. */
+const GP_ID = "42";
+const MIN_ID = "40";
+
+/**
+ * One side's player lines for the matchup, live: ESPN's `rosterForMatchupPeriod` lists
+ * each player whose stats counted, with his matchup-to-date totals (statSplitTypeId 5,
+ * scoringPeriodId 0). Same shape as an exported `BoxLine`, so the Box Score table reads
+ * either without knowing which.
+ */
+function boxLines(side: any, meta: StatMeta) {
+  const entries: any[] = side?.rosterForMatchupPeriod?.entries ?? [];
+  return entries.map((e) => {
+    const player = e?.playerPoolEntry?.player ?? {};
+    const line = (player.stats ?? []).find(
+      // scoringPeriodId 0 = the matchup-to-date line (verified against ESPN's response:
+      // today's single-day line carries today's period id instead).
+      (s: any) => s?.statSourceId === 0 && s?.statSplitTypeId === 5 && s?.scoringPeriodId === 0
+    );
+    const st = line?.stats ?? {};
+    const gp = Number(st[GP_ID] ?? 0) || 0;
+    return {
+      name: String(player.fullName ?? ""),
+      gp,
+      min: Number(st[MIN_ID] ?? 0) || 0,
+      ...(gp ? { v: meta.stats.map((s) => Number(st[String(meta.statIds[s])] ?? 0) || 0) } : {}),
+    };
+  });
+}
+
+/** ESPN's NBA-scoreboard abbreviations that differ from the fantasy data's (`nbaTeam`). */
+const SITE_TO_FANTASY: Record<string, string> = {
+  NY: "NYK", PHI: "PHL", SA: "SAS", GS: "GSW", NO: "NOP", UTAH: "UTA", WSH: "WAS", PHX: "PHO",
+};
+
+/**
+ * How much of each team's game today is still to be played, from ESPN's NBA scoreboard:
+ * 1 before tip-off, 0 once final, and in between the share of regulation left on the clock
+ * (overtime counts as all but done). This is what lets the page take an IN-PROGRESS game
+ * only partly out of the projection — its banked stats are in the live totals, the rest of
+ * it is still to come.
+ */
+async function todaysGameLeft(): Promise<Record<string, number> | null> {
+  try {
+    const day = etDate().replaceAll("-", "");
+    const res = await fetch(
+      `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${day}`,
+      { cache: "no-store", signal: AbortSignal.timeout(10_000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const out: Record<string, number> = {};
+    for (const e of data?.events ?? []) {
+      const comp = e?.competitions?.[0];
+      const st = comp?.status ?? {};
+      const state = st?.type?.state;
+      let left = 1;
+      if (state === "post") left = 0;
+      else if (state === "in") {
+        const period = Number(st.period) || 1;
+        const clock = clockSeconds(st);
+        left =
+          period > 4
+            ? 0.02
+            : Math.max(0, Math.min(1, ((4 - period) * 720 + clock) / 2880));
+      }
+      for (const c of comp?.competitors ?? []) {
+        const ab = String(c?.team?.abbreviation ?? "");
+        if (ab) out[SITE_TO_FANTASY[ab] ?? ab] = left;
+      }
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Seconds left in the current period. ESPN's numeric `clock` first; else `displayClock`,
+ * which is "M:SS" for most of a period but SECONDS ONLY ("45.3") in its last minute — read
+ * as minutes, that made a game look barely started for the final minute of every quarter
+ * and pushed the unplayed share (and the opponent's games left) back up (2026-10-20).
+ */
+function clockSeconds(st: any): number {
+  if (typeof st?.clock === "number" && Number.isFinite(st.clock)) return st.clock;
+  const s = String(st?.displayClock ?? "0:00");
+  if (s.includes(":")) {
+    const [m, sec] = s.split(":").map(Number);
+    return (m || 0) * 60 + (sec || 0);
+  }
+  return Number(s) || 0;
+}
+
+/** Names of the players on one side with a game played (GP > 0) in today's scoring period. */
+function playedToday(side: any): string[] {
+  const entries: any[] = side?.rosterForCurrentScoringPeriod?.entries ?? [];
+  return entries
+    .filter((e) =>
+      (e?.playerPoolEntry?.player?.stats ?? []).some(
+        // A single DAY's line (scoringPeriodId > 0), never the matchup-to-date one (0):
+        // a player who played Monday is not "played today".
+        (s: any) =>
+          s?.statSplitTypeId === 5 &&
+          Number(s?.scoringPeriodId ?? 0) > 0 &&
+          Number(s?.stats?.[GP_ID] ?? 0) > 0
+      )
+    )
+    .map((e) => String(e?.playerPoolEntry?.player?.fullName ?? ""));
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const period = Number(url.searchParams.get("period"));
@@ -94,13 +205,32 @@ export async function GET(request: Request) {
 
   const endpoint =
     `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/${season}` +
-    `/segments/0/leagues/${leagueId}?view=mMatchupScore&view=mScoreboard` +
-    `&scoringPeriodId=0&matchupPeriodId=${period}`;
+    // mBoxscore adds each side's `rosterForMatchupPeriod`: per-player totals for the
+    // matchup, games in progress included — the live Box Score tab.
+    `/segments/0/leagues/${leagueId}?view=mMatchupScore&view=mScoreboard&view=mBoxscore` +
+    // NO scoringPeriodId: ESPN then defaults to TODAY's, which is what makes it include
+    // the per-player rosters (rosterForMatchupPeriod / rosterForCurrentScoringPeriod).
+    // `scoringPeriodId=0` — what this used to send — silently drops both.
+    `&matchupPeriodId=${period}`;
 
   try {
+    // Started alongside the fantasy request, not after it: the two are independent.
+    const gameLeftPromise = todaysGameLeft();
     const res = await fetch(endpoint, {
       headers: {
         accept: "application/json",
+        // Only the matchups near this period: mBoxscore carries every roster, so without
+        // the filter the response is the whole season's schedule with players attached.
+        // A small window, not just [period]: the app's period can run AHEAD of ESPN's
+        // matchupPeriodId (playoff rounds span two scoring periods), and the fallbacks
+        // below (currentMatchupPeriod, the team's latest) need those matchups present.
+        "x-fantasy-filter": JSON.stringify({
+          schedule: {
+            filterMatchupPeriodIds: {
+              value: [period - 3, period - 2, period - 1, period].filter((p) => p >= 1),
+            },
+          },
+        }),
         // Private leagues need the auth cookies; public ones ignore them.
         ...(s2 && swid ? { cookie: `espn_s2=${s2}; SWID=${swid}` } : {}),
       },
@@ -157,8 +287,53 @@ export async function GET(request: Request) {
         teamId,
         oppId: theirs?.teamId ?? null,
         stats: meta.stats,
-        you: vectorFrom(myside?.cumulativeScore?.scoreByStat, meta),
-        opp: vectorFrom(theirs?.cumulativeScore?.scoreByStat, meta),
+        /*
+         * `cumulativeScoreLive`, not `cumulativeScore` (fixed 2026-10-20). ESPN only rolls
+         * a day's games into `cumulativeScore` once that scoring period is final, so on a
+         * game night it still read 0-0 while ESPN's own page showed 35 points to 13 — the
+         * "live" scoreboard was really end-of-yesterday. The Live field carries the banked
+         * totals PLUS games in progress. Falls back to the settled one if Live is absent.
+         */
+        you: vectorFrom(
+          (myside?.cumulativeScoreLive ?? myside?.cumulativeScore)?.scoreByStat,
+          meta
+        ),
+        opp: vectorFrom(
+          (theirs?.cumulativeScoreLive ?? theirs?.cumulativeScore)?.scoreByStat,
+          meta
+        ),
+        // Per-player box lines, same shape as boxscores.json (BoxLine).
+        youLines: boxLines(myside, meta),
+        oppLines: boxLines(theirs, meta),
+        // Who has already played TODAY (game finished or under way). The page takes those
+        // games out of the projection, so live totals + projection count each game once.
+        // Share of each team's game TODAY still to play (1 = not started, 0 = final),
+        // keyed by the fantasy data's team abbreviation. Null if the NBA scoreboard
+        // could not be read; the page then falls back to `*PlayedToday`.
+        gameLeft: await gameLeftPromise,
+        /*
+         * EVERY matchup this period, live — for League Home's scores card. The response
+         * already holds all of them (the filter is by period, not team), so this costs
+         * nothing extra. Totals include games in progress, like `you`/`opp`.
+         */
+        games: schedule
+          .filter((m) => m?.matchupPeriodId === game.matchupPeriodId)
+          .map((m) => ({
+            homeId: m?.home?.teamId ?? null,
+            awayId: m?.away?.teamId ?? null,
+            home: vectorFrom(
+              (m?.home?.cumulativeScoreLive ?? m?.home?.cumulativeScore)?.scoreByStat,
+              meta
+            ),
+            away: vectorFrom(
+              (m?.away?.cumulativeScoreLive ?? m?.away?.cumulativeScore)?.scoreByStat,
+              meta
+            ),
+            homePlayedToday: playedToday(m?.home),
+            awayPlayedToday: playedToday(m?.away),
+          })),
+        youPlayedToday: playedToday(myside),
+        oppPlayedToday: playedToday(theirs),
         fetchedAt: new Date().toISOString(),
       },
       // Small shared cache window: repeated loads within a minute reuse the response,

@@ -369,6 +369,14 @@ function PlayerDetail({
               <div className="pd-source">2025-26 stats until he plays in 2026-27</div>
             )}
             {p.statSource === "proj" && <div className="pd-source">2026-27 projection (no NBA stats yet)</div>}
+            {/* Under 10 games this season the line is a blend (engine/data.py
+                BLEND_FULL_GAMES): say how much of it is this season. */}
+            {p.statSource === "blend" && (
+              <div className="pd-source">
+                {Math.round(Math.min(p.gp ?? 0, 10) * 10)}% 2026-27, rest 2025-26 — all
+                2026-27 from 10 games
+              </div>
+            )}
             <div className="pd-status">
               <span>
                 <span className={`pd-dot ${sev || "ok"}`} />

@@ -1028,6 +1028,105 @@ def record_preweek_predictions(payload, check_only=False):
     return existing
 
 
+def _reading_window_ok():
+    """
+    Is this a moment when the export's banked totals and its projection describe the same
+    games? (True, "") if so, else (False, reason).
+
+    The projection counts every game from TODAY (Eastern) on, and the banked side is ESPN's
+    SETTLED total. They match only when:
+      - it is after 6 AM Eastern — ESPN settles the previous night overnight, and a run in
+        the small hours has last night's games in neither half (a 12:25 AM run read 81%
+        against 72% live, 2026-10-21); and
+      - none of today's games has tipped off — once one has, its stats are in neither the
+        settled total nor (correctly) the projection's remainder.
+    The scheduled 7 AM and 5:30 PM runs pass; a manual late-night run, or a scheduled one
+    GitHub started after tip-off, is skipped rather than logging a wrong point.
+    """
+    now = datetime.now(ZoneInfo("America/New_York"))
+    if now.hour < 6:
+        return False, f"{now:%H:%M} ET is before ESPN settles last night's games"
+    try:
+        r = D.HTTP.get(
+            "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+            f"?dates={now:%Y%m%d}",
+            timeout=10,
+        )
+        r.raise_for_status()
+        started = [
+            e for e in r.json().get("events", [])
+            if ((e.get("competitions") or [{}])[0].get("status", {}).get("type", {})
+                .get("state")) != "pre"
+        ]
+    except Exception as exc:  # noqa: BLE001 — unknown is not safe to record
+        return False, f"could not read today's NBA scoreboard ({exc})"
+    if started:
+        return False, f"{len(started)} of today's games have already tipped off"
+    return True, ""
+
+
+def record_winprob_reading(payload, check_only=False):
+    """
+    Append this export's reading of every matchup to public/data/winprob-log.json, for the
+    Current Matchup page's win-probability-over-the-week chart (owner, 2026-10-21).
+
+    Like predictions.json, it ACCUMULATES: league.json describes only the present, and a
+    chart of how the odds moved needs the past. It records the MOMENTS (banked totals plus
+    the rest-of-week projection's mean and variance per category, per side), not a
+    percentage, so the probability is computed by the one engine in lib/probability.ts —
+    the same number the gauge shows, never a second implementation of the maths.
+
+    The banked totals and the projection are a consistent pair as of the export: the
+    banked side is ESPN's settled total (completed days) and the projection counts every
+    game from the export's day on.
+
+    A reading identical to the period's previous one is NOT appended: the refresh workflow
+    deploys only when a data file really changes, and a log that grew on every run would
+    turn each no-op refresh into a commit and a deploy.
+    """
+    path = OUT_DIR / "winprob-log.json"
+    try:
+        log = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        log = {"schemaVersion": 1, "periods": {}}
+    periods = log.setdefault("periods", {})
+
+    matchups = payload.get("matchups") or []
+    if payload.get("seasonOver") or not matchups:
+        print("  win-prob log: skipped — no live week in this export")
+        return log
+    ok, why = _reading_window_ok()
+    if not ok:
+        print(f"  win-prob log: skipped — {why}")
+        return log
+
+    games = [
+        {
+            "homeId": m["homeId"], "awayId": m["awayId"],
+            "homeCur": m["home"].get("current") or [], "awayCur": m["away"].get("current") or [],
+            "homeMu": m["home"]["projMu"], "homeVar": m["home"]["projVar"],
+            "awayMu": m["away"]["projMu"], "awayVar": m["away"]["projVar"],
+        }
+        for m in matchups
+    ]
+    readings = periods.setdefault(str(payload.get("period")), [])
+    if readings and readings[-1].get("games") == games:
+        print("  win-prob log: unchanged since the last reading — not appended")
+        return log
+    readings.append({"at": payload.get("generatedAt"), "games": games})
+    log["stats"] = payload.get("stats")
+    log["categories"] = payload.get("categories")
+    log["lowerIsBetter"] = payload.get("lowerIsBetter")
+
+    if check_only:
+        print(f"  win-prob log: WOULD append reading {len(readings)} — --check, nothing written")
+        return log
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(log, separators=(",", ":")), encoding="utf-8")
+    print(f"  win-prob log: appended reading {len(readings)} for period {payload.get('period')}")
+    return log
+
+
 def fetch_draft_ranks(season_year):
     """
     ESPN's own published rankings for the season being DRAFTED FOR, plus live ADP.
@@ -1478,6 +1577,13 @@ def build_season(league, injury_data, sims=8000):
                 # columns then, so it has to ship.
                 "seedProbs": {str(k): _round(v, 3)
                               for k, v in (r.get("seed_probs") or {}).items()},
+                # Matchup period -> most likely category score [W, L] and win / tie
+                # probability for each unplayed week, from the same simulated seasons
+                # (Schedule page). ~19 small entries per team.
+                "projWeeks": {str(int(w)): {"score": [int(x) for x in v["score"]],
+                                            "win": _round(v["win"], 4),
+                                            "tie": _round(v["tie"], 4)}
+                              for w, v in (r.get("proj_weeks") or {}).items()},
             } for r in rows]
             fin = rows[0].get("championship_finalist_team_ids")
             if fin:
@@ -1640,6 +1746,7 @@ def main():
     # The forecast log, BEFORE the --check early return: under --check it reports what it
     # would do without writing, which is the only way to see the decision on a dry run.
     record_preweek_predictions(payload, check_only=args.check)
+    record_winprob_reading(payload, check_only=args.check)
 
     if args.check:
         print("--check: nothing written")

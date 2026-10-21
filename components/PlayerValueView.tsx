@@ -2,33 +2,64 @@
 
 import { useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
-import GameLog from "./GameLog";
 import MultiSelect from "./MultiSelect";
 import FilterBar from "./FilterBar";
 import PlayerLink from "./PlayerLink";
 import StatusBadge from "./StatusBadge";
+import SortableTable, { type SortCol, type SortRow } from "./SortableTable";
 import {
   gpFor,
   MIN_GP_OPTIONS,
   POSITION_ORDER,
   VALUE_BASES,
   VALUE_COL,
-  TREND_COL,
   type ValueBasis,
-  headshotUrl,
   playerStatus,
-  stocks,
 } from "@/lib/playerPool";
 
 /**
- * Every rostered player plus the top free agents, as the ranked value list the Streamlit
- * page showed — one tappable row each, opening an ESPN-style card.
+ * Every rostered player plus the top free agents, ranked by value, as one sortable table.
  *
- * The row's translucent bar is the player's value as a share of the largest in the pool
- * (cobalt positive, clay negative), so the list reads as a distribution and not just a
- * column of numbers. All filtering is client-side over the exported pool — instant at
- * ~290 players, no server round trip.
+ * Was a list of tappable rows with a translucent value bar behind each and the stats
+ * hidden in an expandable card (owner asked for a table, 2026-10-20): comparing two
+ * players meant opening both. Now every number is a column and any column sorts. The
+ * card's headshot and game log live on the Player Card, which the name links to.
+ *
+ * All filtering is client-side over the exported pool — instant at ~290 players.
  */
+
+/** Per-game counting stats, in the expanded card's order plus the league's extra cats. */
+const STATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "DD", "TO"];
+
+const COLS: SortCol[] = [
+  { key: "rank", label: "#", num: true },
+  { key: "name", label: "Player" },
+  { key: "nba", label: "NBA" },
+  { key: "pos", label: "Pos" },
+  { key: "owner", label: "Owner" },
+  { key: "gp", label: "GP", num: true },
+  // All three value windows at once, so "is he heating up" needs no basis toggling.
+  { key: "value", label: "Value", num: true, leader: true },
+  { key: "v30", label: "30D", num: true, leader: true },
+  { key: "v15", label: "15D", num: true, leader: true },
+  { key: "t30", label: "30D Δ", num: true },
+  { key: "t15", label: "15D Δ", num: true },
+  ...STATS.slice(0, 5).map((key) => ({ key, label: key, num: true, leader: true })),
+  { key: "STOCKS", label: "STK", num: true, leader: true },
+  ...STATS.slice(5).map((key) => ({ key, label: key, num: true, leader: key !== "TO" })),
+  { key: "fg", label: "FG%", num: true },
+  { key: "ft", label: "FT%", num: true },
+  { key: "tp", label: "3P%", num: true },
+];
+
+const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
+const tone = (v: number) => (v > 0 ? "var(--good)" : v < 0 ? "var(--bad)" : undefined);
+const score = (v: number | undefined) => {
+  const n = Number(v ?? 0);
+  return { sort: n, text: signed(n), color: tone(n) };
+};
+const perGame = (v: number) => ({ sort: v, text: v.toFixed(1) });
+const pctCell = (v: number) => ({ sort: v, text: (v * 100).toFixed(1) });
 
 export default function PlayerValueView({ league }: { league: LeagueData }) {
   const pool = league.seasonData.playerPool ?? [];
@@ -42,7 +73,6 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
   const [minGp, setMinGp] = useState(10);
 
   const valueCol = VALUE_COL[basis];
-  const trendCol = TREND_COL[basis];
 
   // Basketball order (PG -> C), not alphabetical: "C, PF, PG, SF, SG" reads as noise to
   // anyone who thinks in lineup slots. Anything unexpected is appended alphabetically.
@@ -66,14 +96,9 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
     return [...all.filter((o) => o === "FA"), ...all.filter((o) => o !== "FA")];
   }, [pool]);
 
-  const maxAbs = useMemo(
-    () => Math.max(1, ...pool.map((p) => Math.abs(p[valueCol]))),
-    [pool, valueCol]
-  );
-
-  const rows = useMemo(() => {
+  const rows = useMemo<SortRow[]>(() => {
     const q = name.trim().toLowerCase();
-    const out = pool.filter((p) => {
+    const kept = pool.filter((p) => {
       if (q && !p.name.toLowerCase().includes(q)) return false;
       if (positions.length && !positions.includes(p.position)) return false;
       if (nbaTeams.length && !nbaTeams.includes(p.nbaTeam)) return false;
@@ -82,7 +107,10 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
       if (minGp > 0 && gpFor(p, basis) < minGp) return false;
       return true;
     });
-    return [...out].sort((a, b) => b[valueCol] - a[valueCol]);
+    // "#" is the VALUE rank among what is shown, fixed while other columns re-sort, so
+    // sorting by rebounds still tells you where each player sits on value.
+    const ranked = [...kept].sort((a, b) => b[valueCol] - a[valueCol]);
+    return ranked.map((p, i) => playerRow(p, i + 1, basis));
   }, [pool, name, positions, nbaTeams, owners, showInjured, minGp, basis, valueCol]);
 
   if (!pool.length) {
@@ -171,141 +199,82 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
       {rows.length === 0 ? (
         <p className="caption">No players match these filters.</p>
       ) : (
-        <div className="pv-list">
-          {rows.map((p, i) => (
-            <PlayerRow
-              key={`${p.name}-${p.playerId ?? i}`}
-              p={p}
-              rank={i + 1}
-              value={p[valueCol]}
-              trend={p[trendCol]}
-              maxAbs={maxAbs}
-            />
-          ))}
-        </div>
+        // Keyed on the basis: switching it re-ranks everything, so start back on the
+        // value sort rather than keeping a column sort over the old numbers.
+        <SortableTable
+          key={basis}
+          cols={COLS}
+          rows={rows}
+          defaultKey="rank"
+          defaultDesc={false}
+          className="sticky-2 pv-table"
+          pageSize={50}
+        />
       )}
 
       {/* A footnote, not something that needs to sit above the data. */}
       <p className="caption" style={{ marginTop: "1rem" }}>
         <strong>Value</strong> is a 9-category z-score (points above/below an average
-        leaguer, turnovers and percentages included). <strong>30D/15D Trend</strong>{" "}
-        compare the last 30 or 15 days to the season on that same scale: positive = heating
-        up. Covers every rostered player plus the top free agents.
+        leaguer, turnovers and percentages included); <strong>30D</strong> and{" "}
+        <strong>15D</strong> are the same score over the last 30 and 15 days, and the{" "}
+        <strong>Δ</strong> columns are those minus the season: positive = heating up.{" "}
+        <strong>#</strong> ranks by the value basis, and GP and the stat columns follow it
+        {basis === "Regular" ? " (season per-game)" : ` (last ${basis === "30D" ? 30 : 15} days per-game)`}.
+        STK is steals + blocks. Click any header to sort. Covers every rostered player plus
+        the top free agents.
       </p>
     </>
   );
 }
 
-function PlayerRow({
-  p,
-  rank,
-  value,
-  trend,
-  maxAbs,
-}: {
-  p: PoolPlayer;
-  rank: number;
-  value: number;
-  trend: number;
-  maxAbs: number;
-}) {
-  const [code, sev] = playerStatus(p.status);
-  const positive = value >= 0;
-  const width = Math.min(100, (Math.abs(value) / maxAbs) * 100);
-  const shot = headshotUrl(p.playerId);
+function playerRow(p: PoolPlayer, rank: number, basis: ValueBasis): SortRow {
+  // The recent windows when the basis asks for one; the season line otherwise, and also
+  // when a window is empty (no games in it), which is not the same as a line of zeros.
+  const w = basis === "30D" ? p.last30 : basis === "15D" ? p.last15 : undefined;
+  const win = w?.gp ? w : undefined;
+  const stat = (k: string) =>
+    Number(win?.[k] ?? (p as unknown as Record<string, number>)[k] ?? 0);
+  const ratio = (made: string, att: string, season: number) => {
+    const m = win?.[made];
+    const a = win?.[att];
+    return m != null && a ? m / a : season;
+  };
+  const fg = ratio("FGM", "FGA", p.fgPct);
+  const ft = ratio("FTM", "FTA", p.ftPct);
+  const tp = ratio("3PM", "3PA", p.tpPct);
   const isFa = p.owner === "FA";
+  const [code] = playerStatus(p.status);
 
-  // Counting stats first, rate stats second — the same eight tiles as the Streamlit card.
-  const tiles: Array<[string, string]> = [
-    ["PTS", p.PTS.toFixed(1)],
-    ["REB", p.REB.toFixed(1)],
-    ["AST", p.AST.toFixed(1)],
-    ["STOCKS", stocks(p).toFixed(1)],
-    ["FG%", (p.fgPct * 100).toFixed(1)],
-    ["FT%", (p.ftPct * 100).toFixed(1)],
-    ["3P%", (p.tpPct * 100).toFixed(1)],
-    ["TO", p.TO.toFixed(1)],
-  ];
-
-  // The card body is only mounted once the row is opened. With ~290 rows, rendering every
-  // card up front put a headshot, eight tiles and a log stub into the page for players
-  // nobody expanded — the disclosure is closed markup either way, so this is free.
-  const [open, setOpen] = useState(false);
-
-  return (
-    <details className="pv-item" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="pv-sum">
-        <span
-          className="pv-fill"
-          style={{
-            width: `${width.toFixed(1)}%`,
-            background: positive ? "var(--cobalt)" : "var(--clay)",
-          }}
-        />
-        <span className="pv-rank">{rank}</span>
-        <span className="pv-name">{p.name}</span>
-        {code && <StatusBadge status={p.status} />}
-        {isFa && <span className="pv-fa">FA</span>}
-        <span className="pv-meta">{p.position}</span>
-        <span
-          className="pv-val"
-          style={{ color: positive ? "var(--good)" : "var(--bad)" }}
-        >
-          {value >= 0 ? "+" : ""}
-          {value.toFixed(1)}
+  const cells: SortRow["cells"] = {
+    rank: { sort: rank, text: String(rank) },
+    name: {
+      sort: p.name,
+      text: p.name,
+      node: (
+        <span className="pv-tname">
+          <PlayerLink name={p.name} />
+          {code && <StatusBadge status={p.status} />}
         </span>
-        <TrendChip v={trend} />
-      </summary>
-      {open && (
-      <div className="pv-detail">
-        <div className="pv-card">
-          {shot ? (
-            <div className="pv-shot" style={{ backgroundImage: `url('${shot}')` }} />
-          ) : (
-            <div className="pv-shot pv-shot-blank" />
-          )}
-          <div className="pv-chead">
-            {/*
-              The link goes on the EXPANDED card's name, not the row above it. The row is
-              a <summary>: its whole job is to open this panel, and a link inside it would
-              take the tap that opens the row (and nest interactive content inside a
-              summary, which is not what that element is for). Once open, the name is the
-              natural way through to the full card.
-            */}
-            <div className="pv-cname">
-              <PlayerLink name={p.name} />
-            </div>
-            <div className="pv-csub">
-              <span className="pv-cmeta">
-                {[p.nbaTeam, p.position].filter(Boolean).join(" · ")}
-              </span>
-              {(code || isFa) && (
-                <span className="pv-badges">
-                  {code && <StatusBadge status={p.status} />}
-                  {isFa && <span className="pv-fa">FA</span>}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="pv-statgrid">
-          {tiles.map(([label, v]) => (
-            <div className="pv-stat" key={label}>
-              <span className="pv-stat-l">{label}</span>
-              <span className="pv-stat-v">{v}</span>
-            </div>
-          ))}
-        </div>
-        <GameLog playerId={p.playerId} />
-      </div>
-      )}
-    </details>
-  );
-}
-
-/** Geometric arrow, no emoji — the trend marker from the legacy list. */
-function TrendChip({ v }: { v: number }) {
-  if (v > 0.5) return <span className="pv-trend up">&#9650;</span>;
-  if (v < -0.5) return <span className="pv-trend down">&#9660;</span>;
-  return <span className="pv-trend flat">&ndash;</span>;
+      ),
+    },
+    nba: { sort: p.nbaTeam || "", text: p.nbaTeam || "-" },
+    pos: { sort: p.position || "", text: p.position || "-" },
+    owner: {
+      sort: isFa ? "" : p.owner,
+      text: isFa ? "FA" : p.owner,
+      node: isFa ? <span className="pv-fa">FA</span> : undefined,
+    },
+    gp: { sort: gpFor(p, basis), text: String(gpFor(p, basis)) },
+    value: score(p.value),
+    v30: score(p.recent),
+    v15: score(p.recent15),
+    t30: score(p.trend),
+    t15: score(p.trend15),
+    STOCKS: perGame(stat("STL") + stat("BLK")),
+    fg: pctCell(fg),
+    ft: pctCell(ft),
+    tp: pctCell(tp),
+  };
+  for (const k of STATS) cells[k] = perGame(stat(k));
+  return { id: `${p.name}-${p.playerId ?? rank}`, cells };
 }

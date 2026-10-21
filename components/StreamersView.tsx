@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeStreamers } from "@/lib/streamers";
-import { useLiveTotals } from "@/lib/useLiveTotals";
+import { dayLabel, etDate } from "@/lib/dates";
+import { useLiveSides } from "@/lib/useLiveSides";
 import { useSettings } from "@/lib/useSettings";
 import LiveBadge from "./LiveBadge";
 import PlayerLink from "./PlayerLink";
@@ -28,16 +29,8 @@ export default function StreamersView({
   teamId,
   live: liveEnabled = true,
 }: Props) {
-  const you = isHome ? matchup.home : matchup.away;
-  const opp = isHome ? matchup.away : matchup.home;
-
-  const live = useLiveTotals(
-    league.period,
-    teamId,
-    you.current,
-    opp.current,
-    liveEnabled
-  );
+  // Live totals + each side's projection minus the games those totals already count.
+  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
   // Persisted in localStorage so protected players and the open-spot flag survive a
   // reload — in the Streamlit version these lived in server session state and were lost
   // whenever the host spun down.
@@ -51,18 +44,51 @@ export default function StreamersView({
   const youMoments = useMemo(() => sideMoments(you, live.you), [you, live.you]);
   const oppMoments = useMemo(() => sideMoments(opp, live.opp), [opp, live.opp]);
 
+  // Today in Eastern time, set after mount (same reason as WeekSchedule: the server's
+  // clock and the browser's can straddle midnight). Until then every date in the week
+  // shows; after, only the ones a pickup could still play — the dates GL is counting.
+  const [today, setToday] = useState<string | null>(null);
+  useEffect(() => {
+    setToday(etDate());
+  }, []);
+  /*
+   * The games a pickup made NOW could still play (2026-10-20): later days, plus today's
+   * only if it has not tipped off yet (live NBA scoreboard; unknown counts as not
+   * started). A game that is over or under way can no longer be added — the export's
+   * count, made that morning, still included them.
+   */
+  const gameDates = (nbaTeam: string): string[] =>
+    Object.keys(league.weekSchedule?.teams[nbaTeam] ?? {})
+      .filter(
+        (d) =>
+          !today || d > today || (d === today && (live.gameLeft?.[nbaTeam] ?? 1) >= 1)
+      )
+      .sort();
+  const pickupLeague = useMemo(() => {
+    if (!today || !league.weekSchedule) return league;
+    return {
+      ...league,
+      freeAgents: league.freeAgents.map((fa) =>
+        league.weekSchedule!.teams[fa.nbaTeam]
+          ? { ...fa, gamesLeft: Math.min(fa.gamesLeft, gameDates(fa.nbaTeam).length) }
+          : fa
+      ),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [league, today, live.gameLeft]);
+
   // Recomputed on every toggle, in milliseconds, with no server round trip. This is the
   // whole point of moving the maths client-side.
   const { baseline, results } = useMemo(
     () =>
-      analyzeStreamers(league, you.players, youMoments, oppMoments, {
+      analyzeStreamers(pickupLeague, you.players, youMoments, oppMoments, {
         hasOpenSpot: openSpot,
         untouchables: untouchable,
       }),
-    [league, you.players, youMoments, oppMoments, openSpot, untouchable]
+    [pickupLeague, you.players, youMoments, oppMoments, openSpot, untouchable]
   );
 
-  const anyGamesLeft = league.freeAgents.some((f) => f.gamesLeft > 0);
+  const anyGamesLeft = pickupLeague.freeAgents.some((f) => f.gamesLeft > 0);
 
   function toggleUntouchable(name: string) {
     const next = new Set(settings.untouchables);
@@ -108,6 +134,7 @@ export default function StreamersView({
                   <th>Add</th>
                   <th>NBA</th>
                   <th className="num">GL</th>
+                  <th>Games</th>
                   <th className="num">Δ Cats</th>
                   <th className="num">Δ Win %</th>
                   <th>Drop</th>
@@ -125,6 +152,9 @@ export default function StreamersView({
                     <td><PlayerLink name={r.add.name} /></td>
                     <td>{r.add.nbaTeam}</td>
                     <td className="num">{r.add.gamesLeft}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {gameDates(r.add.nbaTeam).map(dayLabel).join(" · ") || "-"}
+                    </td>
                     <td
                       className="num"
                       style={{

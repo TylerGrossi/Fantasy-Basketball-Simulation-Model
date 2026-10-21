@@ -130,51 +130,57 @@ const FLOW: Array<[string, string, string]> = [
 ];
 
 /**
- * The page directory, grouped as the header groups it. `inSeason` marks pages that are
- * meaningless once the bracket is done — the same rule IN_SEASON_ONLY applies to the nav,
- * so the directory can never advertise a dead end.
+ * The page directory: the IMPORTANT pages only, five per column in four columns (owner,
+ * 2026-10-20) — the menus still carry everything else. Rows line up across columns
+ * because every entry is the same height (see `.lp-dir-item`).
+ *
+ * `inSeason` marks pages that are meaningless once the bracket is done — the same rule
+ * IN_SEASON_ONLY applies to the nav, so the directory can never advertise a dead end.
  */
 const DIRECTORY: Array<{
   section: string;
   items: Array<{ href: string; name: string; desc: string; inSeason?: boolean }>;
 }> = [
   {
+    // League Home, then the one-page Current Matchup's sections in page order.
     section: "This Week",
     items: [
+      { href: "/league", name: "League Home", desc: "Standings, scores, moves and risers at a glance." },
       { href: "/scoreboard", name: "Scoreboard", desc: "The matchup category by category, live from ESPN." },
-      { href: "/matchup", name: "Matchup", desc: "Win probability, score distribution, per-category projections." },
-      { href: "/streamers", name: "Streamers", desc: "Every pick-up-and-drop pair scored against this week.", inSeason: true },
-      { href: "/bench", name: "Bench", desc: "Who to play, who to sit, and what each choice is worth.", inSeason: true },
-      { href: "/roster", name: "Roster", desc: "Your players, games left, and per-game averages." },
+      { href: "/scoreboard#schedule", name: "Week Schedule", desc: "Who plays each day, and days with too many players." },
+      { href: "/scoreboard#odds", name: "Win Probability", desc: "Win odds, score distribution and projections." },
+      { href: "/scoreboard#streamers", name: "Streamers", desc: "Every pick-up-and-drop pair scored against this week.", inSeason: true },
     ],
   },
   {
-    section: "Season",
+    section: "League",
     items: [
-      { href: "/season", name: "Season Summary", desc: "Standings, all-play and schedule luck, updated weekly." },
-      { href: "/season-stats", name: "Season Stats", desc: "Category leaders and every player's line." },
-      { href: "/league-stats", name: "League Stats", desc: "Every team's totals and where each of them ranks." },
-      // Sits with the other league-wide numbers, matching its move out of Tools in the nav.
-      { href: "/rankings", name: "Power Rankings", desc: "All-play strength, form and weekly movement." },
-      { href: "/league-rosters", name: "Rosters", desc: "Every team's roster, slot, acquisition and value." },
-      { href: "/recent-moves", name: "Recent Moves", desc: "Every add, drop, waiver claim and trade, newest first." },
       { href: "/schedule", name: "Schedule", desc: "Week-by-week results, opponents and margins." },
+      { href: "/season", name: "Season Summary", desc: "Standings, all-play and schedule luck, updated weekly." },
+      { href: "/rankings", name: "Power Rankings", desc: "All-play strength, form and weekly movement." },
+      { href: "/playoffs", name: "Playoff Odds", desc: "Playoff and title chances from the season simulation.", inSeason: true },
+      { href: "/recent-moves", name: "Recent Moves", desc: "Every add, drop, waiver claim and trade, newest first." },
     ],
   },
   {
-    // Mirrors the header: Player Card (its own header link since 2026-10-19) leads, then
-    // the Tools dropdown in lib/nav.ts order, so a page is in the same place either way.
+    // Player Card leads, then the Tools dropdown in lib/nav.ts order.
     section: "Players & Tools",
     items: [
       { href: "/player", name: "Player Card", desc: "Profile, value, recent form, last ten games." },
       { href: "/player-value", name: "Player Value", desc: "Rostered players and free agents by 9-cat value." },
       { href: "/trade", name: "Trade Simulator", desc: "What a trade does to your category strength." },
       { href: "/compare", name: "Compare", desc: "Two players side by side, category by category." },
-      { href: "/lineup", name: "Lineup", desc: "Who to start, and what each swap costs you." },
-      { href: "/cheat-sheets", name: "Cheat Sheets", desc: "Ranked columns per position, with your roster shaded." },
-      { href: "/draft-recap", name: "Draft Recap", desc: "Who won the draft: grades, playoff odds, steals and reaches." },
-      { href: "/playoffs", name: "Playoff Odds", desc: "Championship probabilities from a simulated bracket.", inSeason: true },
+      { href: "/draft-recap", name: "Draft Recap", desc: "Who won the draft: grades, steals and reaches." },
+    ],
+  },
+  {
+    section: "History & More",
+    items: [
+      { href: "/history", name: "Seasons", desc: "Every season you have played." },
+      { href: "/history/head-to-head", name: "Head to Head", desc: "Your record against each manager." },
+      { href: "/history/managers", name: "Managers", desc: "All-time standings by manager." },
       { href: "/agent", name: "Agent", desc: "Ask about the league in plain English." },
+      { href: "/settings", name: "Settings", desc: "Your team, protected players and display." },
     ],
   },
 ];

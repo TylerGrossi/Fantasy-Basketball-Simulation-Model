@@ -35,6 +35,7 @@ import {
   type ConsistencyPool,
 } from "./espnLive";
 import { playerStatus } from "./playerPool";
+import { dayLabel, etDate } from "./dates";
 import { APP_TOUR } from "./appTour";
 
 export interface ToolDeclaration {
@@ -495,6 +496,28 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
     },
   },
   {
+    name: "streamers",
+    description:
+      "STREAMING PICKUPS by date. Returns this matchup week's real NBA slate for the dates asked (which teams play each day, from the league's own schedule) and the free agents whose teams play on those dates, ranked by games on those dates then value, each with his game dates and opponents. Use this for ANY question about streamers, who to pick up for certain days, who plays tonight or on a given date, or how many games a player gets this week. Every player it returns is unowned in this league. Never answer these questions from web_search or memory.",
+    parameters: {
+      type: "object",
+      properties: {
+        dates: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            'The days the user can use the pickup, as ISO dates ("2026-10-22") or M/D ("10/22"). Leave empty for every remaining day of the matchup week.',
+        },
+        exclude: {
+          type: "array",
+          items: { type: "string" },
+          description: "Players the user does not want (already rejected, or known to be gone).",
+        },
+        limit: { type: "integer", description: "How many free agents to return (1-25, default 12)." },
+      },
+    },
+  },
+  {
     name: "web_search",
     description:
       "Search the live web (Google) for real-world basketball information the league data can't answer: current NBA news, injuries, trades, the offseason, standings, awards, schedules, or general basketball facts. Use this whenever the question is about the real NBA rather than this fantasy league's own player pool.",
@@ -512,6 +535,23 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
 ];
 
 export type ToolArgs = Record<string, unknown>;
+
+/**
+ * "10/22", "10-22" or "2026-10-22" -> "2026-10-22"; anything else -> null. A date with no
+ * year takes the year that puts it inside [start, end] — a week spanning New Year reads
+ * "1/2" as the January in it — else the start's year.
+ */
+function isoDate(raw: string, start: string, end: string): string | null {
+  const t = raw.trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  m = t.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-]\d{2,4})?$/);
+  if (!m) return null;
+  const md = `${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  const years = [...new Set([start.slice(0, 4), end.slice(0, 4)])];
+  const inWeek = years.map((y) => `${y}-${md}`).find((d) => d >= start && d <= end);
+  return inWeek ?? `${years[0]}-${md}`;
+}
 
 /**
  * Bind the tools to one league snapshot and one "my team".
@@ -1084,6 +1124,74 @@ export function createToolRunner(
         ].join("\n");
       }
 
+      case "streamers": {
+        // The model had no schedule before this tool: it web-searched the slate, got
+        // days wrong, then named "free agents" from memory who were rostered (2026-10-20).
+        const sched = league.weekSchedule;
+        if (!sched) return "No NBA schedule for this matchup week is in the export yet.";
+        const today = etDate();
+        const week = [
+          ...new Set(Object.values(sched.teams).flatMap((days) => Object.keys(days))),
+        ].sort();
+        const asked = (Array.isArray(args.dates) ? args.dates : [])
+          .map((d) => isoDate(String(d), sched.start, sched.end))
+          .filter((d): d is string => !!d);
+        const outside = asked.filter((d) => !week.includes(d));
+        const dates = asked.length
+          ? asked.filter((d) => week.includes(d))
+          : week.filter((d) => d >= today);
+        const out = [
+          `Today is ${dayLabel(today)} (Eastern). Matchup week: ${dayLabel(sched.start)} to ${dayLabel(sched.end)}.`,
+        ];
+        if (outside.length)
+          out.push(`Outside this matchup week, no schedule data: ${outside.map(dayLabel).join(", ")}.`);
+        const past = dates.filter((d) => d < today);
+        if (past.length)
+          out.push(`Already played (a pickup now cannot use these): ${past.map(dayLabel).join(", ")}.`);
+        if (!dates.length) return out.join("\n");
+
+        out.push("NBA slate:");
+        for (const d of dates) {
+          const teams = Object.keys(sched.teams).filter((t) => sched.teams[t][d]);
+          out.push(`  ${dayLabel(d)}: ${teams.length ? teams.join(", ") : "no games"} (${teams.length} teams)`);
+        }
+
+        const useful = dates.filter((d) => d >= today);
+        if (!useful.length) return out.join("\n");
+        const skip = new Set(
+          (Array.isArray(args.exclude) ? args.exclude : []).map((n) => String(n).toLowerCase().trim())
+        );
+        const limit = Math.max(1, Math.min(Number(args.limit ?? 12) || 12, 25));
+        const ranked = pool
+          .filter((p) => p.owner === "FA" && !skip.has(p.name.toLowerCase()))
+          .filter((p) => playerStatus(p.status)[1] !== "out")
+          .map((p) => ({ p, games: useful.filter((d) => sched.teams[p.nbaTeam]?.[d]) }))
+          .filter((x) => x.games.length > 0)
+          .sort((a, b) => b.games.length - a.games.length || b.p.value - a.p.value)
+          .slice(0, limit);
+        if (!ranked.length) {
+          out.push("No healthy free agent has a game on those dates.");
+          return out.join("\n");
+        }
+        out.push(`Free agents with games on ${useful.map(dayLabel).join(", ")} (healthy, unowned):`);
+        for (const { p, games } of ranked) {
+          const [label] = playerStatus(p.status);
+          out.push(
+            `- ${p.name} (${p.nbaTeam}, ${p.position || "?"})${label ? ` [${label}]` : ""}: ` +
+              `${games.length} game${games.length === 1 ? "" : "s"} - ` +
+              games.map((d) => `${dayLabel(d)} ${sched.teams[p.nbaTeam][d]}`).join(", ") +
+              ` | value ${signed(p.value)}, 15d ${signed(p.recent15)} | ` +
+              `${p.PTS.toFixed(1)}p ${p.REB.toFixed(1)}r ${p.AST.toFixed(1)}a ` +
+              `${p.STL.toFixed(1)}s ${p.BLK.toFixed(1)}b ${p["3PM"].toFixed(1)} 3PM`
+          );
+        }
+        out.push(
+          "Ownership is from the last league export; a player may have been picked up since. " +
+            "Recommend ONLY players from this list."
+        );
+        return out.join("\n");
+      }
+
       case "web_search":
         return webSearch(str("query"));
 
@@ -1151,6 +1259,14 @@ export function systemInstruction(
     "   - teams: team_roster, league_rosters, team_category_ranks, list_teams\n" +
     "   - the season: power_rankings, current_matchup, team_schedule, recent_moves, " +
     "playoff_odds\n" +
+    "   - streaming and this week's NBA schedule: streamers. It holds the real slate day " +
+    "by day and returns ONLY unowned players. For any question about streamers, pickups " +
+    "for particular days, who plays on a date or how many games a player gets, call " +
+    "streamers - never web_search the schedule and never name a pickup from memory. A " +
+    "player is a pickup option ONLY if a tool returned him as a free agent; if the user " +
+    "rejects some, call streamers again with them in exclude. Read dates exactly as " +
+    "listed: 'today, 10/22, 24, 25' is FOUR days (today's date above plus three more), " +
+    "not 'today is 10/22'.\n" +
     "   - the 2026-27 DRAFT: draft_recap (who won the draft, grades, projected records and " +
     "playoff odds), draft_results (any team's picks, steals and reaches), player_projection " +
     "(any player's 2026-27 projection, projected value, ADP and who drafted him). Use these " +

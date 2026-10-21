@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
 import { weeklyAllPlay } from "@/lib/history";
-import { periodLabel } from "@/lib/league";
+import { periodLabel, winProbability } from "@/lib/league";
 
 /**
  * Your season, matchup by matchup — what happened, and what would have happened against
@@ -62,6 +62,34 @@ export default async function Page() {
       .trim();
     return { away, name: name || text };
   };
+
+  /**
+   * The projection for every week without a result: the MOST LIKELY category score
+   * (whole categories, ties left out — owner, 2026-10-20) and the chance of winning the
+   * matchup.
+   *
+   * The CURRENT week comes from the matchup snapshot, the same numbers the Current
+   * Matchup page opens on (before its live refresh), so the two pages agree. Every later
+   * week comes from the playoff model's simulated seasons (`projWeeks`), the same weeks
+   * the playoff odds are built from. Either source may be missing on an older export,
+   * and then the row just shows dashes.
+   */
+  const projOf = new Map<number, { score: string; win: number }>();
+  const odds = league.seasonData?.playoffOdds?.find((o) => o.teamId === me.id);
+  for (const [period, p] of Object.entries(odds?.projWeeks ?? {})) {
+    const [pw, pl] = p.score;
+    projOf.set(Number(period), { score: `${Math.round(pw)}-${Math.round(pl)}`, win: p.win });
+  }
+  const live = league.matchups.find((m) => m.homeId === me.id || m.awayId === me.id);
+  if (live && !league.seasonOver) {
+    const [you, opp] = live.homeId === me.id ? [live.home, live.away] : [live.away, live.home];
+    const o = winProbability(league, you, opp, you.current, opp.current);
+    // The peak of the categories-won distribution: distribution[k] = P(win exactly k).
+    const n = o.categoryProbs.length;
+    const k = o.distribution.reduce((best, p, i, d) => (p > d[best] ? i : best), 0);
+    projOf.set(league.period, { score: `${k}-${n - k}`, win: o.win });
+  }
+  const pctText = (p: number) => `${(p * 100).toFixed(0)}%`;
 
   const w = rows.filter((r) => r.result === "W").length;
   const l = rows.filter((r) => r.result === "L").length;
@@ -158,7 +186,11 @@ export default async function Page() {
             >
               <span className="msched-wk">{weekTag(r.period)}</span>
               <span className={played ? `msched-score ${tone}` : "msched-preview"}>
-                {played ? r.score || "—" : "Preview"}
+                {played
+                  ? r.score || "—"
+                  : projOf.has(r.period)
+                    ? `${pctText(projOf.get(r.period)!.win)} win`
+                    : "Preview"}
               </span>
               <span className="msched-opp">
                 <span className="msched-team">
@@ -182,6 +214,7 @@ export default async function Page() {
               <th>Manager</th>
               <th>Result</th>
               <th className="num">Score</th>
+              <th className="num">Win %</th>
               <th className="num">All-play</th>
               <th className="num">Beat</th>
               <th>vs the field</th>
@@ -216,7 +249,31 @@ export default async function Page() {
                     {r.result || "—"}
                   </span>
                 </td>
-                <td className="num">{r.score || "—"}</td>
+                {/* A finished week shows what happened; an unfinished one shows the
+                    projection, muted and marked "proj" so it never reads as a result. */}
+                {r.result || !projOf.has(r.period) ? (
+                  <>
+                    <td className="num">{r.score || "—"}</td>
+                    <td className="num">—</td>
+                  </>
+                ) : (
+                  <>
+                    <td className="num sched-proj">
+                      <span className="sched-proj-tag">proj</span>
+                      {projOf.get(r.period)!.score}
+                    </td>
+                    <td
+                      className="num"
+                      style={{
+                        fontWeight: 700,
+                        color:
+                          projOf.get(r.period)!.win >= 0.5 ? "var(--good)" : "var(--bad)",
+                      }}
+                    >
+                      {pctText(projOf.get(r.period)!.win)}
+                    </td>
+                  </>
+                )}
                 <ScheduleAllPlay week={byPeriod.get(r.period)} />
               </tr>
             ))}

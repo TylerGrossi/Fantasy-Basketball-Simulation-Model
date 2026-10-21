@@ -1,12 +1,12 @@
 import BenchView from "@/components/BenchView";
-import { PlayerBoxTable } from "@/components/BoxScoreSheet";
+import LiveBoxScores from "@/components/LiveBoxScores";
 import MatchupDeck from "@/components/MatchupDeck";
 import MatchupView from "@/components/MatchupView";
 import RosterView from "@/components/RosterView";
 import Scoreboard from "@/components/Scoreboard";
 import StreamersView from "@/components/StreamersView";
 import WeekSchedule from "@/components/WeekSchedule";
-import { forecastFor } from "@/lib/predictions";
+import { forecastFor, winProbHistory } from "@/lib/predictions";
 import ScoreboardTabs from "@/components/ScoreboardTabs";
 import { buildWeekRecap } from "@/components/WeekRecap";
 import WeekSelect from "@/components/WeekSelect";
@@ -14,6 +14,7 @@ import { periodLabel } from "@/lib/league";
 import {
   loadBoxScores,
   loadPredictions,
+  loadWinProbLog,
   loadLeague,
   myTeam,
   resolveMatchup,
@@ -159,7 +160,16 @@ export default async function Page({
   const deckLeague = trimLeague(league, { matchupTeamId: me.id, freeAgents: true });
   const you = r.isHome ? r.matchup.home : r.matchup.away;
   const oppSide = r.isHome ? r.matchup.away : r.matchup.home;
-  const forecast = forecastFor(await loadPredictions(), league, league.period, me.id);
+  const preWeekLog = await loadPredictions();
+  const forecast = forecastFor(preWeekLog, league, league.period, me.id);
+  // The week so far, for the win-probability chart: pre-week forecast + every refresh.
+  const history = winProbHistory(
+    preWeekLog,
+    await loadWinProbLog(),
+    league,
+    league.period,
+    me.id
+  );
 
   return (
     <>
@@ -192,25 +202,20 @@ export default async function Page({
         />
         <MatchupDeck
           box={
-            lines(me.id).length === 0 && lines(r.oppId).length === 0 ? (
-              <p className="caption">
-                No box score yet — player lines appear once this week&rsquo;s games are
-                played and the data refreshes.
-              </p>
-            ) : (
-            <>
-              <PlayerBoxTable
-                title={`${r.youName} box score`}
-                stats={box?.stats ?? league.stats}
-                lines={lines(me.id)}
-              />
-              <PlayerBoxTable
-                title={`${r.oppName} box score`}
-                stats={box?.stats ?? league.stats}
-                lines={lines(r.oppId)}
-              />
-            </>
-            )
+            // Live from ESPN (players' matchup-to-date lines, games in progress
+            // included), painted from the exported lines first.
+            <LiveBoxScores
+              period={league.period}
+              teamId={me.id}
+              live={!demo}
+              stats={league.stats}
+              youName={r.youName}
+              oppName={r.oppName}
+              snapshotYou={you.current}
+              snapshotOpp={oppSide.current}
+              youLines={lines(me.id)}
+              oppLines={lines(r.oppId)}
+            />
           }
           schedule={
             <WeekSchedule
@@ -247,6 +252,7 @@ export default async function Page({
           youAbbrev={abbrev(me.id)}
           oppAbbrev={abbrev(r.oppId)}
           forecast={forecast}
+          history={history}
         />
       </section>
 

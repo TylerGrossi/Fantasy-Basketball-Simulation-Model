@@ -609,6 +609,9 @@ PRIOR_GAMES = 8  # weight of the preseason projection, in games (see build_stat_
 #                   owner, 2026-10-19 — "show 25-26 until there is new data for 26-27").
 # scripts/build_data.py switches it to "last_season" around the player-pool build only.
 PRIOR_MODE = "projection"
+# In "last_season" mode, a player with fewer games than this THIS season is shown as a
+# blend: gp/BLEND_FULL_GAMES of this season, the rest last season (see build_stat_df).
+BLEND_FULL_GAMES = 10
 _LAST_SEASON = None
 
 
@@ -711,6 +714,27 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
                         continue
                     per_game = prior
                     source = "proj"
+            elif gp < BLEND_FULL_GAMES:
+                # A SMALL SAMPLE is blended, not taken as is (owner, 2026-10-20): on
+                # opening night 49 players' values rested on ONE game (Stephon Castle
+                # -1.3 -> -11.0, Gilgeous-Alexander +10.5 -> +2.1) and the Value Power
+                # Rankings reshuffled on a single night. This season counts gp/10 — 10%
+                # after one game, 50% after five, all of it from ten on — and the rest
+                # is last season's line (a rookie: ESPN's projection).
+                pid = int(getattr(p, "playerId", -1) or -1)
+                last = _last_season_lines().get(pid)
+                base = (
+                    {k: float(last.get(k, 0) or 0) for k in
+                     ("FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST",
+                      "STL", "BLK", "TO", "PTS", "DD", "TW")}
+                    if last else _projected_per_game(p, year)
+                )
+                if base:
+                    w = gp / BLEND_FULL_GAMES
+                    keys = set(per_game) | set(base)
+                    per_game = {k: w * per_game.get(k, 0.0) + (1 - w) * base.get(k, 0.0)
+                                for k in keys}
+                    source = "blend"
             prior = None
         else:
             prior = _projected_per_game(p, year) if use_prior else None
@@ -784,12 +808,22 @@ def blend_season_last30(season_df, last30_df, blend_weight, merge_on=None):
         last30_df, on=merge_on, how="left", suffixes=("_season", "_30")
     )
     has_last30 = merged["PTS_30"].notna()
+    # The last-30 weight GROWS WITH ITS SAMPLE (2026-10-20): full `blend_weight` from
+    # BLEND_FULL_GAMES games in the window, proportionally less before. A flat 70% let
+    # opening night's ONE game set 70% of every projected average (Embiid 27.4 -> 16.8
+    # PTS after a 13-point game, Gilgeous-Alexander 31.2 -> 20.1), which swung a week's
+    # win probability from 47% to 85% on a single evening.
+    if "GP_30" in merged.columns:
+        sample = (merged["GP_30"].fillna(0) / BLEND_FULL_GAMES).clip(0, 1)
+        weight = sample * blend_weight
+    else:
+        weight = blend_weight
     for col in NUMERIC_COLS:
         c_sea = f"{col}_season"
         c30 = f"{col}_30"
         sea = merged[c_sea].fillna(0) if c_sea in merged.columns else 0
         t30 = merged[c30].fillna(0) if c30 in merged.columns else 0
-        blended = t30 * blend_weight + sea * (1 - blend_weight)
+        blended = t30 * weight + sea * (1 - weight)
         merged[col] = blended.where(has_last30, sea)
     for base in ("Team", "Games Left"):
         sb = f"{base}_season"

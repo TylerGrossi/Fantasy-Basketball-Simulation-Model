@@ -41,7 +41,7 @@ export default function StrengthByPosition({ ranks }: { ranks: StarterRank[] }) 
                   data — a zero-width fill looks like the row failed to render. */}
               <span
                 className={`sbp-fill ${r.pct >= 0.5 ? "sbp-good" : "sbp-bad"}`}
-                style={{ width: `${Math.max(r.pct * 100, 7)}%` }}
+                style={{ width: `${Math.max(r.pct * 100, 7).toFixed(2)}%` }}
               />
             </span>
           </div>

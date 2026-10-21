@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { LeagueData, Matchup, PoolPlayer, Team } from "./league";
-import type { PreWeekLog } from "./predictions";
+import type { PreWeekLog, WinProbLog } from "./predictions";
 import type { CareerLog } from "./career";
 import type { ConsistencyPool } from "./espnLive";
 import { resolveTeam } from "./team";
@@ -95,6 +95,19 @@ export async function loadBoxScores(): Promise<BoxScores | null> {
 export async function loadPredictions(): Promise<PreWeekLog | null> {
   try {
     return await readJson<PreWeekLog>(dataFile("predictions.json"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The win-probability log (scripts/build_data.py record_winprob_reading): one reading of
+ * every matchup per data refresh, for the week's win-probability chart. Append-only like
+ * the forecast log. Null until the first refresh has written it.
+ */
+export async function loadWinProbLog(): Promise<WinProbLog | null> {
+  try {
+    return await readJson<WinProbLog>(dataFile("winprob-log.json"));
   } catch {
     return null;
   }

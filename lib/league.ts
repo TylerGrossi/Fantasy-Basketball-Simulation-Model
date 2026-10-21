@@ -170,6 +170,13 @@ export interface PlayoffOddsRow {
    * absent from exports built before it was added.
    */
   seedProbs?: Record<string, number>;
+  /**
+   * Matchup period (as a string) -> the most likely category score [W, L] and win / tie
+   * probability for each unplayed week, from the same simulated seasons. The user's
+   * current week is not in it (that comes from the matchup snapshot). Absent on exports
+   * built before it was added.
+   */
+  projWeeks?: Record<string, { score: number[]; win: number; tie: number }>;
 }
 
 export interface PoolPlayer {
