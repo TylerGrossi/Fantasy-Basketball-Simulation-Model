@@ -11,7 +11,8 @@ Why that split works: a team's projected total for a category is
 
     mu  = current_total            (live, certain, adds no uncertainty)
         + sum_players(avg * games_left)     (slow)
-    sd  = sqrt(sum_players(games_left * (avg * variance)^2))    (slow only)
+    sd  = sqrt(sum_players(games_left * (avg * variance)^2
+                           + (games_left * avg * projection_error)^2))    (slow only)
 
 so everything expensive is cacheable and the live part is one addition.
 
@@ -57,6 +58,7 @@ import simulation as S  # noqa: E402
 OUT_DIR = ROOT / "public" / "data"
 STATS = list(config.CATEGORY_VARIANCE.keys())
 VARIANCE = [float(config.CATEGORY_VARIANCE[s]) for s in STATS]
+PROJECTION_ERROR = [float(config.PROJECTION_ERROR[s]) for s in STATS]
 
 # espn-api's short slot names -> the labels the board prints, which are ESPN's own UI
 # wording. Anything not listed (PG, SG, ... IR) already matches and passes through.
@@ -132,8 +134,10 @@ def player_moments(row_vals, games_left):
     One player's contribution to their team's totals, as (mu, var) per stat.
 
     mu  = games * avg
-    var = games * (avg * variance_factor)^2
-    Variances add across independent players, which is what lets the browser evaluate
+    var = games * (avg * variance_factor)^2 + (games * avg * projection_error)^2
+    The first term is game-to-game noise, the second the chance the average itself is
+    wrong (a miss repeated every game, so it grows with games^2). Variances add across
+    independent players, which is what lets the browser evaluate
     "drop A, add B" with a subtraction instead of a re-simulation.
 
     NOT exported per player — the browser derives it from `avg` + `gamesLeft` + the
@@ -143,24 +147,42 @@ def player_moments(row_vals, games_left):
     """
     g = float(games_left)
     mu = [_round(v * g, 3) for v in row_vals]
-    var = [_round(g * (v * f) ** 2, 4) for v, f in zip(row_vals, VARIANCE)]
+    var = [_round(g * (v * f) ** 2 + (g * v * e) ** 2, 4)
+           for v, f, e in zip(row_vals, VARIANCE, PROJECTION_ERROR)]
     return mu, var
 
 
-def build_roster(roster, team_name, year, injury_data, window):
-    """Per-player averages + games left for one fantasy roster."""
+def roster_frame(roster, team_name, year):
+    """One roster's blended per-game lines (season + last 30), or an empty frame."""
     season = D.build_stat_df(roster, f"{year}_total", "Season", team_name, year)
     last30 = D.build_stat_df(roster, f"{year}_last_30", "Last30", team_name, year)
     if season.empty:
+        return season
+    return D.blend_season_last30(season, last30, config_blend())
+
+
+def build_roster(roster, team_name, year, injury_data, window, frame=None, rank_ref=None):
+    """
+    Per-player averages + games left for one fantasy roster.
+
+    `rank_ref` is every rostered player's line in the league (see main): the 9-cat value
+    that decides who sits on a day with more games than starting spots is scored against
+    it, and exported per player as `value` so the schedule grid greys the same games the
+    projection leaves out.
+    """
+    merged = frame if frame is not None else roster_frame(roster, team_name, year)
+    if merged is None or merged.empty:
         return []
-    merged = D.blend_season_last30(season, last30, config_blend())
+    merged = merged.copy()
     start, end = window
     if start is not None and end is not None:
         merged = D.add_games_left_with_injury(
             merged, roster, injury_data, window_start=start, window_end=end,
+            rank_ref=rank_ref,
         )
     else:
         merged["Games Left"] = 0
+    values = D._value_rank_scores_from_df(merged, rank_ref)
 
     # "Games Left" above is COUNTED games: on a day more players have games than there
     # are starting slots, the lowest scorers lose that day. Right for the projection, wrong
@@ -187,13 +209,15 @@ def build_roster(roster, team_name, year, injury_data, window):
             "gamesLeft": games,
             "nbaGamesLeft": max(games, sched_games.get(r["Player"], 0)),
             "avg": [_round(v, 3) for v in vals],
+            # 9-cat value, the rank for who sits on a crowded day (see docstring).
+            "value": _round(values.get(r["Player"], 0.0), 3),
             "status": str(getattr(p, "injuryStatus", "") or "") if p else "",
             "injured": bool(D.is_player_injured(p)) if p else False,
         })
     return out
 
 
-def build_free_agents(league, year, injury_data, window, size=150):
+def build_free_agents(league, year, injury_data, window, size=150, rank_ref=None):
     """
     The waiver pool, for the Streamers page.
 
@@ -223,6 +247,9 @@ def build_free_agents(league, year, injury_data, window, size=150):
         merged["Games Left"] = 0
 
     by_name = {getattr(p, "name", None): p for p in healthy}
+    # Same 9-cat value, against the same league reference, as the rosters' `value` — the
+    # Streamers page seats a pickup in your lineup day by day by it (lib/streamers.ts).
+    values = D._value_rank_scores_from_df(merged, rank_ref)
     out = []
     for _, r in merged.iterrows():
         p = by_name.get(r["Player"])
@@ -230,6 +257,7 @@ def build_free_agents(league, year, injury_data, window, size=150):
             "name": r["Player"],
             "nbaTeam": r.get("NBA_Team", ""),
             "gamesLeft": int(r.get("Games Left", 0) or 0),
+            "value": _round(values.get(r["Player"], 0.0), 3),
             "avg": [_round(float(r.get(s, 0) or 0), 3) for s in STATS],
             "status": str(getattr(p, "injuryStatus", "") or "") if p else "",
         })
@@ -386,7 +414,12 @@ def fetch_player_history(player_ids, season_year, workers=8):
     return out
 
 
-def fetch_last_game_dates(player_ids, workers=8):
+def _before_season(season_year):
+    """The "no game this season" date: earlier than any game of season ``season_year``."""
+    return datetime(season_year - 1, 7, 1).date()
+
+
+def fetch_last_game_dates(player_ids, season_year, workers=8):
     """
     ``{playerId: date}`` — the last REGULAR-SEASON game each player actually appeared in.
 
@@ -405,14 +438,24 @@ def fetch_last_game_dates(player_ids, workers=8):
     One request per player (~290), threaded, alongside the career-history pass — the same
     cost and the same failure mode: a player we cannot date is simply left out of the map,
     and `drop_stale_windows` then leaves his windows alone rather than guessing.
+
+    THE SEASON IS ASKED FOR EXPLICITLY (2026-10-21). ESPN's default game log lags the
+    calendar: two days into 2026-27 it still served 2025-26, so every player who HAD
+    played this season looked last seen in April and lost his real opening-week windows
+    (386 cleared — Doncic, Edwards, Leonard, Curry among them). A player whose
+    season-``season_year`` log has no regular-season game yet gets the day before the
+    season as his date, so ESPN's backfilled windows are still dropped for him.
     """
     from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
 
     ids = [int(i) for i in player_ids if i]
+    before_season = _before_season(season_year)
 
     def one(pid):
         try:
-            data = D.HTTP.get(_ATHLETE_GAMELOG_URL.format(pid=pid), timeout=20).json()
+            data = D.HTTP.get(
+                _ATHLETE_GAMELOG_URL.format(pid=pid) + f"?season={season_year}", timeout=20
+            ).json()
         except Exception:  # noqa: BLE001
             return pid, None
         events = data.get("events") or {}
@@ -438,7 +481,7 @@ def fetch_last_game_dates(player_ids, workers=8):
                 continue
             if latest is None or when > latest:
                 latest = when
-        return pid, latest
+        return pid, latest or before_season
 
     out = {}
     failed = 0
@@ -453,7 +496,7 @@ def fetch_last_game_dates(player_ids, workers=8):
     return out
 
 
-def drop_stale_windows(pool, last_games, as_of):
+def drop_stale_windows(pool, last_games, as_of, season_start=None):
     """
     Blank the recent windows ESPN backfilled with an out-of-window game.
 
@@ -467,6 +510,12 @@ def drop_stale_windows(pool, last_games, as_of):
     `as_of` is the last date any player in the pool played, not today's. Once the season
     is over ESPN freezes these sets at its end, so measuring back from the current date
     would call every window stale in the offseason.
+
+    `season_start` is the "no game this season" date fetch_last_game_dates hands back. A
+    player whose FANTASY line already has games this season (StatSource current/blend)
+    but whose game log still shows none keeps his windows: the log lags the fantasy feed
+    by up to a day (tonight's game counts in one before the other), and those windows are
+    the real thing, not ESPN's backfill.
 
     Returns the number of (player, window) pairs cleared, for the build log.
     """
@@ -482,6 +531,9 @@ def drop_stale_windows(pool, last_games, as_of):
         # No date means the fetch failed for him; leave his data untouched rather than
         # deleting a window on the strength of a missing request.
         if not played:
+            continue
+        if (season_start and played <= season_start
+                and p.get("StatSource") in ("current", "blend")):
             continue
         for prefix, days, recent_col, trend_col in windows:
             if (as_of - played).days <= days:
@@ -586,12 +638,13 @@ def build_player_pool(app):
     # fetch_last_game_dates. Must run BEFORE the rows are assembled below, because it
     # rewrites Recent/Trend and the L30_/L15_ columns in place.
     t_last = time.perf_counter()
-    last_games = fetch_last_game_dates(hist_ids)
+    last_games = fetch_last_game_dates(hist_ids, config.ESPN_SEASON_YEAR)
+    season_start = _before_season(config.ESPN_SEASON_YEAR)
     if last_games:
         # Measured from the last game ANYONE played, not today: ESPN freezes these sets
         # at season end, so an offseason export dated from today would void every window.
         as_of = max(last_games.values())
-        cleared = drop_stale_windows(pool, last_games, as_of)
+        cleared = drop_stale_windows(pool, last_games, as_of, season_start)
         print(f"  last-game dates: {len(last_games)} players, {cleared} stale windows "
               f"cleared as of {as_of} ({time.perf_counter() - t_last:.1f}s)", flush=True)
     # ESPN's own rankings for NEXT season — the outside opinion the draft board is read
@@ -642,6 +695,11 @@ def build_player_pool(app):
         # season), "last" (2025-26 shown until he plays), "proj" (rookie projection).
         if p.get("StatSource"):
             row["statSource"] = p["StatSource"]
+        # The games the line rests on (gp, plus last season's for a blend) — see SampleGP
+        # in engine/data.py. Only written when it differs, to keep the pool small.
+        sample = int(_round(p.get("SampleGP", 0), 0) or 0)
+        if sample and sample != row["gp"]:
+            row["sampleGp"] = sample
         bio = ages.get(row["playerId"]) or {}
         if "age" in bio:
             row["age"] = bio["age"]
@@ -1040,8 +1098,9 @@ def _reading_window_ok():
         against 72% live, 2026-10-21); and
       - none of today's games has tipped off — once one has, its stats are in neither the
         settled total nor (correctly) the projection's remainder.
-    The scheduled 7 AM and 5:30 PM runs pass; a manual late-night run, or a scheduled one
-    GitHub started after tip-off, is skipped rather than logging a wrong point.
+    The scheduled two-hourly runs from 6 AM to the first tip-off pass; a run during or
+    after the night's games, or in the small hours, is skipped rather than logging a
+    wrong point.
     """
     now = datetime.now(ZoneInfo("America/New_York"))
     if now.hour < 6:
@@ -1650,13 +1709,21 @@ def main():
 
     current_vector = stat_vector
 
+    # Every roster's lines first, so player value is scored against the whole league
+    # rather than each roster against itself (who sits on a crowded day ranks by it).
+    frames = {t.team_id: roster_frame(t.roster, t.team_name, yr) for t in league.teams}
+    league_ref = pd.concat([f for f in frames.values() if f is not None and not f.empty],
+                           ignore_index=True) if frames else None
+
     matchups = []
     for m in league.box_scores(matchup_period=period):
         home, away = m.home_team, m.away_team
         if not hasattr(home, "team_id") or not hasattr(away, "team_id"):
             continue
-        h_players = build_roster(home.roster, home.team_name, yr, injury, window)
-        a_players = build_roster(away.roster, away.team_name, yr, injury, window)
+        h_players = build_roster(home.roster, home.team_name, yr, injury, window,
+                                 frame=frames.get(home.team_id), rank_ref=league_ref)
+        a_players = build_roster(away.roster, away.team_name, yr, injury, window,
+                                 frame=frames.get(away.team_id), rank_ref=league_ref)
         h_mu, h_var = team_totals(h_players)
         a_mu, a_var = team_totals(a_players)
         # A SNAPSHOT of the live tier, so a page can paint immediately from static data
@@ -1671,7 +1738,7 @@ def main():
         print(f"  {home.team_name} vs {away.team_name}: "
               f"{len(h_players)}v{len(a_players)} players", flush=True)
 
-    free_agents = build_free_agents(league, yr, injury, window)
+    free_agents = build_free_agents(league, yr, injury, window, rank_ref=league_ref)
     print(f"  free agents: {len(free_agents)}", flush=True)
 
     week_schedule = None
@@ -1718,6 +1785,11 @@ def main():
         "statIds": espn_stat_ids(),  # ESPN's numeric id per stat (see espn_stat_ids)
         "categories": list(config.CATEGORIES),   # the 15 SCORED categories
         "variance": [_round(v, 4) for v in VARIANCE],
+        "projectionError": [_round(v, 4) for v in PROJECTION_ERROR],
+        # Correlation of the per-category margins, in `categories` order — the browser
+        # draws the categories jointly from it (lib/probability.ts matchupOutcome).
+        "categoryCorrelation": [[_round(v, 3) for v in row]
+                                for row in config.CATEGORY_CORRELATION],
         "lowerIsBetter": ["TO"],
         # The roster's slot shape, so the League Rosters board can draw empty spots.
         "rosterSlots": fetch_roster_slots(league),
@@ -1779,8 +1851,12 @@ def validate(payload):
     """Fail loudly here rather than shipping malformed data to the browser."""
     problems = []
     n = len(payload["stats"])
-    if n != len(payload["variance"]):
+    if n != len(payload["variance"]) or n != len(payload["projectionError"]):
         problems.append("stats/variance length mismatch")
+    nc = len(payload["categories"])
+    corr = payload["categoryCorrelation"]
+    if len(corr) != nc or any(len(row) != nc for row in corr):
+        problems.append("categoryCorrelation is not categories x categories")
     if not payload["teams"]:
         problems.append("no teams")
     if not payload["matchups"]:

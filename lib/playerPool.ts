@@ -8,6 +8,41 @@
  */
 
 import type { PoolPlayer } from "./league";
+import { gamesFor, VALUE_INPUTS } from "./percentiles";
+
+/** ESPN's season year as the app prints it: 2027 -> "2026-27". */
+export const seasonLabel = (s: number) => `${s - 1}-${String(s % 100).padStart(2, "0")}`;
+
+/**
+ * The player's ACTUAL line for this season, for the card's this-season view.
+ *
+ * Under 10 games his pool row is a BLEND — this season's few games mixed with last
+ * season's (engine/data.py) — which is right for rankings and wrong for a card labelled
+ * 2026-27: it printed 71 GP and last season's averages under this season's name (owner,
+ * 2026-10-21). Player Value's 2026-27 view uses it for the same reason. A blend only
+ * lasts ten games, so every game of his season so far sits
+ * inside his last-30 window: that window IS his season to date, valued on the same scale
+ * (`recent`). Anything else, or a blend with no window, is returned unchanged.
+ */
+export function thisSeasonOnly(p: PoolPlayer): PoolPlayer {
+  const w = p.last30;
+  if (p.statSource !== "blend" || !w?.gp) return p;
+  const n = (k: string) => Number(w[k] ?? 0);
+  const rate = (made: string, att: string) => (n(att) > 0 ? n(made) / n(att) : 0);
+  const line: Record<string, number> = {};
+  for (const k of VALUE_INPUTS) line[k] = n(k);
+  return {
+    ...p,
+    ...line,
+    gp: w.gp,
+    sampleGp: undefined,
+    value: p.recent,
+    fgPct: rate("FGM", "FGA"),
+    ftPct: rate("FTM", "FTA"),
+    tpPct: rate("3PM", "3PA"),
+    statSource: "current",
+  };
+}
 
 /** Statuses that mean UNAVAILABLE, not just a game-time decision (config.INJURED_STATUSES). */
 const INJURED = new Set(["OUT", "INJURY_RESERVE", "SSPD"]);
@@ -268,9 +303,9 @@ export const MIN_GP_OPTIONS = [0, 5, 10, 15, 20] as const;
  * window is being ranked, not always the season count.
  */
 export function gpFor(p: PoolPlayer, basis: ValueBasis): number {
-  if (basis === "30D") return p.last30?.gp ?? 0;
-  if (basis === "15D") return p.last15?.gp ?? 0;
-  return p.gp ?? 0;
+  // One definition with the Player Card's qualifying bar — a blended line counts both
+  // seasons' games (see gamesFor).
+  return gamesFor(p, basis);
 }
 
 /** The counting stats summed when a set of players is treated as one roster. */

@@ -1,13 +1,11 @@
 "use client";
 
-import GamesLeftCell from "./GamesLeftCell";
 import { useMemo } from "react";
 import type { LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeBench } from "@/lib/bench";
 import { useLiveSides } from "@/lib/useLiveSides";
 import LiveBadge from "./LiveBadge";
-import PlayerLink from "./PlayerLink";
 
 interface Props {
   league: LeagueData;
@@ -17,8 +15,6 @@ interface Props {
   /** false = freeze on the snapshot, never fetch (?demo=1). */
   live?: boolean;
 }
-
-const SHOWN = ["PTS", "FGA", "FG%", "TO", "REB", "AST"];
 
 export default function BenchView({
   league,
@@ -52,8 +48,7 @@ export default function BenchView({
     );
   }
 
-  const { playAll, benchAll, benchAllBetter, perPlayer } = analysis;
-  const hurting = perPlayer.filter((p) => p.hurts);
+  const { playAll, benchAll, benchAllBetter } = analysis;
   const catsDiff = playAll.expectedCats - benchAll.expectedCats;
   const winDiff = (playAll.win - benchAll.win) * 100;
 
@@ -61,8 +56,8 @@ export default function BenchView({
    * THE OLD (Streamlit) LAYOUT, by request (owner, 2026-10-20): one decision — play the
    * rest of the week, or sit everyone and bank what you have — then the two scenarios
    * side by side, which categories each one helps, and the per-category comparison. Same
-   * numbers as before (lib/bench.ts); the per-player table is kept, folded away, for the
-   * finer question of sitting one player.
+   * numbers as before (lib/bench.ts). The folded-away "sit one player" table was removed
+   * (owner, 2026-10-21).
    */
   const rows = league.categories.map((cat, i) => {
     const play = (playAll.categoryProbs[i] ?? 0) * 100;
@@ -146,75 +141,6 @@ export default function BenchView({
           </tbody>
         </table>
       </div>
-
-      <details className="bn-more">
-        <summary>
-          Sit one player instead{" "}
-          <span className="bn-note">
-            {hurting.length
-              ? `${hurting.length} of ${perPlayer.length} would add expected cats by sitting`
-              : "nobody is a net negative"}
-          </span>
-        </summary>
-        <p className="caption">
-          Positive &Delta; means your expected category total goes <strong>up</strong> if that
-          player sits all his remaining games this matchup.
-        </p>
-        <div className="table-scroll">
-          <table className="sheet">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>NBA</th>
-                <th className="num">GL</th>
-                <th className="num">&Delta; Cats if sat</th>
-                <th className="num">&Delta; Win %</th>
-                <th>Verdict</th>
-                {SHOWN.map((s) => (
-                  <th key={s} className="num">
-                    {s}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {perPlayer.map((r) => (
-                <tr key={r.player.name}>
-                  <td>
-                    <PlayerLink name={r.player.name} />
-                  </td>
-                  <td>{r.player.nbaTeam}</td>
-                  <GamesLeftCell player={r.player} />
-                  <td className="num" style={{ fontWeight: r.hurts ? 700 : 400 }}>
-                    {r.deltaCats >= 0 ? "+" : ""}
-                    {r.deltaCats.toFixed(3)}
-                  </td>
-                  <td className="num">
-                    {r.deltaWinPct >= 0 ? "+" : ""}
-                    {r.deltaWinPct.toFixed(1)}
-                  </td>
-                  <td>
-                    {r.hurts ? (
-                      <span className="tag">CONSIDER SITTING</span>
-                    ) : (
-                      <span style={{ color: "var(--ink-3)" }}>play</span>
-                    )}
-                  </td>
-                  {SHOWN.map((s) => {
-                    const i = league.stats.indexOf(s);
-                    const v = i >= 0 ? r.player.avg[i].toFixed(1) : ratio(league, r.player.avg, s);
-                    return (
-                      <td key={s} className="num">
-                        {v}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
     </>
   );
 }
@@ -265,18 +191,4 @@ function Scenario({
       </div>
     </section>
   );
-}
-
-/** Per-game ratio categories aren't stored directly — derive from made/attempted. */
-function ratio(league: LeagueData, avg: number[], cat: string): string {
-  const pairs: Record<string, [string, string]> = {
-    "FG%": ["FGM", "FGA"],
-    "FT%": ["FTM", "FTA"],
-    "3P%": ["3PM", "3PA"],
-  };
-  const pair = pairs[cat];
-  if (!pair) return "-";
-  const made = avg[league.stats.indexOf(pair[0])] ?? 0;
-  const att = avg[league.stats.indexOf(pair[1])] ?? 0;
-  return att > 0 ? `${((made / att) * 100).toFixed(1)}%` : "-";
 }

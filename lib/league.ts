@@ -11,8 +11,8 @@ export interface PlayerRow {
   nbaTeam: string;
   /**
    * COUNTED games left: on a day more of the roster plays than there are starting
-   * slots, the lowest scorers lose that day. What the projections multiply by — not what
-   * to show as "games left" (see `scheduledGames`).
+   * slots, the lowest-VALUE players lose that day. What the projections multiply by — not
+   * what to show as "games left" (see `scheduledGames`).
    */
   gamesLeft: number;
   /**
@@ -22,6 +22,12 @@ export interface PlayerRow {
   nbaGamesLeft?: number;
   /** Per-game averages (season blended with last 30). Moments derive from this. */
   avg: StatVector;
+  /**
+   * 9-cat value of `avg`, scored against every rostered player in the league — the rank
+   * for who sits on a crowded day, the same one the export's counted games used. Absent
+   * on exports built before 2026-10-21; callers fall back to points per game.
+   */
+  value?: number;
   status: string;
   injured: boolean;
 }
@@ -33,6 +39,8 @@ export interface FreeAgent {
   gamesLeft: number;
   avg: StatVector;
   status: string;
+  /** 9-cat value on the rosters' scale (see PlayerRow.value). Absent on older exports. */
+  value?: number;
 }
 
 export interface TeamSide {
@@ -187,6 +195,12 @@ export interface PoolPlayer {
    * exports, which were always "current".
    */
   statSource?: "current" | "last" | "proj" | "blend";
+  /**
+   * The games the season line RESTS ON, when that differs from `gp`: a "blend" mixes this
+   * season's few games with all of last season's, so it is both. Absent = `gp`. Read
+   * through `gamesFor` (lib/percentiles.ts), never directly.
+   */
+  sampleGp?: number;
   name: string;
   nbaTeam: string;
   position: string;
@@ -332,6 +346,11 @@ export interface LeagueData extends LeagueMeta {
   rosterSlots?: string[];
   /** Per-stat variance factor. The one source for turning averages into moments. */
   variance: number[];
+  /**
+   * Per-stat projection error (CV of the average itself), the second term of
+   * `playerMoments`. Optional — older exports predate it, and their projVar left it out.
+   */
+  projectionError?: number[];
   statIds: Record<string, number>;
   teams: Team[];
   matchups: Matchup[];
@@ -350,6 +369,28 @@ export interface LeagueData extends LeagueMeta {
     end: string;
     teams: Record<string, Record<string, string>>;
   };
+}
+
+/**
+ * Whether the all-play power rankings have taken over from week 0. They need week 1 to be
+ * FINAL, not merely started (owner, 2026-10-21): the export scores a week as soon as any
+ * box score has points, and a partial week ranks teams by how many games they happen to
+ * have played — one night in, a roster with a single player out had gone from 1st to 8th.
+ */
+export function allPlayStarted(league: LeagueData): boolean {
+  const pr = league.seasonData?.powerRankings;
+  const scored = pr?.teams.some((t) => t.record.some((n) => n > 0)) ?? false;
+  return scored && firstWeekFinal(league);
+}
+
+/**
+ * Whether any matchup week has finished — the gate for anything built on standings.
+ * Before it, every record is 0-0-0 while all-play % is already scoring the half-played
+ * week 1, so Luck (win % minus all-play %) reads -70 and the "standings" are ESPN's
+ * tiebreak order, not a finish (owner, 2026-10-21).
+ */
+export function firstWeekFinal(league: LeagueData): boolean {
+  return league.seasonOver || league.leaguePeriod > 1;
 }
 
 /**
@@ -386,7 +427,13 @@ export function periodLabel(league: LeagueData, period = league.period): string 
  * One player's (mu, variance) contribution over their remaining games.
  *
  *   mu  = games * avg
- *   var = games * (avg * varianceFactor)^2
+ *   var = games * (avg * varianceFactor)^2 + (games * avg * projectionError)^2
+ *
+ * The first term is game-to-game noise; the second is the chance the average itself is
+ * wrong, a miss repeated in every game — so it grows with games^2, and a player's
+ * variance is NOT additive over games. Take a player's games down from g to g' by
+ * subtracting his g-game moments and adding his g'-game ones, never by subtracting
+ * (g - g') games' worth. Matches build_data.py `player_moments` exactly.
  *
  * Derived here rather than shipped, so the formula has exactly one home. Variances add
  * across independent players — that identity is what makes "drop A, add B" a subtraction
@@ -395,12 +442,15 @@ export function periodLabel(league: LeagueData, period = league.period): string 
 export function playerMoments(
   avg: StatVector,
   gamesLeft: number,
-  variance: number[]
+  variance: number[],
+  projectionError?: number[]
 ): Moments {
   const g = Math.max(0, gamesLeft);
   return {
     mu: avg.map((a) => a * g),
-    var: avg.map((a, i) => g * Math.pow(a * variance[i], 2)),
+    var: avg.map(
+      (a, i) => g * Math.pow(a * variance[i], 2) + Math.pow(g * a * (projectionError?.[i] ?? 0), 2)
+    ),
   };
 }
 
@@ -518,6 +568,13 @@ export function sideMoments(side: TeamSide, current: StatVector): Moments {
 }
 
 /** Live win probability for a matchup, given whatever current totals we have. */
+/**
+ * A win probability as the app prints it EVERYWHERE: one decimal, "71.3%" (owner,
+ * 2026-10-21). One formatter so Current Matchup, League Home, Game Day and Schedule can
+ * never show the same number two ways.
+ */
+export const winPctText = (p: number) => `${(p * 100).toFixed(1)}%`;
+
 export function winProbability(
   meta: LeagueMeta,
   side: TeamSide,

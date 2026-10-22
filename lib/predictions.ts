@@ -43,6 +43,20 @@ export interface PreWeekLog {
   periods: Record<string, PreWeekPeriod>;
 }
 
+/**
+ * The current category correlation, when it applies to a log's categories. The logs do
+ * not carry one; a log scored under different categories gets independent categories
+ * rather than a matrix whose rows mean something else.
+ */
+function logCorrelation(
+  log: { categories?: string[] } | null,
+  meta: LeagueMeta
+): number[][] | undefined {
+  const cats = log?.categories;
+  if (cats && cats.join() !== meta.categories.join()) return undefined;
+  return meta.categoryCorrelation;
+}
+
 /** One team's forecast for one week, already turned into a probability. */
 export interface Forecast {
   /** Chance the model gave this team of winning the matchup, 0-1. */
@@ -93,6 +107,7 @@ export function forecastFor(
     stats: log?.stats ?? meta.stats,
     categories: log?.categories ?? meta.categories,
     lowerIsBetter: log?.lowerIsBetter ?? meta.lowerIsBetter,
+    categoryCorrelation: logCorrelation(log, meta),
   };
   const out = matchupOutcome(scoreMeta, you, opp);
   return {
@@ -181,6 +196,7 @@ export function winProbHistory(
     stats: log?.stats ?? meta.stats,
     categories: log?.categories ?? meta.categories,
     lowerIsBetter: log?.lowerIsBetter ?? meta.lowerIsBetter,
+    categoryCorrelation: logCorrelation(log, meta),
   };
   for (const r of log?.periods?.[String(period)] ?? []) {
     const g = r.games.find((x) => x.homeId === teamId || x.awayId === teamId);

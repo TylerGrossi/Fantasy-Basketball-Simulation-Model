@@ -1,6 +1,6 @@
 import SeasonSummaryView, { type SummaryRow } from "@/components/SeasonSummaryView";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
-import type { StandingRow } from "@/lib/league";
+import { firstWeekFinal, periodLabel, type StandingRow } from "@/lib/league";
 
 /**
  * Season Summary: champion, one team's headline numbers, and the final standings.
@@ -25,6 +25,17 @@ export default async function Page() {
       <>
         <h1>Season</h1>
         <p className="caption">No season data — run `npm run data`.</p>
+      </>
+    );
+  }
+
+  if (!firstWeekFinal(league)) {
+    return (
+      <>
+        <h1>Season</h1>
+        <p className="caption">
+          Standings start once {periodLabel(league, 1)} is final.
+        </p>
       </>
     );
   }

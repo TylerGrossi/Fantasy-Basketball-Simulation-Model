@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { StatVector } from "./probability";
 import type { BoxLine } from "./loadLeague";
 
@@ -30,6 +30,22 @@ export interface LiveTotals {
   gameLeft: Record<string, number> | null;
   /** Every matchup this period, live (League Home's scores). Null until the first fetch. */
   games: LiveGame[] | null;
+  /** Each side's lines for TODAY, with whether the lineup slot counts (Game Day). */
+  youToday: TodayLine[] | null;
+  oppToday: TodayLine[] | null;
+}
+
+/** One player's single-day line for today's scoring period. */
+export interface TodayLine {
+  name: string;
+  playerId: number | null;
+  /** In a lineup slot that counts — false on the bench or IR. */
+  counted: boolean;
+  /** ESPN's NBA event id. Empty before his game starts. */
+  gameId: string;
+  min: number;
+  /** Today's totals in `stats` order. Null before his game starts (or with no game). */
+  v: number[] | null;
 }
 
 /** One matchup's live totals, from the same request. */
@@ -69,10 +85,17 @@ export function useLiveTotals(
   enabled = true,
   refreshMs = 90_000
 ): LiveTotals {
-  const [you, setYou] = useState<StatVector>(snapshotYou);
-  const [opp, setOpp] = useState<StatVector>(snapshotOpp);
-  const [state, setState] = useState<LiveState>(enabled ? "snapshot" : "frozen");
-  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  // A server page that already fetched this matchup (LiveSeed) hands the result down, so
+  // the FIRST PAINT is live — no snapshot numbers flashing before the swap.
+  const seedCtx = useContext(LiveSeedContext);
+  const key = `${period}-${teamId}`;
+  const seed = enabled && seedCtx?.key === key ? seedCtx.result : null;
+  const [you, setYou] = useState<StatVector>(seed?.you ?? snapshotYou);
+  const [opp, setOpp] = useState<StatVector>(seed?.opp ?? snapshotOpp);
+  const [state, setState] = useState<LiveState>(
+    !enabled ? "frozen" : seed ? "live" : "snapshot"
+  );
+  const [fetchedAt, setFetchedAt] = useState<string | null>(seed?.fetchedAt ?? null);
   const [extra, setExtra] = useState<{
     youLines: BoxLine[] | null;
     oppLines: BoxLine[] | null;
@@ -80,13 +103,17 @@ export function useLiveTotals(
     oppPlayed: string[] | null;
     gameLeft: Record<string, number> | null;
     games: LiveGame[] | null;
+    youToday: TodayLine[] | null;
+    oppToday: TodayLine[] | null;
   }>({
-    youLines: null,
-    oppLines: null,
-    youPlayed: null,
-    oppPlayed: null,
-    gameLeft: null,
-    games: null,
+    youLines: seed?.youLines ?? null,
+    oppLines: seed?.oppLines ?? null,
+    youPlayed: seed?.youPlayed ?? null,
+    oppPlayed: seed?.oppPlayed ?? null,
+    gameLeft: seed?.gameLeft ?? null,
+    games: seed?.games ?? null,
+    youToday: seed?.youToday ?? null,
+    oppToday: seed?.oppToday ?? null,
   });
 
   useEffect(() => {
@@ -94,7 +121,7 @@ export function useLiveTotals(
     // Every component on the page that asks for the same matchup shares ONE poller (see
     // `subscribe`): the Current Matchup page mounts four of them, which used to mean
     // four identical ESPN round trips every 90 seconds.
-    return subscribe(`${period}-${teamId}`, period, teamId, refreshMs, (r) => {
+    return subscribe(key, period, teamId, refreshMs, seed, (r) => {
       if (r.ok) {
         setYou(r.you);
         setOpp(r.opp);
@@ -105,6 +132,8 @@ export function useLiveTotals(
           oppPlayed: r.oppPlayed,
           gameLeft: r.gameLeft,
           games: r.games,
+          youToday: r.youToday,
+          oppToday: r.oppToday,
         });
         setFetchedAt(r.fetchedAt);
         setState("live");
@@ -112,9 +141,50 @@ export function useLiveTotals(
         setState("error");
       }
     });
-  }, [period, teamId, refreshMs, enabled]);
+    // `seed` is first-render data only; a new seed object must not restart the poller.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, period, teamId, refreshMs, enabled]);
 
   return { you, opp, state, fetchedAt, ...extra };
+}
+
+/* ------------------------------------------------------------- server seed */
+
+type LiveOk = Extract<LiveResult, { ok: true }>;
+
+/**
+ * A live result fetched by the SERVER while it rendered the page (lib/liveMatchup.ts
+ * liveSeed), keyed to one matchup. Provided by components/LiveSeed.tsx.
+ */
+export const LiveSeedContext = createContext<{ key: string; result: LiveOk } | null>(null);
+
+/** "7:42:05 PM" in Eastern — the same on the server and in the browser, so a seeded
+ *  first paint hydrates to identical text. */
+const clock = (iso: string | undefined) =>
+  new Date(iso ?? Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York" });
+
+/**
+ * `/api/live`'s JSON as the hook's result — one reading for the browser's poll and the
+ * server's seed. Null when the payload is malformed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function toLiveResult(data: any): LiveOk | null {
+  if (!Array.isArray(data?.you) || !Array.isArray(data?.opp)) return null;
+  return {
+    ok: true,
+    you: data.you,
+    opp: data.opp,
+    // Null when an older deploy of the route does not send them.
+    youLines: Array.isArray(data.youLines) ? data.youLines : null,
+    oppLines: Array.isArray(data.oppLines) ? data.oppLines : null,
+    youPlayed: Array.isArray(data.youPlayedToday) ? data.youPlayedToday : null,
+    oppPlayed: Array.isArray(data.oppPlayedToday) ? data.oppPlayedToday : null,
+    gameLeft: data.gameLeft && typeof data.gameLeft === "object" ? data.gameLeft : null,
+    games: Array.isArray(data.games) ? data.games : null,
+    youToday: Array.isArray(data.youToday) ? data.youToday : null,
+    oppToday: Array.isArray(data.oppToday) ? data.oppToday : null,
+    fetchedAt: clock(data.fetchedAt),
+  };
 }
 
 /* ------------------------------------------------------------ shared poller */
@@ -130,6 +200,8 @@ type LiveResult =
       oppPlayed: string[] | null;
       gameLeft: Record<string, number> | null;
       games: LiveGame[] | null;
+      youToday: TodayLine[] | null;
+      oppToday: TodayLine[] | null;
       fetchedAt: string;
     }
   | { ok: false };
@@ -152,36 +224,25 @@ function subscribe(
   period: number,
   teamId: number,
   refreshMs: number,
+  /** The server's seed, when the page had one: the loop starts from it instead of a fetch. */
+  primed: LiveResult | null,
   listener: (r: LiveResult) => void
 ): () => void {
   let p = pollers.get(key);
   if (!p) {
-    const poller: Poller = { listeners: new Set(), last: null, timer: 0 as never };
+    const poller: Poller = { listeners: new Set(), last: primed, timer: 0 as never };
     const refresh = async () => {
       let r: LiveResult;
       try {
-        const res = await fetch(`/api/live?period=${period}&teamId=${teamId}`, {
+        // Under a minute between polls (Game Day): ask for the route's shorter cache.
+        const fast = refreshMs < 60_000 ? "&fast=1" : "";
+        const res = await fetch(`/api/live?period=${period}&teamId=${teamId}${fast}`, {
           cache: "no-store",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (!Array.isArray(data.you) || !Array.isArray(data.opp)) {
-          throw new Error("malformed response");
-        }
-        r = {
-          ok: true,
-          you: data.you,
-          opp: data.opp,
-          // Null when an older deploy of the route does not send them.
-          youLines: Array.isArray(data.youLines) ? data.youLines : null,
-          oppLines: Array.isArray(data.oppLines) ? data.oppLines : null,
-          youPlayed: Array.isArray(data.youPlayedToday) ? data.youPlayedToday : null,
-          oppPlayed: Array.isArray(data.oppPlayedToday) ? data.oppPlayedToday : null,
-          gameLeft:
-            data.gameLeft && typeof data.gameLeft === "object" ? data.gameLeft : null,
-          games: Array.isArray(data.games) ? data.games : null,
-          fetchedAt: new Date().toLocaleTimeString(),
-        };
+        const ok = toLiveResult(await res.json());
+        if (!ok) throw new Error("malformed response");
+        r = ok;
       } catch {
         r = { ok: false };
       }
@@ -191,7 +252,9 @@ function subscribe(
     poller.timer = setInterval(refresh, refreshMs);
     pollers.set(key, poller);
     p = poller;
-    void refresh();
+    // Seeded: the server fetched this moments ago, so the first poll waits for the
+    // interval rather than re-asking ESPN the same question on load.
+    if (!primed) void refresh();
   } else if (p.last) {
     listener(p.last);
   }

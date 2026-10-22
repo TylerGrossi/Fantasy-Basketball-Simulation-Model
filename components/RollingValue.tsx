@@ -8,10 +8,17 @@ import {
   useGameLog,
   type EspnGameLog,
 } from "@/lib/gamelog";
-import { makeValuer, type StatLine } from "@/lib/percentiles";
+import {
+  doubleDouble,
+  makeValuer,
+  valueTotal,
+  VALUE_INPUTS,
+  type StatLine,
+} from "@/lib/percentiles";
 
 /**
- * Rolling 9-cat value across the season, from the player's own box scores.
+ * Rolling value (all fifteen league categories) across the season, from the player's own
+ * box scores.
  *
  * The three rows of the window table above say where a player is NOW, at three zoom
  * levels. None of them say WHEN he got there — a +2.0 season value reads the same whether
@@ -28,7 +35,7 @@ import { makeValuer, type StatLine } from "@/lib/percentiles";
  * behind all three, and it stays on one smoothing and one scale so any two players, or any
  * two readings of the same player, are directly comparable.
  *
- * Zero is the pool average by construction — a 9-cat value is a sum of z-scores centred on
+ * Zero is the pool average by construction — a value is a sum of z-scores centred on
  * the player pool — so the baseline is a real reference, not a drawn-in convention.
  *
  * Reads the shared game log from `lib/gamelog` — the same single request the game-log
@@ -55,7 +62,7 @@ const ROLL = 10;
  *
  * The window EXPANDS up to `ROLL` rather than waiting for it to fill, so the line starts
  * near the player's first game instead of well into the season. But not at game one: a
- * single-game 9-cat value swings far enough to peg the axis, and a chart that opens pinned
+ * single-game value swings far enough to peg the axis, and a chart that opens pinned
  * to the floor because of one cold night is worse than one that starts a few games late.
  */
 const MIN_SAMPLE = 5;
@@ -69,13 +76,18 @@ const MIN_SAMPLE = 5;
  * would draw the same picture. Constant bounds mean height is meaningful on its own and
  * the eye can carry a shape from one card to the next.
  *
- * The bounds come from the pool: season values run -9.4 to +13.2, and the short windows,
- * which swing hardest, sit inside -9.9 to +11.2 at the 99th percentile. -12 to +18 clears
- * all of that. A genuine outlier beyond it is clamped to the frame rather than allowed to
- * rescale everything — see `clamp` below.
+ * The bounds come from MEASURED rolling values: every 10-game window of every pool
+ * player's 2025-26 season (13,335 points) on the fifteen-category scale runs -14.1 to
+ * +21.4 at the 1st/99th percentile, -19.6 to +35.0 at the extremes. -20 to +36 holds all
+ * of it, so even an MVP stretch has a shape instead of a flat line along the top. A
+ * genuine outlier beyond it is clamped to the frame rather than allowed to rescale
+ * everything — see `clamp` below.
+ *
+ * Re-measure if the value's formula changes: these were -12 / +18 on the old nine-
+ * category scale, and that frame pinned every good player to its ceiling (2026-10-21).
  */
-const Y_MIN = -12;
-const Y_MAX = 18;
+const Y_MIN = -20;
+const Y_MAX = 36;
 
 /*
  * The x-axis is the player's OWN season, anchored to his first game and his last: the line
@@ -148,7 +160,7 @@ function parseGames(data: EspnGameLog): Game[] {
         if (!Number.isFinite(min) || min <= 0) continue;
 
         const [fgm, fga] = pair(at("FG"));
-        const [tpm] = pair(at("3PT"));
+        const [tpm, tpa] = pair(at("3PT"));
         const [ftm, fta] = pair(at("FT"));
         out.push({
           date: +new Date(meta[ev.eventId]?.gameDate ?? 0),
@@ -160,12 +172,16 @@ function parseGames(data: EspnGameLog): Game[] {
             BLK: Number(at("BLK") ?? 0),
             TO: Number(at("TO") ?? 0),
             "3PM": tpm,
+            "3PA": tpa,
             FGM: fgm,
             FGA: fga,
             FTM: ftm,
             FTA: fta,
           },
         });
+        const line = out[out.length - 1].line;
+        line.DD = doubleDouble(line);
+        line.TW = meta[ev.eventId]?.gameResult === "W" ? 1 : 0;
       }
     }
   }
@@ -173,7 +189,6 @@ function parseGames(data: EspnGameLog): Game[] {
   return out;
 }
 
-const KEYS = ["PTS", "REB", "AST", "STL", "BLK", "TO", "3PM", "FGM", "FGA", "FTM", "FTA"];
 
 /** One plotted point: the rolling value, and which game it was measured after. */
 interface Point {
@@ -185,11 +200,14 @@ interface Point {
 export default function RollingValue({
   playerId,
   pool,
+  season,
 }: {
   playerId: number | null;
   pool: PoolPlayer[];
+  /** The season the card is set to (ESPN year); ESPN's default when omitted. */
+  season?: number;
 }) {
-  const { log, state } = useGameLog(playerId);
+  const { log, state } = useGameLog(playerId, season);
   const games = useMemo(() => (log ? parseGames(log) : null), [log]);
   const valuer = useMemo(() => makeValuer(pool), [pool]);
 
@@ -207,13 +225,13 @@ export default function RollingValue({
       // game one rather than at game ten.
       const win = games.slice(Math.max(0, end - ROLL), end);
       const avg: StatLine = {};
-      for (const k of KEYS) {
+      for (const k of VALUE_INPUTS) {
         avg[k] = win.reduce((a, g) => a + Number(g.line[k] ?? 0), 0) / win.length;
       }
-      const { off, def } = valuer(avg);
+
       // Dated by the LAST game in the window: this is what the player was worth as of
       // that night, which is how a trailing average is read.
-      out.push({ game: end, v: off + def, date: games[end - 1].date });
+      out.push({ game: end, v: valueTotal(valuer(avg)), date: games[end - 1].date });
     }
     return out;
   }, [games, valuer]);
@@ -264,7 +282,7 @@ function Plot({ series }: { series: Point[] }) {
   const last = series[series.length - 1];
 
   // Constant, like the axis they sit on.
-  const yTicks = [15, 10, 5, 0, -5, -10];
+  const yTicks = [30, 20, 10, 0, -10, -20];
 
   const shown = hover != null ? series[hover] : null;
 
@@ -274,7 +292,7 @@ function Plot({ series }: { series: Point[] }) {
         className="rv-svg"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`${ROLL}-game moving average of 9-cat value across the season, currently ${last.v.toFixed(1)} after ${last.game} games`}
+        aria-label={`${ROLL}-game moving average of value across the season, currently ${last.v.toFixed(1)} after ${last.game} games`}
       >
       {yTicks.map((t) => (
         <g key={t}>
@@ -287,7 +305,7 @@ function Plot({ series }: { series: Point[] }) {
             strokeWidth={1}
           />
           {/* Every other label, so six gridlines don't put six numbers down the side. */}
-          {t % 10 === 0 && (
+          {t % 20 === 0 && (
             <text className="rv-tick" x={PAD_L - 5} y={y(t) + 3} textAnchor="end">
               {t > 0 ? `+${t}` : t}
             </text>

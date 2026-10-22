@@ -6,18 +6,17 @@
  * fully described by 14 (mu, variance) pairs, and:
  *
  *   - per category:  P(you win) = Phi( (muY - muO) / sqrt(varY + varO) )
- *   - across categories: the number won is a Poisson-binomial, exact via a small DP
+ *   - across categories: the number won, from the per-category probabilities drawn
+ *     jointly with the measured category correlation (`correlatedWins`, 2026-10-21) —
+ *     or, for an export without that matrix, a Poisson-binomial (independent categories)
  *
- * Validated against the Python Monte Carlo it replaces (200,000 sims): worst
- * disagreement 0.44pp on matchup win probability, and on streamer rankings the top-10
- * picks were identical with a worst rank displacement of 1. It is ~236x faster, which is
- * what makes live what-ifs (bench a player, add a streamer, run a trade) instant.
+ * The independent version was validated against the Python Monte Carlo it replaced
+ * (200,000 sims): worst disagreement 0.44pp on matchup win probability. It is ~236x
+ * faster, which is what makes live what-ifs (bench a player, add a streamer, run a
+ * trade) instant; the correlated draw keeps that (~0.3ms per matchup).
  *
- * Two inherited modelling assumptions, both carried over from the Python — not new here:
- *   1. Categories are drawn INDEPENDENTLY. A player's PTS and FGM are uncorrelated in the
- *      model, which is not true in reality.
- *   2. Ratio categories (FG%/FT%/3P%) are ratios of normals, approximated by the delta
- *      method. That is the bulk of the 0.44pp gap above.
+ * Remaining modelling assumption: ratio categories (FG%/FT%/3P%) are ratios of normals,
+ * approximated by the delta method with made and attempted treated as independent.
  */
 
 /** Canonical stat order. Must match `stats` in the generated league.json. */
@@ -37,6 +36,12 @@ export interface LeagueMeta {
   categories: string[];
   /** Categories where a LOWER value wins. */
   lowerIsBetter: string[];
+  /**
+   * Correlation of the per-category margins (you minus opponent), `categories` x
+   * `categories`. When present, the categories are drawn jointly (see matchupOutcome);
+   * older exports predate it and fall back to independent categories.
+   */
+  categoryCorrelation?: number[][];
 }
 
 export interface MatchupOutcome {
@@ -188,7 +193,8 @@ export function categoryProbabilities(
 }
 
 /**
- * Poisson-binomial: exact distribution of how many independent categories you win.
+ * Poisson-binomial: exact distribution of how many INDEPENDENT categories you win — the
+ * fallback when the export carries no category correlation.
  * dist[k] = P(exactly k). O(n^2) on 15 categories, i.e. instant.
  */
 export function poissonBinomial(probs: number[]): number[] {
@@ -204,6 +210,116 @@ export function poissonBinomial(probs: number[]): number[] {
   return dist;
 }
 
+// ---------------------------------------------------------------------------
+// Correlated categories (2026-10-21).
+//
+// The categories are not independent: FGM, FGA, PTS, 3PM and 3PA move together (the
+// margins' FGM~PTS correlation is 0.94). The Poisson-binomial above counts them as five
+// separate coin flips, so one hot shooting quarter read as five pieces of good news and
+// swung the live win probability 20+ points with most of the week left.
+//
+// The fix keeps every per-category probability exactly as before — those are the
+// marginals — and only changes how they COMBINE: a Gaussian copula. Each category's
+// margin is a normal; draw the 15 standardised margins jointly with the measured
+// correlation (engine/config.py CATEGORY_CORRELATION, via the export), and you win
+// category c in a draw when its draw clears Phi^-1(p_c). Counting wins per draw gives
+// the distribution over categories won.
+//
+// The draws are FIXED (seeded, generated once per correlation matrix), so the same
+// inputs always give the same answer — no jitter between polls, and a what-if's delta
+// is not swamped by sampling noise because both sides use the same draws. Antithetic
+// pairs (z, -z) make a dead-even matchup exactly 50% and halve the noise elsewhere.
+// ---------------------------------------------------------------------------
+
+const COPULA_DRAWS = 10000; // ~0.3pp standard error
+
+const drawCache = new WeakMap<number[][], Float32Array[]>();
+
+/**
+ * Fixed correlated standard-normal draws, one column per category: `cols[c][d]`.
+ * Column-major so the per-matchup scan is one tight loop per category — the streamers
+ * page runs ~1,800 matchups per render, and row-major was 6x slower.
+ */
+function correlatedDraws(corr: number[][]): Float32Array[] {
+  const cached = drawCache.get(corr);
+  if (cached) return cached;
+  const n = corr.length;
+
+  // Cholesky, with a small ridge in case the rounded matrix is not quite positive definite.
+  const L = corr.map(() => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      let s = corr[i][j] + (i === j ? 1e-6 : 0);
+      for (let k = 0; k < j; k++) s -= L[i][k] * L[j][k];
+      L[i][j] = i === j ? Math.sqrt(Math.max(s, 1e-9)) : s / L[j][j];
+    }
+  }
+
+  // mulberry32: small, seeded, and identical in every browser.
+  let seed = 0x5eed;
+  const rand = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const gauss = () => {
+    let u = 0;
+    while (!u) u = rand();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand());
+  };
+
+  const cols = corr.map(() => new Float32Array(COPULA_DRAWS));
+  const e = new Array(n).fill(0);
+  for (let d = 0; d < COPULA_DRAWS; d += 2) {
+    for (let i = 0; i < n; i++) e[i] = gauss();
+    for (let i = 0; i < n; i++) {
+      let z = 0;
+      for (let k = 0; k <= i; k++) z += L[i][k] * e[k];
+      cols[i][d] = z;
+      cols[i][d + 1] = -z;
+    }
+  }
+  drawCache.set(corr, cols);
+  return cols;
+}
+
+const winsScratch = new Uint8Array(COPULA_DRAWS);
+
+/**
+ * Distribution over the number of categories won, with correlated categories.
+ * dist[k] = P(exactly k). `probs` are the per-category win probabilities (the marginals).
+ */
+export function correlatedWins(
+  meta: LeagueMeta,
+  probs: number[],
+  corr: number[][]
+): number[] {
+  const n = probs.length;
+  const cols = correlatedDraws(corr);
+  const lower = new Set(meta.lowerIsBetter);
+  const wins = winsScratch.fill(0);
+  // The correlation is of the RAW margins (you minus opponent), and p = Phi(t) for the
+  // standardised mean margin t. A higher-is-better category is won when the margin is
+  // positive: z > -t. A lower-is-better one (TO) when it is negative: z < -t, where
+  // p = 1 - Phi(t) makes -t = Phi^-1(p).
+  for (let c = 0; c < n; c++) {
+    const col = cols[c];
+    const q = normalQuantile(probs[c]);
+    // Branchless (`+(a < b)`): each comparison is close to a coin flip, which a branch
+    // predictor cannot learn, and the branchy form ran at half the speed.
+    if (lower.has(meta.categories[c])) {
+      for (let d = 0; d < COPULA_DRAWS; d++) wins[d] += +(col[d] < q);
+    } else {
+      const t = -q;
+      for (let d = 0; d < COPULA_DRAWS; d++) wins[d] += +(col[d] > t);
+    }
+  }
+  const counts = new Array(n + 1).fill(0);
+  for (let d = 0; d < COPULA_DRAWS; d++) counts[wins[d]]++;
+  return counts.map((x) => x / COPULA_DRAWS);
+}
+
 /** Full matchup outcome from two teams' moment vectors. */
 export function matchupOutcome(
   meta: LeagueMeta,
@@ -211,8 +327,12 @@ export function matchupOutcome(
   opp: Moments
 ): MatchupOutcome {
   const categoryProbs = categoryProbabilities(meta, you, opp);
-  const distribution = poissonBinomial(categoryProbs);
   const n = categoryProbs.length;
+  const corr = meta.categoryCorrelation;
+  const distribution =
+    corr && corr.length === n
+      ? correlatedWins(meta, categoryProbs, corr)
+      : poissonBinomial(categoryProbs);
   let win = 0;
   let loss = 0;
   let tie = 0;

@@ -80,6 +80,10 @@ export function weeklyAllPlay(league: LeagueData, teamId: number): SeasonHistory
 
   const weeks: WeekRow[] = [];
   for (const p of periods) {
+    // Finished weeks only. The export always carries the CURRENT period's results, and
+    // a week one night old scored as a loss — 3-10-2 against the field, "expected 0-1" —
+    // while the matchup itself stood at 10-5 (owner, 2026-10-21).
+    if (p.period === league.period && !league.seasonOver) continue;
     const mine = vectorFor(p, teamId);
     if (!mine) continue;
 

@@ -141,6 +141,27 @@ export async function loadConsistency(): Promise<ConsistencyPool | null> {
   }
 }
 
+/** How far ONE GAME spreads per category, from scripts/build_game_spread.mjs. */
+export interface GameSpread {
+  season: number;
+  games: number;
+  /** PTS, 3PM, AST, REB, STL, BLK, TO, and "FG%"/"FT%" as makes − league rate × attempts. */
+  spread: Record<string, number>;
+}
+
+/**
+ * The single-game spreads Game Day values a night with (see makeGameValuer). Fixed per
+ * season, built from last season's logs. Null when the file is missing — Game Day then
+ * falls back to the Player Card's season scale.
+ */
+export async function loadGameSpread(): Promise<GameSpread | null> {
+  try {
+    return await readJson<GameSpread>(dataFile("game-spread.json"));
+  } catch {
+    return null;
+  }
+}
+
 /** One team's week-0 power ranking (see loadWeek0). */
 export interface Week0Rank {
   teamId: number;

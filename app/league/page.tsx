@@ -8,6 +8,9 @@ import {
 import PlayerLink from "@/components/PlayerLink";
 import { periodLabel, type LeagueData, type PoolPlayer } from "@/lib/league";
 import { loadLeague, loadWeek0, myTeam, type Week0Rank } from "@/lib/loadLeague";
+import LiveSeed from "@/components/LiveSeed";
+import { liveSeed } from "@/lib/liveMatchup";
+import { allPlayStarted } from "@/lib/league";
 import { timeLabel } from "@/lib/moves";
 import { playerStatus } from "@/lib/playerPool";
 
@@ -25,6 +28,8 @@ import { playerStatus } from "@/lib/playerPool";
 const ET = "America/New_York";
 const RECENT_MOVES = 8;
 const TREND_ROWS = 6;
+/** Best Players (before the trends start): the top 10, five to a column. */
+const BEST_ROWS = 10;
 /** A riser needs a real sample on both sides of the comparison. */
 const TREND_MIN_GP = 5;
 const TREND_MIN_GP15 = 3;
@@ -47,6 +52,8 @@ export default async function Page() {
     seasonData: {},
   };
   const teamNames = Object.fromEntries(league.teams.map((t) => [t.id, t.name]));
+  // First paint already live (LiveSeed) — see app/scoreboard/page.tsx.
+  const seed = league.seasonOver ? null : await liveSeed(league.period, me.id);
 
   /*
    * A DASHBOARD: all three columns end on the same line. The columns stretch to the
@@ -55,6 +62,7 @@ export default async function Page() {
    * as the card's own space rather than a gap.
    */
   return (
+    <LiveSeed period={league.period} teamId={me.id} data={seed}>
     <LiveMatchupsProvider league={liveLeague} meId={me.id}>
     <div className="lh">
       <div className="lh-col lh-left">
@@ -84,6 +92,7 @@ export default async function Page() {
       </div>
     </div>
     </LiveMatchupsProvider>
+    </LiveSeed>
   );
 }
 
@@ -259,6 +268,12 @@ function badgeClass(action: string) {
  * season's numbers. Before anyone has played, the pool carries last season's lines
  * (statSource "last") and their trends describe last March — so they are left out rather
  * than presented as this week's movers.
+ *
+ * Until enough games are in to show a trend, the card shows the best players instead
+ * (owner, 2026-10-21): THIS season only, numbered, split across the same two columns.
+ * Ranked on the 15-day value, not `value` — `value` blends a player's few games with last
+ * season's line, while the 15-day window holds nothing but this season's games until the
+ * trends take over (TREND_MIN_GP games in).
  */
 function TrendsCard({ pool }: { pool: PoolPlayer[] }) {
   const live = pool.filter(
@@ -273,21 +288,28 @@ function TrendsCard({ pool }: { pool: PoolPlayer[] }) {
     .slice(-TREND_ROWS)
     .reverse()
     .filter((p) => p.trend15 < 0);
+  const best = pool
+    .filter((p) => p.statSource !== "last" && p.statSource !== "proj" && (p.last15?.gp ?? 0) > 0)
+    .sort((a, b) => b.recent15 - a.recent15)
+    .slice(0, BEST_ROWS);
+  const trending = live.length > 0;
 
   return (
     <section className="lh-card">
-      <h2 className="lh-h">
-        Rising &amp; Falling <span className="lh-h-note">last 15 days vs season value</span>
-      </h2>
-      {live.length === 0 ? (
-        <p className="caption">
-          Starts once players have a few games this season — until then every line is
-          last season&rsquo;s.
-        </p>
+      <h2 className="lh-h">{trending ? <>Rising &amp; Falling</> : "Best Players"}</h2>
+      {trending ? (
+        <div className="lh-trends">
+          <TrendList title="Rising" rows={rising} metric={(p) => p.trend15} />
+          <TrendList title="Falling" rows={falling} metric={(p) => p.trend15} />
+        </div>
       ) : (
         <div className="lh-trends">
-          <TrendList title="Rising" rows={rising} />
-          <TrendList title="Falling" rows={falling} />
+          <TrendList rows={best.slice(0, BEST_ROWS / 2)} metric={(p) => p.recent15} rankFrom={1} />
+          <TrendList
+            rows={best.slice(BEST_ROWS / 2)}
+            metric={(p) => p.recent15}
+            rankFrom={BEST_ROWS / 2 + 1}
+          />
         </div>
       )}
       <Link href="/player-value" className="lh-more">
@@ -297,23 +319,37 @@ function TrendsCard({ pool }: { pool: PoolPlayer[] }) {
   );
 }
 
-function TrendList({ title, rows }: { title: string; rows: PoolPlayer[] }) {
+function TrendList({
+  title,
+  rows,
+  metric,
+  rankFrom,
+}: {
+  title?: string;
+  rows: PoolPlayer[];
+  /** The number on the right: the 15-day trend, or this season's value for Best Players. */
+  metric: (p: PoolPlayer) => number;
+  /** Number the rows from here (Best Players); omitted, the rows are unnumbered. */
+  rankFrom?: number;
+}) {
   return (
     <div className="lh-trend">
-      <div className="lh-sub-h">{title}</div>
+      {title && <div className="lh-sub-h">{title}</div>}
       {rows.length === 0 && <p className="caption">Nobody yet.</p>}
-      {rows.map((p) => {
+      {rows.map((p, i) => {
         const free = !p.owner || p.owner === "FA" || p.owner === "Waivers";
+        const v = metric(p);
         return (
           <div className="lh-trend-row" key={p.name}>
+            {rankFrom != null && <span className="lh-seed mono">{rankFrom + i}</span>}
             <span className="lh-trend-who">
               <PlayerLink name={p.name} />
               <span className={`lh-trend-own${free ? " fa" : ""}`}>
                 {free ? "Free agent" : p.owner}
               </span>
             </span>
-            <span className={`lh-trend-d mono ${p.trend15 >= 0 ? "up" : "dn"}`}>
-              {signed(p.trend15)}
+            <span className={`lh-trend-d mono ${v >= 0 ? "up" : "dn"}`}>
+              {signed(v)}
             </span>
           </div>
         );
@@ -464,7 +500,8 @@ function PowerCard({
   draft: Week0Rank[] | null;
 }) {
   const pr = league.seasonData.powerRankings;
-  const played = pr?.teams.some((t) => t.record.some((n) => n > 0));
+  // Week 0 holds until week 1 is final (see allPlayStarted).
+  const played = allPlayStarted(league);
   const draftPlace = new Map((draft ?? []).map((d) => [d.teamId, d.place]));
   // Week 1's move is measured from week 0 (the opening-day value rank), as on Rankings.
   const firstWeek = (pr?.weeks.length ?? 0) <= 1;
@@ -483,7 +520,7 @@ function PowerCard({
     <section className="lh-card">
       <h2 className="lh-h">
         Power Rankings{" "}
-        <span className="lh-h-note">{teams.length ? "all-play" : "week 0 · total value"}</span>
+        <span className="lh-h-note">{teams.length ? "all-play" : "Week 0"}</span>
       </h2>
       {teams.length === 0 ? (
         draft?.length ? (
@@ -535,7 +572,7 @@ function TitleOddsCard({ league, meId }: { league: LeagueData; meId: number }) {
   return (
     <section className="lh-card">
       <h2 className="lh-h">
-        Title Odds <span className="lh-h-note">season simulation</span>
+        Title Odds
       </h2>
       {odds.length === 0 ? (
         <p className="caption">No season simulation in the export.</p>

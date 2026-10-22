@@ -1,11 +1,8 @@
 import type { PoolPlayer } from "./league";
-import type { StatLine } from "./percentiles";
+import { VALUE_INPUTS, type StatLine } from "./percentiles";
 
-/** The stats a 9-cat value is built from, as a plain line. */
-const KEYS = [
-  "PTS", "REB", "AST", "STL", "BLK", "TO", "3PM",
-  "FGM", "FGA", "FTM", "FTA",
-];
+/** Every stat the value is built from, as a plain line. */
+const KEYS = VALUE_INPUTS;
 
 /**
  * A pool player's SEASON line, in the shape the value engine eats.

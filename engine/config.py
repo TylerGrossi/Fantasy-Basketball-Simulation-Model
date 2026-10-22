@@ -136,19 +136,61 @@ REGULAR_SEASON_VARIANCE_EARLY_WEEK = 1.45   # Monday/Tuesday
 REGULAR_SEASON_VARIANCE_MID_WEEK = 1.25     # Wednesday–Friday
 REGULAR_SEASON_VARIANCE_LATE_WEEK = 1.0     # Saturday/Sunday
 
-# Category variance for Monte Carlo simulation (higher = more game-to-game variance)
+# The win-probability model's uncertainty constants. All three are MEASURED from the
+# 2025-26 box scores by scripts/measure_variance.mjs (2026-10-21) — rerun it on a newer
+# archive and paste its output here rather than hand-tuning. They replaced hand-picked
+# factors that had FTM/FTA at 0.2 (measured ~0.67) and FGM/FGA/PTS at 0.7 (~0.35).
+
+# Per-game noise, as a coefficient of variation: a player's week total over g games has
+# variance g * (avg * cv)^2.
 CATEGORY_VARIANCE = {
-    "FGM": 0.7, "FGA": 0.7,
-    "FTM": 0.2, "FTA": 0.2,
-    "3PM": 0.7, "3PA": 0.7,
-    "REB": 0.4, "AST": 0.4,
-    "STL": 0.8, "BLK": 0.8,
-    "TO": 0.5, "PTS": 0.7,
-    "DD": 0.7, "TW": 0.7
+    "FGM": 0.40, "FGA": 0.31,
+    "FTM": 0.69, "FTA": 0.65,
+    "3PM": 0.70, "3PA": 0.45,
+    "REB": 0.43, "AST": 0.51,
+    "STL": 0.90, "BLK": 1.03,
+    "TO": 0.65, "PTS": 0.38,
+    "DD": 1.27, "TW": 0.78
+}
+
+# How wrong the projected AVERAGE itself is, as a CV. A wrong average is wrong in every
+# game, so it adds (g * avg * err)^2 — growing with games^2, not games. The web model
+# (build_data.py player_moments, lib/league.ts playerMoments) uses it; the Python Monte
+# Carlo in simulation.py does not.
+PROJECTION_ERROR = {
+    "FGM": 0.10, "FGA": 0.07,
+    "FTM": 0.13, "FTA": 0.13,
+    "3PM": 0.16, "3PA": 0.08,
+    "REB": 0.09, "AST": 0.12,
+    "STL": 0.17, "BLK": 0.21,
+    "TO": 0.14, "PTS": 0.09,
+    "DD": 0.26, "TW": 0.18
 }
 
 CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
               "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"]
+
+# Correlation of the per-category margins (your total minus your opponent's), rows and
+# columns in CATEGORIES order. The categories are NOT independent: FGM, FGA, PTS, 3PM and
+# 3PA move together, and counting them as five separate coin flips made one hot quarter
+# swing the live win probability 20+ points. lib/probability.ts draws them jointly.
+CATEGORY_CORRELATION = [
+    [ 1.00, 0.78, 0.63,-0.02, 0.25, 0.28, 0.08, 0.21, 0.11, 0.11, 0.06, 0.10, 0.07, 0.94, 0.07],  # FGM
+    [ 0.78, 1.00, 0.02,-0.00, 0.19, 0.39,-0.05, 0.30, 0.14, 0.10, 0.06, 0.10, 0.10, 0.75,-0.04],  # FGA
+    [ 0.63, 0.02, 1.00,-0.04, 0.16,-0.03, 0.19,-0.03, 0.00, 0.05, 0.01, 0.04,-0.01, 0.57, 0.17],  # FG%
+    [-0.02,-0.00,-0.04, 1.00,-0.00, 0.02,-0.02,-0.00, 0.01,-0.07, 0.02, 0.02, 0.00, 0.04,-0.01],  # FT%
+    [ 0.25, 0.19, 0.16,-0.00, 1.00, 0.42, 0.78, 0.03, 0.03,-0.00, 0.02, 0.04, 0.02, 0.29, 0.04],  # 3PM
+    [ 0.28, 0.39,-0.03, 0.02, 0.42, 1.00,-0.20, 0.07, 0.06, 0.03, 0.03, 0.03, 0.02, 0.32, 0.01],  # 3PA
+    [ 0.08,-0.05, 0.19,-0.02, 0.78,-0.20, 1.00,-0.02,-0.00,-0.02, 0.00, 0.03, 0.01, 0.11, 0.03],  # 3P%
+    [ 0.21, 0.30,-0.03,-0.00, 0.03, 0.07,-0.02, 1.00, 0.18, 0.04, 0.09, 0.15, 0.18, 0.23, 0.03],  # REB
+    [ 0.11, 0.14, 0.00, 0.01, 0.03, 0.06,-0.00, 0.18, 1.00, 0.02, 0.01, 0.10, 0.07, 0.13, 0.06],  # AST
+    [ 0.11, 0.10, 0.05,-0.07,-0.00, 0.03,-0.02, 0.04, 0.02, 1.00, 0.02, 0.09, 0.03, 0.10, 0.02],  # STL
+    [ 0.06, 0.06, 0.01, 0.02, 0.02, 0.03, 0.00, 0.09, 0.01, 0.02, 1.00, 0.02, 0.02, 0.07, 0.05],  # BLK
+    [ 0.10, 0.10, 0.04, 0.02, 0.04, 0.03, 0.03, 0.15, 0.10, 0.09, 0.02, 1.00, 0.02, 0.13,-0.03],  # TO
+    [ 0.07, 0.10,-0.01, 0.00, 0.02, 0.02, 0.01, 0.18, 0.07, 0.03, 0.02, 0.02, 1.00, 0.06, 0.06],  # DD
+    [ 0.94, 0.75, 0.57, 0.04, 0.29, 0.32, 0.11, 0.23, 0.13, 0.10, 0.07, 0.13, 0.06, 1.00, 0.06],  # PTS
+    [ 0.07,-0.04, 0.17,-0.01, 0.04, 0.01, 0.03, 0.03, 0.06, 0.02, 0.05,-0.03, 0.06, 0.06, 1.00],  # TW
+]
 
 NUMERIC_COLS = ['FGM', 'FGA', 'FG%', 'FTM', 'FTA', 'FT%', '3PM', '3PA', '3P%',
                 'REB', 'AST', 'STL', 'BLK', 'TO', 'DD', 'PTS', 'TW']

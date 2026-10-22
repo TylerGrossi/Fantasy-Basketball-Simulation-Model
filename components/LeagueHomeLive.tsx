@@ -7,6 +7,7 @@ import {
   scoreboardRows,
   winProbability,
   type LeagueData,
+  winPctText,
 } from "@/lib/league";
 import { remainingSide } from "@/lib/liveAdjust";
 import type { MatchupOutcome } from "@/lib/probability";
@@ -30,7 +31,9 @@ interface LiveLine {
   /** Category record from the HOME side: [won, lost, tied]. */
   home: [number, number, number];
   /** P(home wins the week), ties split. */
+  /** Each side's chance to win outright — the same `.win` Current Matchup shows. */
   homeWin: number;
+  awayWin: number;
 }
 
 function useLiveMatchups(league: LeagueData, meId: number) {
@@ -68,7 +71,8 @@ function useLiveMatchups(league: LeagueData, meId: number) {
         homeId: m.homeId,
         awayId: m.awayId,
         home: [rec.win, rec.loss, rec.tie],
-        homeWin: p.win + p.tie / 2,
+        homeWin: p.win,
+        awayWin: p.loss,
       };
     });
     return { lines, myOutcome: myOutcome as MatchupOutcome | null, myOppId: myOppId as number | null };
@@ -108,11 +112,11 @@ function sideOf(s: LiveLine, teamId: number) {
   return {
     oppId: isHome ? s.awayId : s.homeId,
     rec: isHome ? `${w}-${l}-${t}` : `${l}-${w}-${t}`,
-    win: isHome ? s.homeWin : 1 - s.homeWin,
+    win: isHome ? s.homeWin : s.awayWin,
   };
 }
 
-const pct = (p: number) => `${Math.round(p * 100)}%`;
+const pct = winPctText;
 
 /** My Team's "This week vs …" box. */
 export function LiveMyWeek({
@@ -182,7 +186,6 @@ export function LiveScoresCard({
           ))}
         </div>
       )}
-      <p className="lh-foot-note">Category record · model&rsquo;s chance to win the week</p>
       <Link href="/scoreboard" className="lh-more">
         Full scoreboard
       </Link>

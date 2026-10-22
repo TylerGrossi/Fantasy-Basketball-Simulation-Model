@@ -69,11 +69,22 @@ Data is split into two tiers, because a team's projected category total is
   why the expensive half is cacheable.
 
 **All probability maths runs in the browser** (`lib/probability.ts`), from 56 numbers
-(14 stats × mu/sd × 2 teams). Categories are independent normals, so per-category odds
-are a closed form and the number of categories won is an exact Poisson-binomial DP — no
-Monte Carlo. Validated against the Python it replaces: **0.44pp** worst disagreement vs a
-200,000-sim run, and TS vs Python agree to **7.3e-8**. At **5 µs per full evaluation**,
-every what-if (bench, streamer, trade) is instant with no server round trip.
+(14 stats × mu/sd × 2 teams). Each category is a normal, so per-category odds are a
+closed form. The number of categories won is drawn with the categories **correlated**
+(2026-10-21): a Gaussian copula over 10,000 fixed, seeded draws using
+`CATEGORY_CORRELATION` from the export — FGM, FGA, PTS, 3PM and 3PA move together, and
+counting them as independent made the live number overconfident. Exports without the
+matrix fall back to the exact independent Poisson-binomial. ~0.17 ms per evaluation; the
+streamers page ranks on expected categories (unaffected by correlation) and runs the
+correlated draw only for each free agent's best move.
+
+**The uncertainty constants are measured, not tuned** — `CATEGORY_VARIANCE` (per-game
+noise), `PROJECTION_ERROR` (the average itself being wrong; adds `(games·avg·err)²`, so a
+player's variance is **not additive over games** — change his games by swapping his whole
+moments, never by subtracting the difference) and `CATEGORY_CORRELATION`, all in
+`engine/config.py` and all printed by `node scripts/measure_variance.mjs` from the archived
+box scores. Rerun it on a newer season rather than hand-editing the numbers. The Python
+Monte Carlo (`simulation.py`, playoff odds) shares `CATEGORY_VARIANCE` but not the other two.
 
 ### Traps already hit here — don't repeat them
 

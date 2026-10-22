@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { PoolPlayer } from "@/lib/league";
 import { averageLine, usePlayerGames, type PlayerGame } from "@/lib/playerGames";
-import { makeValuer } from "@/lib/percentiles";
+import { makeValuer, valueTotal } from "@/lib/percentiles";
 
 /**
  * Splits — WHEN and WHERE a player was good, from his own game log.
@@ -47,11 +47,14 @@ function restLabel(rest: number | null): string | null {
 export default function PlayerSplits({
   playerId,
   pool,
+  season,
 }: {
   playerId: number | null;
   pool: PoolPlayer[];
+  /** The season the card is set to (ESPN year); ESPN's default when omitted. */
+  season?: number;
 }) {
-  const { games, loading } = usePlayerGames(playerId, pool);
+  const { games, loading } = usePlayerGames(playerId, pool, season);
   const value = useMemo(() => makeValuer(pool), [pool]);
 
   const months: Split[] = useMemo(() => {
@@ -137,8 +140,7 @@ function SplitTable({
           <tbody>
             {rows.map((r) => {
               const line = averageLine(r.games);
-              const { off, def } = value(line);
-              const v = off + def;
+              const v = valueTotal(value(line));
               const mins = r.games.reduce((a, g) => a + g.min, 0) / r.games.length;
               const cell = (k: string) => Number(line[k] ?? 0).toFixed(1);
               return (

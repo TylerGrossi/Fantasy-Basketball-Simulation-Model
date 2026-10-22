@@ -1,5 +1,6 @@
 import RankTrendChart from "@/components/RankTrendChart";
 import StarterRankingsPanel from "@/components/StarterRankingsPanel";
+import { allPlayStarted } from "@/lib/league";
 import { loadLeague, loadWeek0, myTeam } from "@/lib/loadLeague";
 
 /** Power rankings by all-play %, plus how each rank moved week to week. */
@@ -8,12 +9,12 @@ export default async function Page() {
   const me = await myTeam(league);
   const pr = league.seasonData?.powerRankings;
   /*
-   * Before the first matchup is scored the export still writes a row per team, but every
-   * field is zero (rank 0, 0.0%, 0-0-0). A table of zeros says nothing, so the all-play
-   * sections drop out until there is a played week; Value Power Rankings below is built
-   * from the player pool and still stands on its own.
+   * Until week 1 is final the all-play sections drop out: before any games every field is
+   * zero, and mid-week-1 the ranks only reflect who has played more games (see
+   * allPlayStarted). Value Power Rankings below is built from the player pool and still
+   * stands on its own.
    */
-  const played = pr?.teams.some((t) => t.record.some((n) => n > 0));
+  const played = allPlayStarted(league);
   const pool = league.seasonData?.playerPool ?? [];
   /*
    * WEEK 0 (owner, 2026-10-20): the Value Power Rankings as they stood before the first
@@ -22,6 +23,21 @@ export default async function Page() {
   const draft = await loadWeek0();
   const draftPlace = new Map((draft ?? []).map((d) => [d.teamId, d]));
   const nameOf = new Map(league.teams.map((t) => [t.id, t.name]));
+  /*
+   * NOW, beside week 0 — the Value Power Rankings' own figure (whole-roster value, the
+   * StarterRankingsPanel total), so the two tables can be read against each other: same
+   * formula, two moments (owner asked why they differ, 2026-10-21).
+   */
+  const nowValue = new Map<string, number>();
+  for (const p of pool) {
+    if (league.teams.some((t) => t.name === p.owner)) {
+      nowValue.set(p.owner, (nowValue.get(p.owner) ?? 0) + (p.value ?? 0));
+    }
+  }
+  const nowPlace = new Map(
+    [...nowValue.entries()].sort((a, b) => b[1] - a[1]).map(([name], i) => [name, i + 1])
+  );
+  const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
 
   if (!pr || !played) {
     return (
@@ -32,29 +48,40 @@ export default async function Page() {
             <h2>Week 0</h2>
             <p className="caption">
               Before any games, teams rank by total roster value, as the Value Power
-              Rankings stood on opening day. All-play rankings take over after week 1, with
-              each team&rsquo;s move measured from here.
+              Rankings stood on opening day. <strong>Now</strong> is the same figure today —
+              the Value Power Rankings below — after this week&rsquo;s games and moves.
+              All-play rankings take over after week 1, with each team&rsquo;s move
+              measured from here.
             </p>
-            <div className="table-scroll">
-              <table className="sheet">
+            <div className="table-scroll wk0-wrap">
+              <table className="sheet wk0-table">
                 <thead>
                   <tr>
                     <th className="num">Rank</th>
                     <th>Team</th>
-                    <th className="num">Total value</th>
+                    <th className="num">Week 0</th>
+                    <th className="num">Now</th>
+                    <th className="num">Move</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {draft.map((d) => (
-                    <tr key={d.teamId} className={d.teamId === me.id ? "row-you" : undefined}>
-                      <td className="num">{d.place}</td>
-                      <td>{nameOf.get(d.teamId) ?? `Team ${d.teamId}`}</td>
-                      <td className="num">
-                        {d.value >= 0 ? "+" : ""}
-                        {d.value.toFixed(1)}
-                      </td>
-                    </tr>
-                  ))}
+                  {draft.map((d) => {
+                    const name = nameOf.get(d.teamId) ?? `Team ${d.teamId}`;
+                    const now = nowValue.get(name);
+                    const place = nowPlace.get(name);
+                    const move = place == null ? 0 : d.place - place;
+                    return (
+                      <tr key={d.teamId} className={d.teamId === me.id ? "row-you" : undefined}>
+                        <td className="num">{d.place}</td>
+                        <td>{name}</td>
+                        <td className="num">{signed(d.value)}</td>
+                        <td className="num">{now == null ? "—" : signed(now)}</td>
+                        <td className={`num ${move > 0 ? "wk0-up" : move < 0 ? "wk0-dn" : ""}`}>
+                          {move > 0 ? `▲${move}` : move < 0 ? `▼${-move}` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

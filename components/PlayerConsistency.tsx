@@ -25,11 +25,14 @@ const EXTREMES = 5;
 export default function PlayerConsistency({
   playerId,
   pool,
+  season,
 }: {
   playerId: number | null;
   pool: PoolPlayer[];
+  /** The season the card is set to (ESPN year); ESPN's default when omitted. */
+  season?: number;
 }) {
-  const { games, loading } = usePlayerGames(playerId, pool);
+  const { games, loading } = usePlayerGames(playerId, pool, season);
 
   /*
    * The maths lives in lib/espnLive.ts, not here.

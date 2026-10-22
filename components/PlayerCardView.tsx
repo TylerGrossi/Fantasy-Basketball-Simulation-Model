@@ -13,7 +13,14 @@ import OpponentDefense from "./OpponentDefense";
 import SimilarPlayers from "./SimilarPlayers";
 import PlayerSplits from "./PlayerSplits";
 import PlayerConsistency from "./PlayerConsistency";
-import { headshotUrl, playerStatus, VALUE_BASES, type ValueBasis } from "@/lib/playerPool";
+import {
+  headshotUrl,
+  playerStatus,
+  seasonLabel,
+  thisSeasonOnly,
+  VALUE_BASES,
+  type ValueBasis,
+} from "@/lib/playerPool";
 import {
   MIN_GP,
   STAT_GROUPS,
@@ -67,7 +74,6 @@ const BASIS_LABEL: Record<ValueBasis, string> = {
 };
 
 /** "2025-26" from ESPN's season year 2026. */
-const seasonLabel = (s: number) => `${s - 1}-${String(s % 100).padStart(2, "0")}`;
 
 /** One choice in the percentile panel's season picker. */
 interface SeasonSource {
@@ -305,7 +311,12 @@ function PlayerDetail({
   const sources = useMemo(() => {
     const out: SeasonSource[] = [];
     const curSeason = p.statSource === "last" ? season - 1 : season;
-    out.push({ season: curSeason, player: p, pool, projected: p.statSource === "proj" });
+    out.push({
+      season: curSeason,
+      player: thisSeasonOnly(p),
+      pool,
+      projected: p.statSource === "proj",
+    });
     for (const a of archives) {
       const row = a.pool.find((x) =>
         p.playerId != null ? x.playerId === p.playerId : x.name === p.name
@@ -369,12 +380,13 @@ function PlayerDetail({
               <div className="pd-source">2025-26 stats until he plays in 2026-27</div>
             )}
             {p.statSource === "proj" && <div className="pd-source">2026-27 projection (no NBA stats yet)</div>}
-            {/* Under 10 games this season the line is a blend (engine/data.py
-                BLEND_FULL_GAMES): say how much of it is this season. */}
-            {p.statSource === "blend" && (
+            {/* Under 10 games the card shows his actual 2026-27 games (thisSeasonOnly),
+                but the site's rankings still blend in last season (engine/data.py
+                BLEND_FULL_GAMES) — say so, or Player Value's number looks like a bug. */}
+            {p.statSource === "blend" && rp.statSource === "current" && (
               <div className="pd-source">
-                {Math.round(Math.min(p.gp ?? 0, 10) * 10)}% 2026-27, rest 2025-26 — all
-                2026-27 from 10 games
+                {rp.gp} {rp.gp === 1 ? "game" : "games"} into 2026-27 — rankings blend in
+                2025-26 until 10 games
               </div>
             )}
             <div className="pd-status">
@@ -401,8 +413,17 @@ function PlayerDetail({
             ))}
           </div>
 
-          <WindowTable p={p} />
-          <RollingValue playerId={p.playerId} pool={pool} />
+          {/* The SAME season the bars are showing (`rp`), not always the current row: a
+              player who has not played yet is shown on last season's archive, and the
+              current pool's copy of that line is valued against a different pool — so the
+              table's VAL and the Total Value bar printed two numbers for one season. */}
+          <WindowTable p={rp} />
+          <RollingValue
+            key={`rv-${src.season}`}
+            playerId={p.playerId}
+            pool={src.pool}
+            season={src.season}
+          />
         </aside>
 
         <section className="pd-rank">
@@ -519,32 +540,50 @@ function PlayerDetail({
         {tab === "profile" && (
           <>
             <div className="pd-sheet-two">
-              <CategoryShape player={p} pool={pool} />
-              <SimilarPlayers player={p} pool={pool} />
+              {/* Every panel follows the season picker (owner, 2026-10-21): the picked
+                  season's row (`rp`) against that season's pool, and that season's game
+                  log below — not the bars on one season and the rest on another. */}
+              <CategoryShape player={rp} pool={src.pool} />
+              <SimilarPlayers player={rp} pool={src.pool} />
             </div>
-            <UsageEfficiency player={p} pool={pool} onPick={onPick} />
+            <UsageEfficiency player={rp} pool={src.pool} onPick={onPick} />
           </>
         )}
 
         {tab === "splits" && (
           <>
-            <PlayerSplits key={`sp-${p.playerId ?? p.name}`} playerId={p.playerId} pool={pool} />
-            <OpponentDefense key={`od-${p.playerId ?? p.name}`} playerId={p.playerId} pool={pool} />
-            <PlayerConsistency
-              key={`con-${p.playerId ?? p.name}`}
+            <PlayerSplits
+              key={`sp-${p.playerId ?? p.name}-${src.season}`}
               playerId={p.playerId}
-              pool={pool}
+              pool={src.pool}
+              season={src.season}
+            />
+            <OpponentDefense
+              key={`od-${p.playerId ?? p.name}-${src.season}`}
+              playerId={p.playerId}
+              pool={src.pool}
+              season={src.season}
+            />
+            <PlayerConsistency
+              key={`con-${p.playerId ?? p.name}-${src.season}`}
+              playerId={p.playerId}
+              pool={src.pool}
+              season={src.season}
             />
           </>
         )}
 
         {tab === "log" && (
           <>
-            <GameLog key={p.playerId ?? p.name} playerId={p.playerId} />
-            <InjuryLog
-              key={`inj-${p.playerId ?? p.name}`}
+            <GameLog
+              key={`${p.playerId ?? p.name}-${src.season}`}
               playerId={p.playerId}
-              season={season}
+              season={src.season}
+            />
+            <InjuryLog
+              key={`inj-${p.playerId ?? p.name}-${src.season}`}
+              playerId={p.playerId}
+              season={src.season}
             />
           </>
         )}
@@ -573,7 +612,7 @@ function PlayerDetail({
  * baseline "above average" is just a longer bar.
  */
 function PercentileBar({ row }: { row: PercentileRow }) {
-  const { spec, value, percentile, n, rank, tied } = row;
+  const { spec, value, percentile, qualified, n, rank, tied } = row;
   const text = formatStat(spec, value);
 
   if (percentile == null) {
@@ -607,6 +646,34 @@ function PercentileBar({ row }: { row: PercentileRow }) {
   // Floored so a 0th-percentile bar is still a visible mark rather than nothing at all,
   // which would read as missing data — the case `percentile == null` above handles.
   const width = Math.max(percentile, 3);
+
+  /*
+   * NOT QUALIFIED (too few games for the basis): the bar keeps its length and colour, only
+   * dimmed and hatched, with no number on it — Baseball Savant's treatment. Hiding it threw
+   * away a real reading; printing a percentile would claim a standing the sample cannot
+   * support. The length says where he is tracking, the hatching says it does not count yet.
+   */
+  if (!qualified) {
+    return (
+      <div
+        className="pct-row pct-unq"
+        title={`${spec.label}: ${text} — not qualified (too few games); tracking at the ${percentile}th percentile`}
+      >
+        <span className="pct-label">{spec.label}</span>
+        <span className="pct-value mono">{text}</span>
+        <span className="pct-track">
+          <span className="pct-tick" aria-hidden="true" />
+          <span
+            className="pct-fill"
+            style={{
+              width: `${width}%`,
+              background: `repeating-linear-gradient(135deg, ${fill} 0 4px, transparent 4px 8px)`,
+            }}
+          />
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div

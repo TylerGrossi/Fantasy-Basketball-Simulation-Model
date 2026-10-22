@@ -17,6 +17,8 @@ interface Props {
 }
 
 const PLOT_H = 190;
+/** Room above the tallest bar for its percentage. */
+const LABEL_H = 18;
 
 export default function ScoreDistribution({ distribution, total, show = 10 }: Props) {
   const all = distribution.map((p, k) => ({ k, p }));
@@ -37,8 +39,11 @@ export default function ScoreDistribution({ distribution, total, show = 10 }: Pr
             k > lost ? "var(--good)" : k < lost ? "var(--bad)" : "var(--ink-3)";
           return (
             <div className="dist-col" key={k}>
-              <div className="dist-pct">{(p * 100).toFixed(1)}%</div>
-              <div className="dist-slot" style={{ height: PLOT_H }}>
+              {/* The label rides on the bar (owner, 2026-10-21): it sits directly on top
+                  of it and moves with its height, rather than in a fixed row above the
+                  plot. The slot is taller than the tallest bar by the label's height. */}
+              <div className="dist-slot" style={{ height: PLOT_H + LABEL_H }}>
+                <div className="dist-pct">{(p * 100).toFixed(1)}%</div>
                 <div
                   className="dist-bar"
                   style={{

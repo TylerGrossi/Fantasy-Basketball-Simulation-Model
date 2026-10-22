@@ -67,6 +67,8 @@ interface Props {
   defaultDesc?: boolean;
   /** Extra class on the table, e.g. `sheet-tight` for a wide one that must fit. */
   className?: string;
+  /** Extra class on the scroll wrapper, e.g. `st-scroll` for a fixed-height table. */
+  scrollClassName?: string;
   /**
    * Rows per page. Omit for an unpaged table.
    *
@@ -91,6 +93,7 @@ export default function SortableTable({
   defaultKey,
   defaultDesc = true,
   className,
+  scrollClassName,
   pageSize,
 }: Props) {
   const [sort, setSort] = useState({ key: defaultKey, desc: defaultDesc });
@@ -185,7 +188,7 @@ export default function SortableTable({
   };
 
   const table = (
-    <div className="table-scroll">
+    <div className={`table-scroll${scrollClassName ? ` ${scrollClassName}` : ""}`}>
       <table className={`sheet sortable${className ? ` ${className}` : ""}`}>
         <thead>
           <tr>

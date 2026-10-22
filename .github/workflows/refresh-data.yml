@@ -16,17 +16,18 @@ name: Refresh league snapshot
 
 on:
   schedule:
-    # TWICE a day (owner, 2026-10-20), October through April only — the NBA season:
-    #   11:00 UTC = 7:00 AM Eastern (EDT; 6:00 AM in EST) — last night's games are final
-    #   21:30 UTC = 5:30 PM Eastern (EDT; 4:30 PM in EST) — the day's injury news is in,
-    #               before tip-off. Early on purpose: GitHub can start a run hours late.
-    # Cron is UTC with no daylight saving, so both drift an hour earlier in Eastern from
-    # November to March; either way they stay on the right side of the games.
+    # EVERY TWO HOURS (owner, 2026-10-21; it was 7 AM + 5:30 PM Eastern), October through
+    # April only — the NBA season. Free agents, injuries, rosters, the acquisition count
+    # and the projections stay within two hours of ESPN; the live scores were never from
+    # this export. A run only commits (and so deploys) when the data moved, so this is at
+    # most 12 deploys a day. GitHub starts scheduled runs late or skips them under load —
+    # the cadence is a target, not a clock.
+    # The win-probability log still takes no reading while games are in progress (see
+    # _reading_window_ok in scripts/build_data.py): those runs refresh everything else.
     # Outside the season the export would rewrite an identical finished season every run,
     # and every rewrite is a commit and a deploy. GitHub DISABLES cron entirely on a repo
     # with no activity for 60 days, which in the offseason is easy to hit.
-    - cron: "0 11 * 10,11,12,1,2,3,4 *"
-    - cron: "30 21 * 10,11,12,1,2,3,4 *"
+    - cron: "0 */2 * 10,11,12,1,2,3,4 *"
   # Lets you run it by hand from the Actions tab — use this for the first run.
   workflow_dispatch:
 

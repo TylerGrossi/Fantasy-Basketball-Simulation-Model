@@ -1,53 +1,53 @@
 {
  "takenAt": "2026-10-20",
- "source": "Value Power Rankings (sum of each roster's 9-cat player value) from the league.json generated 2026-10-20T16:39:34+00:00",
+ "source": "Value Power Rankings (sum of each roster's league-category player value, all 15 categories) recomputed 2026-10-21 from the league.json generated 2026-10-20T16:55:12+00:00 (commit c868708); first taken 2026-10-20 on the 9-cat value",
  "teams": [
-  {
-   "teamId": 8,
-   "teamName": "Team Grossi",
-   "value": 39.35,
-   "place": 1
-  },
   {
    "teamId": 4,
    "teamName": "Big Purr's Posse",
-   "value": 35.88,
-   "place": 2
+   "value": 82.7,
+   "place": 1
   },
   {
-   "teamId": 2,
-   "teamName": "Bryant's Best Team",
-   "value": 35.25,
-   "place": 3
+   "teamId": 8,
+   "teamName": "Team Grossi",
+   "value": 79.42,
+   "place": 2
   },
   {
    "teamId": 5,
    "teamName": "Matt's Magnificent Team",
-   "value": 32.02,
+   "value": 71.55,
+   "place": 3
+  },
+  {
+   "teamId": 2,
+   "teamName": "Bryant's Best Team",
+   "value": 68.21,
    "place": 4
-  },
-  {
-   "teamId": 7,
-   "teamName": "Josh Hart's Thumb",
-   "value": 30.24,
-   "place": 5
-  },
-  {
-   "teamId": 6,
-   "teamName": "Chris's Competitive Team",
-   "value": 29.05,
-   "place": 6
   },
   {
    "teamId": 1,
    "teamName": "JUST THE TIP",
-   "value": 21.6,
+   "value": 55.48,
+   "place": 5
+  },
+  {
+   "teamId": 7,
+   "teamName": "Josh Hart's Thumb",
+   "value": 51.41,
+   "place": 6
+  },
+  {
+   "teamId": 6,
+   "teamName": "Chris's Competitive Team",
+   "value": 49.58,
    "place": 7
   },
   {
    "teamId": 3,
    "teamName": "Ryan's Rowdy Team",
-   "value": 16.08,
+   "value": 28.1,
    "place": 8
   }
  ]

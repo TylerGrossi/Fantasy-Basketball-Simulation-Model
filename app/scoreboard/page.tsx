@@ -10,6 +10,8 @@ import { forecastFor, winProbHistory } from "@/lib/predictions";
 import ScoreboardTabs from "@/components/ScoreboardTabs";
 import { buildWeekRecap } from "@/components/WeekRecap";
 import WeekSelect from "@/components/WeekSelect";
+import LiveSeed from "@/components/LiveSeed";
+import { liveSeed } from "@/lib/liveMatchup";
 import { periodLabel } from "@/lib/league";
 import {
   loadBoxScores,
@@ -171,17 +173,25 @@ export default async function Page({
     me.id
   );
 
+  // Live totals fetched HERE, so the first paint is current — not the export's snapshot
+  // swapped for live numbers a second later (owner, 2026-10-21). Null (demo, or ESPN
+  // slow) paints the snapshot as before; see LiveSeed.
+  const seed = demo ? null : await liveSeed(league.period, me.id);
+
   return (
-    <>
+    <LiveSeed period={league.period} teamId={me.id} data={seed}>
+      {/* Title + section links, one band — frozen at the top on a phone (.cm-head). */}
+      <div className="cm-head">
       <WeekSelect weeks={weeks} selected={league.period} current={league.period} />
 
       <nav className="cm-jump" aria-label="Sections">
         <a href="#scoreboard">Scoreboard</a>
-        <a href="#odds">Win probability</a>
+        <a href="#odds">Win Prob</a>
         <a href="#projections">Projections</a>
         <a href="#streamers">Streamers</a>
         <a href="#bench">Bench</a>
       </nav>
+      </div>
 
       <section id="scoreboard" className="cm-sec">
         <Scoreboard
@@ -264,6 +274,7 @@ export default async function Page({
           matchup={r.matchup}
           isHome={r.isHome}
           teamId={me.id}
+          acq={youAcq}
         />
       </section>
 
@@ -277,7 +288,7 @@ export default async function Page({
           teamId={me.id}
         />
       </section>
-    </>
+    </LiveSeed>
   );
 }
 

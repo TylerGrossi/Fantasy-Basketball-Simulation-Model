@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
 import {
+  BroadcastIcon,
   TrophyIcon,
   ChartIcon,
   TableIcon,
@@ -60,6 +61,8 @@ const TILES = [
   { href: "/player-value", label: "Player Value", Icon: GraphUpIcon },
   { href: "/trade", label: "Trade Simulator", Icon: ShuffleIcon },
 ];
+
+const GAME_DAY_TILE = { href: "/gameday", label: "Game Day", Icon: BroadcastIcon };
 
 /**
  * What the site is for, as the four questions it answers.
@@ -125,7 +128,7 @@ const FLOW: Array<[string, string, string]> = [
   [
     "Decide",
     "Every lineup, waiver and trade option ranked by how far it moves that number. This is the part that wins weeks.",
-    "9-cat marginal value",
+    "League-category marginal value",
   ],
 ];
 
@@ -167,7 +170,7 @@ const DIRECTORY: Array<{
     section: "Players & Tools",
     items: [
       { href: "/player", name: "Player Card", desc: "Profile, value, recent form, last ten games." },
-      { href: "/player-value", name: "Player Value", desc: "Rostered players and free agents by 9-cat value." },
+      { href: "/player-value", name: "Player Value", desc: "Rostered players and free agents by league value." },
       { href: "/trade", name: "Trade Simulator", desc: "What a trade does to your category strength." },
       { href: "/compare", name: "Compare", desc: "Two players side by side, category by category." },
       { href: "/draft-recap", name: "Draft Recap", desc: "Who won the draft: grades, steals and reaches." },
@@ -190,7 +193,15 @@ export default async function Page() {
   const me = await myTeam(league);
   const yr = `${league.season - 1}–${String(league.season).slice(2)}`;
   const leagueName = league.leagueName?.trim() || "Your League";
-  const status = league.seasonOver ? "Season complete" : "Season in progress";
+  // Said only once it is over (owner, 2026-10-21): "Season in progress" is the default
+  // state of the app and told nobody anything.
+  const status = league.seasonOver ? "Season complete" : null;
+  // In season, Game Day leads the phone grid in League Home's slot (owner, 2026-10-21);
+  // League Home is one tap away in the Season index. Offseason there are no games, so
+  // the slot goes back to League Home.
+  const tiles = league.seasonOver
+    ? TILES
+    : TILES.map((t) => (t.href === "/league" ? GAME_DAY_TILE : t));
   const directory = DIRECTORY.map((g) => ({
     ...g,
     items: g.items.filter((i) => !i.inSeason || !league.seasonOver),
@@ -202,7 +213,8 @@ export default async function Page() {
       <div className="home-desktop">
         <header className="lp-hero">
           <div className="lp-eyebrow">
-            {leagueName} &middot; {status} &middot; {yr}
+            {leagueName}
+            {status && <> &middot; {status}</>} &middot; {yr}
           </div>
           <h1 className="lp-title">Fantasy Basketball Simulator</h1>
           <p className="lp-sub">
@@ -273,7 +285,8 @@ export default async function Page() {
       <div className="home-mobile">
         <div className="home-hero">
           <div className="home-eyebrow">
-            {leagueName} &middot; {status}
+            {leagueName}
+            {status && <> &middot; {status}</>}
           </div>
           <h1 className="home-title">Fantasy Basketball Simulator</h1>
           <p className="home-sub">
@@ -282,7 +295,7 @@ export default async function Page() {
           </p>
         </div>
         <div className="home-tiles">
-          {TILES.map(({ href, label, Icon }) => (
+          {tiles.map(({ href, label, Icon }) => (
             <Link key={href} href={href} className="home-tile">
               <Icon size={28} />
               <span>{label}</span>

@@ -31,6 +31,12 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CONCURRENCY = 8;
 /** Below this a standard deviation is noise, and the player is not a fantasy asset. */
 const MIN_GAMES = 20;
+/**
+ * The season whose logs are measured, pinned. ESPN's default is the CURRENT season, which
+ * early on holds a game or two per player — every row would fall under MIN_GAMES and this
+ * file would come out empty. The last complete season is the baseline.
+ */
+const SEASON = 2026;
 
 /*
  * The library is TypeScript and this is a plain Node script, so compile the handful of
@@ -92,7 +98,7 @@ try {
       if (!p) return;
       const url =
         "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/" +
-        `${p.playerId}/gamelog`;
+        `${p.playerId}/gamelog?season=${SEASON}`;
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -120,7 +126,7 @@ try {
 
   const out = {
     generatedAt: new Date().toISOString(),
-    season: league.season,
+    season: SEASON,
     minGames: MIN_GAMES,
     players: rows,
   };

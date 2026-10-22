@@ -1276,12 +1276,16 @@ table.sheet.sortable th.num .th-sort {
   font-size: 0.72rem;
   color: var(--ink-2);
   white-space: nowrap;
+  line-height: 1;
+  margin-bottom: 0.25rem;
 }
+/* A column, bottom-aligned: the bar at the floor, its percentage right on top of it. */
 .dist-slot {
   width: 100%;
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
 }
 .dist-bar {
   width: 72%;
@@ -2935,6 +2939,7 @@ table.sheet.lu-table .lu-pos {
 .pv-f-pos { flex: 0 0 116px; min-width: 0; }
 .pv-f-team { flex: 0 0 132px; min-width: 0; }
 .pv-f-owner { flex: 1 1 150px; min-width: 0; }
+.pv-f-season { flex: 0 0 96px; min-width: 0; }
 .pv-f-basis { flex: 0 0 104px; min-width: 0; }
 .pv-f-gp { flex: 0 0 88px; min-width: 0; }
 .pv-injured { flex: 0 0 auto; padding-bottom: 0.45rem; white-space: nowrap; }
@@ -2956,6 +2961,7 @@ table.sheet.lu-table .lu-pos {
   .pv-f-owner { flex: 1 1 200px; }
   .pv-f-pos,
   .pv-f-team,
+  .pv-f-season,
   .pv-f-basis,
   .pv-f-gp { flex: 0 1 auto; }
 }
@@ -3666,6 +3672,10 @@ table.sheet.lu-table .lu-pos {
     var(--card) 4px 8px
   );
 }
+/* Not qualified: the bar at its length, hatched in its own colour, dimmed (see
+   PercentileBar). The value beside it dims with it, so the row reads as provisional. */
+.pct-unq .pct-fill { opacity: 0.5; }
+.pct-unq .pct-value { color: var(--ink-3); }
 .pct-none {
   font-size: 0.66rem;
   font-weight: 600;
@@ -5870,6 +5880,11 @@ table.sheet.ls-cats td:last-child {
 /* Wide enough for the longest team name plus a signed total on one line — at 17rem
    "Bryant's Brilliant Team" forced the table into its own horizontal scrollbar. */
 .sr-value-wrap { flex: 0 0 23rem; }
+/* Week 0 sized to its five columns, not stretched across the page with an empty middle. */
+.wk0-wrap { max-width: 36rem; margin-bottom: 1.6rem; }
+table.sheet.wk0-table { font-size: 0.86rem; }
+.wk0-up { color: var(--good); font-weight: 700; }
+.wk0-dn { color: var(--bad); font-weight: 700; }
 .sr-panel > .sr-card {
   flex: 1 1 0;
   min-width: 0;
@@ -7564,7 +7579,6 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
   text-decoration: none;
 }
 .lh-more:hover { text-decoration: underline; }
-.lh-foot-note { margin: 0.6rem 0 0; font-size: 0.68rem; color: var(--ink-3); }
 
 /* Header card: the league's name and the four facts that frame the week. */
 .lh-head { border-top: 4px solid var(--cobalt); }
@@ -7677,6 +7691,9 @@ table.sheet.lh-moves td { white-space: nowrap; }
 }
 .lh-trend-row:last-child { border-bottom: 0; }
 .lh-trend-who { display: flex; flex-direction: column; min-width: 0; font-size: 0.85rem; }
+/* Numbered (Best Players): the number, then the name taking the width, value right. */
+.lh-trend-row > .lh-seed { flex: none; }
+.lh-trend-row > .lh-seed + .lh-trend-who { flex: 1 1 auto; }
 .lh-trend-own { font-size: 0.68rem; color: var(--ink-3); }
 .lh-trend-own.fa { color: var(--good); font-weight: 600; }
 .lh-trend-d { font-weight: 700; font-size: 0.85rem; }
@@ -7795,8 +7812,23 @@ table.sheet.lh-stand td { padding-left: 0.35rem; padding-right: 0.35rem; }
    One page since 2026-10-20: scoreboard -> Box Score / Schedule / Roster tabs -> win
    probability -> projections -> streamers -> bench. A sticky jump bar under the site
    header links the sections. */
-/* The section links under the page title. NOT sticky (owner, 2026-10-20): pinned under
-   the header it slid over the content as you scrolled. It scrolls away with the page. */
+/* The week title and the section links, one band, FROZEN at the top of the page at every
+   width (owner, 2026-10-21 — reversing 2026-10-20, when it scrolled away on desktop). On a
+   desktop the page scrolls inside `.app-scroll`, which starts below the site header, so
+   `top: 0` pins it just under the header. Solid paper behind it, or the page shows
+   through as it passes underneath. */
+.cm-head {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  background: var(--paper);
+  margin: 0 calc(-1 * var(--page-pad)) 1rem;
+  padding: 0 var(--page-pad);
+}
+/* The h1's 1.6rem top margin, frozen inside the band, was dead space on screen. */
+.cm-head .week-title,
+.cm-head > h1 { margin-top: 0.9rem; }
+.cm-head .cm-jump { margin-bottom: 0; }
 .cm-jump {
   display: flex;
   gap: 1.4rem;
@@ -7815,19 +7847,29 @@ table.sheet.lh-stand td { padding-left: 0.35rem; padding-right: 0.35rem; }
   text-decoration: none;
 }
 .cm-jump a:hover { color: var(--cobalt); }
-/* Land each section below the sticky site header, not under it. */
+/* Land each section below the frozen band, not under it. The site header is outside the
+   scroll area on a desktop, so only the band's own height counts. */
 .cm-sec,
 .cm-sec h2[id],
-.md-anchor { scroll-margin-top: calc(var(--nav-h) + 1rem); }
+.md-anchor { scroll-margin-top: 7rem; }
 .cm-sec { margin-bottom: 2.4rem; }
 .cm-sec + .cm-sec { padding-top: 1.6rem; border-top: 1px solid var(--line); }
 .cm-h { margin-top: 0; }
 @media (max-width: 767px) {
-  /* No site header on a phone; the page's own 45px back row is the sticky band there. */
   .cm-jump { gap: 1.1rem; }
+  /* Phone: the page's 0.35rem top padding is pulled into the band so nothing peeks
+     above it, and the title sits closer to the top edge. */
+  .cm-head {
+    margin: -0.35rem calc(-1 * var(--page-pad)) 0.8rem;
+    padding: 0.35rem var(--page-pad) 0;
+  }
+  .cm-head .week-title,
+  .cm-head > h1 { margin-top: 0.2rem; }
+  .cm-head .cm-jump { margin: 0.1rem 0 0; }
+  /* Sections land below the frozen band, not under it. */
   .cm-sec,
   .cm-sec h2[id],
-  .md-anchor { scroll-margin-top: 3.5rem; }
+  .md-anchor { scroll-margin-top: 6rem; }
 }
 
 /* The scoreboard alone (no box-score tabs): the in-panel board shows at every width. */
@@ -7944,14 +7986,6 @@ table.sheet.ws-table tfoot td {
 .bn-better { font-weight: 700; color: var(--ink-3); }
 .bn-better.play { color: var(--cobalt); }
 .bn-better.bench { color: var(--clay); }
-.bn-more { margin-top: 1.2rem; }
-.bn-more > summary {
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 0.9rem;
-  color: var(--ink);
-  padding: 0.4rem 0;
-}
 @media (max-width: 767px) {
   .bn-scen { grid-template-columns: 1fr; }
 }
@@ -8007,3 +8041,334 @@ table.sheet.ws-table tfoot td {
   .three-up { grid-template-columns: 1fr; gap: 0.5rem; }
 }
 .three-up .wpc { margin: 0.4rem 0 0; }
+
+/* ===================================================================== GAME DAY
+   /gameday (2026-10-21): tonight's NBA games, live, and what they do to your matchup.
+   ONE SCREEN on a laptop (owner, 2026-10-21 — the first cut was a long scroll):
+
+     title row ·· odds and how tonight moved them
+     Current Matchup's scoreboard (the Scoreboard component itself)
+     games strip ·· every game, one row; picking one narrows everything below to it
+     players | play by play ·· fill the rest of the window, each scrolling inside itself
+
+   `.gd` is a flex column exactly as tall as the scroll area, and `.gd-panes` takes what
+   is left. A floor (`min-height`) stops a short window crushing the panes to nothing —
+   below it the page scrolls a little instead. On a phone it is an ordinary stacked page.
+   You are cobalt and the opponent clay, as everywhere else. */
+
+.gd .up { color: var(--good); }
+.gd .dn { color: var(--bad); }
+
+@media (min-width: 768px) {
+  /* The page's 3rem bottom padding would push the one-screen layout into a scroll. */
+  .page:has(> .gd) { padding-bottom: 0; }
+  .gd {
+    display: flex;
+    flex-direction: column;
+    /* -1px: --nav-h is fractional (62.4px) and the rounding left a 1px scroll. */
+    height: calc(100dvh - var(--nav-h) - 1px);
+    padding-bottom: 0.9rem;
+  }
+}
+
+/* ---- title row ---- */
+.gd-top { flex: none; display: flex; align-items: baseline; gap: 0.4rem 0.9rem; flex-wrap: wrap; margin: 0.9rem 0 0.6rem; }
+.gd-top h1 { margin: 0; font-size: 1.3rem; }
+.gd-top-sub { color: var(--ink-2); font-size: 0.85rem; }
+.gd-top-odds { margin-left: auto; font-size: 0.85rem; color: var(--ink-2); display: flex; gap: 0.5rem; align-items: baseline; }
+.gd-top-odds b { font-size: 1.15rem; color: var(--cobalt); }
+.gd-delta { font-weight: 700; font-size: 0.8rem; }
+
+/* ---- the scoreboard: Current Matchup's, untouched, with its spacing trimmed ---- */
+.gd-board { flex: none; }
+.gd-board .sbx-solo { margin-bottom: 0; }
+.gd-board .live-badge { margin: 0.3rem 0 0; }
+
+/* ---- games strip ---- */
+.gd-strip {
+  flex: none;
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  margin: 0.7rem 0;
+  padding-bottom: 0.25rem;
+}
+.gd-game {
+  font: inherit;
+  /* Grows to share the row, so a full slate (11-12 games) fits a laptop without a
+     sideways scroll; a smaller window scrolls the strip. */
+  flex: 1 0 104px;
+  max-width: 170px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.gd-game:hover { border-color: var(--line-strong); }
+.gd-game.on { border-color: var(--cobalt); background: var(--cobalt-soft); }
+.gd-game.in { border-left: 3px solid var(--good); }
+.gd-game-status { display: flex; align-items: center; gap: 0.35rem; font-size: 0.68rem; color: var(--ink-2); white-space: nowrap; }
+.gd-game-status .live-dot { flex: none; }
+.gd-game.post .gd-game-status { color: var(--ink-3); }
+.gd-game-team { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; }
+.gd-game.post .gd-game-team:not(.won) { color: var(--ink-2); font-weight: 500; }
+.gd-game-all { flex: 0 0 118px; justify-content: space-between; }
+.gd-game-all-label { font-weight: 700; font-size: 0.9rem; }
+/* Fixed height so a game with nobody of yours lines up with one that has three. */
+.gd-game-who { display: flex; gap: 0.25rem; min-height: 1.1rem; align-items: center; font-size: 0.68rem; color: var(--ink-3); }
+.gd-who { font-size: 0.64rem; font-weight: 600; padding: 0.04rem 0.4rem; border-radius: 999px; white-space: nowrap; }
+.gd-who.you { color: var(--cobalt); background: var(--cobalt-soft); }
+.gd-who.opp { color: var(--clay); background: var(--clay-soft); }
+
+/* ---- one filter for both panes, with the colour key ---- */
+.gd-filter { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; flex-wrap: wrap; margin: 0 0 0.6rem; }
+.gd-filter .chips { margin: 0; }
+/* One line per chip — on a phone the row scrolls sideways rather than wrapping labels. */
+.gd-filter .chip { white-space: nowrap; }
+/* The Live toggle: a dot so it reads as a state, and the count of games in progress.
+   Set apart from the owner chips by a gap — it combines with them, it is not one of them. */
+.gd-chip-live { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: 0.6rem; }
+.gd-chip-live .live-dot { flex: none; }
+.gd-chip-n { font-size: 0.68rem; font-weight: 700; color: var(--ink-3); }
+.gd-chip-live.chip-on .gd-chip-n { color: inherit; }
+.gd-legend { display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; color: var(--ink-3); }
+.gd-key { font-size: 0.66rem; font-weight: 700; padding: 0.04rem 0.45rem; border-radius: 4px; }
+.gd-key.you { color: var(--cobalt); background: var(--cobalt-soft); }
+.gd-key.opp { color: var(--clay); background: var(--clay-soft); }
+
+/* ---- the two panes ---- */
+.gd-panes {
+  flex: 1 1 auto;
+  /* The floor: on a short window the page scrolls a little rather than the panes
+     shrinking to a few rows. */
+  min-height: 320px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+.gd-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  min-width: 0;
+}
+.gd-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.gd-pane-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 1rem 0.6rem;
+  border-bottom: 1px solid var(--line-2);
+}
+.gd-pane-title { font-weight: 700; font-size: 0.92rem; }
+.gd-pane-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 1rem 0.8rem; }
+/* The top gap is a MARGIN on the first child, not padding on the scroller: rows scroll
+   through a scroller's padding, so with padding they showed above the sticky header. */
+.gd-pane-body > :first-child { margin-top: 0.4rem; }
+.gd-foot { margin: 0.6rem 0 0; font-size: 0.72rem; line-height: 1.5; color: var(--ink-3); }
+.gd-off { color: var(--ink-2); }
+
+/* ---- the box: every player tonight, your matchup's lit up ----
+   Yours and theirs carry a tint and a coloured edge so they stand out in a table of
+   ~240; everyone else stays plain. "Live" is the green dot on the floor, not a row tint —
+   with every row of a live game tinted, the tint stopped meaning anything. */
+table.sheet.gd-ptable tr.gd-own-you td { background: var(--cobalt-soft); }
+table.sheet.gd-ptable tr.gd-own-opp td { background: var(--clay-soft); }
+table.sheet.gd-ptable tr.gd-own-you td:first-child { box-shadow: inset 3px 0 0 var(--cobalt); }
+table.sheet.gd-ptable tr.gd-own-opp td:first-child { box-shadow: inset 3px 0 0 var(--clay); }
+table.sheet.gd-ptable tr.gd-own-you .gd-pname a { color: var(--cobalt); font-weight: 600; }
+table.sheet.gd-ptable tr.gd-own-opp .gd-pname a { color: var(--clay); font-weight: 600; }
+/* The pane body is the scroller, so the table's own `.table-scroll` must not be one —
+   otherwise the (already sticky) header sticks inside a box that never scrolls and the
+   column names scroll away with the rows. */
+.gd-pane-body > .table-scroll { overflow: visible; }
+/* The box runs edge to edge in its pane: the card is already the frame, so the table's
+   own border and the pane's side padding were a second frame inside the first. Only the
+   captions and footnote keep an inset. */
+.gd-box .gd-pane-body { padding: 0 0 0.8rem; }
+.gd-box .gd-pane-body > :first-child { margin-top: 0; }
+.gd-box .gd-pane-body > .table-scroll { border: none; border-radius: 0; }
+.gd-box .gd-pane-body > p { padding: 0 1rem; }
+.gd-box .gd-pane-body > p:first-child { margin-top: 0.6rem; }
+table.sheet.gd-ptable thead th { z-index: 1; }
+/* Fourteen columns in half a screen: tighter cells than a full-width sheet. The header
+   cell itself is unpadded — its sort button carries the padding (as on every sortable
+   sheet), so padding both doubled every column's width and pushed the box off the pane. */
+table.sheet.gd-ptable td { padding-left: 0.42rem; padding-right: 0.42rem; }
+table.sheet.gd-ptable th { padding: 0; }
+table.sheet.gd-ptable .th-sort { padding: 0.5rem 0.42rem; gap: 0.15rem; }
+/* Only the active column's caret: fourteen dim carets cost a column's worth of width. */
+table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
+.gd-pname { display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.gd-team { font-size: 0.66rem; color: var(--ink-3); }
+.gd-tag { font-size: 0.6rem; font-weight: 700; padding: 0.02rem 0.35rem; border-radius: 4px; background: var(--surface-2); color: var(--ink-2); }
+.gd-court { width: 7px; height: 7px; border-radius: 50%; background: var(--good); flex: none; }
+.gd-gstat { color: var(--ink-2); white-space: nowrap; }
+.gd-opp { color: var(--ink-3); }
+
+/* ---- leaders ---- */
+.gd-owner { font-size: 0.7rem; padding: 0.06rem 0.45rem; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
+.gd-owner.you { background: var(--cobalt-soft); color: var(--cobalt); font-weight: 600; }
+.gd-owner.opp { background: var(--clay-soft); color: var(--clay); font-weight: 600; }
+.gd-owner.fa { background: transparent; border: 1px solid var(--good); color: var(--good); font-weight: 600; }
+
+/* ---- play feed ---- */
+.gd-plays { list-style: none; margin: 0; padding: 0; }
+.gd-play { padding: 0.55rem 0 0.55rem 0.6rem; border-bottom: 1px solid var(--line-2); border-left: 3px solid transparent; }
+.gd-play.you { border-left-color: var(--cobalt); background: var(--cobalt-soft); }
+.gd-play.opp { border-left-color: var(--clay); background: var(--clay-soft); }
+.gd-play:last-child { border-bottom: none; }
+.gd-play-when { font-size: 0.66rem; color: var(--ink-3); }
+.gd-play-text { font-size: 0.82rem; margin: 0.15rem 0 0.3rem; }
+.gd-play-credit { display: flex; flex-direction: column; gap: 0.2rem; }
+.gd-credit { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-size: 0.7rem; }
+.gd-credit-name { font-weight: 700; }
+.gd-credit.you .gd-credit-name { color: var(--cobalt); }
+.gd-credit.opp .gd-credit-name { color: var(--clay); }
+.gd-credit-name em { font-style: normal; font-weight: 500; color: var(--ink-3); }
+.gd-chip { font-family: var(--mono); font-size: 0.66rem; padding: 0.02rem 0.35rem; border-radius: 4px; background: var(--surface-2); color: var(--ink); }
+.gd-chip.neg { color: var(--bad); }
+.gd-more { font: inherit; font-size: 0.78rem; width: 100%; margin-top: 0.6rem; padding: 0.4rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink-2); cursor: pointer; }
+
+/* Narrower laptop / tablet: the box needs ~750px for its fourteen columns, and the feed
+   reads fine narrower — so below 1320px the box takes a bigger share. */
+@media (min-width: 768px) and (max-width: 1320px) {
+  .gd-panes { grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); }
+}
+
+/* Phone: games first, then ONE panel at a time behind the segmented control (Play by
+   Play / Box Score / Matchup — `phoneTab` in GameDayView). Stacked, the three made one
+   endless scroll and the scoreboard's ~800px vertical category sheet buried the games.
+   The page scrolls normally; only the box scrolls sideways, with the name column pinned. */
+@media (max-width: 767px) {
+  .gd { display: flex; flex-direction: column; }
+  .gd-top { order: 0; margin-top: 0.4rem; }
+  .gd-strip { order: 1; margin-top: 0; }
+  .gd-filter { order: 2; }
+  .gd-tabs { order: 3; margin-bottom: 0.7rem; }
+  .gd-board { order: 4; }
+  .gd-panes { order: 4; min-height: 0; }
+  .gd-top-odds { margin-left: 0; }
+  .gd-game { flex: 0 0 120px; }
+  .gd-panes { grid-template-columns: minmax(0, 1fr); }
+
+  /* One panel showing. */
+  .gd-tab-plays .gd-board, .gd-tab-plays .gd-box,
+  .gd-tab-box .gd-board, .gd-tab-box .gd-feed,
+  .gd-tab-matchup .gd-panes, .gd-tab-matchup .gd-filter { display: none; }
+
+  /* The filter chips scroll sideways rather than wrapping to a second row; the colour
+     key repeats what the chips and the tinted rows already say. */
+  .gd-filter .chips { flex-wrap: nowrap; overflow-x: auto; }
+  .gd-legend { display: none; }
+
+  /* The panel is the page now: no inner scroll box, no height cap. */
+  .gd-pane { overflow: visible; }
+  .gd-pane-body { max-height: none; overflow: visible; }
+  .gd-pane-head { display: none; }
+  .gd-box .gd-pane-body > .table-scroll { overflow-x: auto; }
+  /* Name pinned while the stats scroll under it. */
+  table.sheet.gd-ptable th:first-child,
+  table.sheet.gd-ptable td:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
+  /* The tints are translucent; a pinned cell needs them over a solid card, or the
+     stats scrolling underneath show through. */
+  table.sheet.gd-ptable tr.gd-own-you td:first-child {
+    background: linear-gradient(var(--cobalt-soft), var(--cobalt-soft)), var(--card);
+  }
+  table.sheet.gd-ptable tr.gd-own-opp td:first-child {
+    background: linear-gradient(var(--clay-soft), var(--clay-soft)), var(--card);
+  }
+  table.sheet.gd-ptable th:first-child { z-index: 2; background: var(--surface-2); }
+}
+
+/* ------------------------------------------------------------ team card (/team)
+
+   The Player Card's layout for a fantasy team (TeamCardView). Everything structural is
+   the Player Card's own classes (.pd-*, .pct-*); these are only the parts a team has and
+   a player doesn't. */
+.tc-pick {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  min-width: 16rem;
+  max-width: 100%;
+}
+/* The monogram stands where the headshot goes. */
+.pv-shot.tc-mono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 1.5rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+/* The facts, in the masthead: four figures to a row, number over label. */
+.tc-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem 0.4rem;
+  margin: 0.85rem 0 0.2rem;
+  padding: 0.75rem 0 0.1rem;
+  border-top: 1px solid var(--line-2);
+}
+.tc-fact { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.tc-fv { font-size: 1.05rem; font-weight: 800; color: var(--ink); line-height: 1.15; }
+.tc-fv-none { color: var(--ink-3); font-weight: 500; }
+.tc-fl {
+  margin-top: 0.15rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.tc-h {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-align: left;
+}
+/* The card is stretched to the rankings panel beside it; the lineup takes the height
+   that leaves and its rows share it, instead of ending early above an empty block. */
+.tc-card { display: flex; flex-direction: column; }
+.tc-card > .tc-lineup-wrap { flex: 1 1 auto; margin-bottom: 0; }
+.tc-card .tc-lineup { height: 100%; }
+.tc-lineup .tc-slot { color: var(--ink-2); text-align: left; width: 3rem; font-weight: 600; }
+.tc-lineup th.tc-player { text-align: left; width: 100%; }
+.tc-lineup tbody th.tc-player { font-size: 0.74rem; color: var(--ink); }
+.tc-lineup td:nth-child(3),
+.tc-lineup thead th:nth-child(3) { text-align: left; padding-left: 0.4rem; }
+/* A line under the starters, where the bench begins. */
+.tc-lineup tr.tc-bench-start th,
+.tc-lineup tr.tc-bench-start td { border-top: 1px solid var(--line); }
+.tc-inj {
+  margin-left: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+.tc-inj.out { color: var(--bad); }
+.tc-inj.day { color: var(--clay); }
+/* IR players sit at their value rank but read as out of the lineup. */
+.tc-lineup tr.tc-ir th,
+.tc-lineup tr.tc-ir td { opacity: 0.55; }

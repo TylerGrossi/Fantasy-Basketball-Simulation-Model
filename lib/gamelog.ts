@@ -28,16 +28,23 @@ export type { EspnGameEvent, EspnGameLog } from "./gamelogTypes";
 export { isAllStar, isRegularSeason } from "./gamelogTypes";
 import type { EspnGameLog } from "./gamelogTypes";
 
-const URL_FOR = (playerId: number) =>
-  `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/${playerId}/gamelog`;
+/*
+ * `season` (ESPN's year: 2027 = 2026-27) asks for that season explicitly. Without it ESPN
+ * serves ITS default, which lags the calendar — two days into 2026-27 it still handed
+ * back 2025-26 — so a card set to one season drew its chart and splits from another.
+ */
+const URL_FOR = (playerId: number, season?: number) =>
+  `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/${playerId}/gamelog` +
+  (season ? `?season=${season}` : "");
 
-const CACHE = new Map<number, Promise<EspnGameLog>>();
+const CACHE = new Map<string, Promise<EspnGameLog>>();
 
-/** The raw log for one player. Repeat calls in a session reuse the first request. */
-export function fetchGameLog(playerId: number): Promise<EspnGameLog> {
-  let hit = CACHE.get(playerId);
+/** The raw log for one player and season. Repeat calls in a session reuse the first. */
+export function fetchGameLog(playerId: number, season?: number): Promise<EspnGameLog> {
+  const key = `${playerId}-${season ?? ""}`;
+  let hit = CACHE.get(key);
   if (!hit) {
-    hit = fetch(URL_FOR(playerId))
+    hit = fetch(URL_FOR(playerId, season))
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<EspnGameLog>;
@@ -45,10 +52,10 @@ export function fetchGameLog(playerId: number): Promise<EspnGameLog> {
       .catch((err) => {
         // A failed request must not be cached as a permanent failure — the next player
         // switch (or a retry) should be free to try again.
-        CACHE.delete(playerId);
+        CACHE.delete(key);
         throw err;
       });
-    CACHE.set(playerId, hit);
+    CACHE.set(key, hit);
   }
   return hit;
 }
@@ -56,7 +63,7 @@ export function fetchGameLog(playerId: number): Promise<EspnGameLog> {
 export type LoadState = "idle" | "loading" | "done" | "error";
 
 /** `fetchGameLog` as a hook, with the switched-player race already handled. */
-export function useGameLog(playerId: number | null): {
+export function useGameLog(playerId: number | null, season?: number): {
   log: EspnGameLog | null;
   state: LoadState;
 } {
@@ -72,7 +79,7 @@ export function useGameLog(playerId: number | null): {
     let live = true;
     setState("loading");
     setLog(null);
-    fetchGameLog(playerId)
+    fetchGameLog(playerId, season)
       .then((d) => {
         // The card may have moved to another player while this was in flight.
         if (!live) return;
@@ -85,7 +92,7 @@ export function useGameLog(playerId: number | null): {
     return () => {
       live = false;
     };
-  }, [playerId]);
+  }, [playerId, season]);
 
   return { log, state };
 }

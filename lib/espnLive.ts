@@ -1,6 +1,6 @@
 import type { EspnGameLog } from "./gamelogTypes";
 import type { PoolPlayer } from "./league";
-import { makeValuer, type StatLine } from "./percentiles";
+import { doubleDouble, makeValuer, valueTotal, VALUE_INPUTS, type StatLine, type ValueSplit } from "./percentiles";
 import { isAllStar, isRegularSeason } from "./gamelogTypes";
 
 /**
@@ -66,7 +66,7 @@ const MS_DAY = 86_400_000;
  */
 export function parseGameLog(
   data: EspnGameLog,
-  value: (l: StatLine) => { off: number; def: number }
+  value: (l: StatLine) => ValueSplit
 ): PlayerGame[] {
   const index: Record<string, number> = {};
   (data.labels ?? []).forEach((l, i) => (index[l] = i));
@@ -87,7 +87,7 @@ export function parseGameLog(
 
         const m = meta[ev.eventId] ?? {};
         const [fgm, fga] = pair(at("FG"));
-        const [tpm] = pair(at("3PT"));
+        const [tpm, tpa] = pair(at("3PT"));
         const [ftm, fta] = pair(at("FT"));
         const line: StatLine = {
           PTS: Number(at("PTS") ?? 0),
@@ -97,13 +97,17 @@ export function parseGameLog(
           BLK: Number(at("BLK") ?? 0),
           TO: Number(at("TO") ?? 0),
           "3PM": tpm,
+          "3PA": tpa,
           FGM: fgm,
           FGA: fga,
           FTM: ftm,
           FTA: fta,
         };
+        // The league's two derived categories: a double-double off this line, and the
+        // team win off the game's result.
+        line.DD = doubleDouble(line);
+        line.TW = m.gameResult === "W" ? 1 : 0;
         const d = new Date(m.gameDate ?? 0);
-        const { off, def } = value(line);
         out.push({
           id: ev.eventId,
           date: +d,
@@ -114,7 +118,7 @@ export function parseGameLog(
           rest: null,
           min,
           line,
-          value: off + def,
+          value: valueTotal(value(line)),
         });
       }
     }
@@ -290,11 +294,8 @@ export function spreadRank(
 
 /** Mean of a per-game line over a set of games. */
 export function averageLine(games: PlayerGame[]): StatLine {
-  const keys: Array<keyof StatLine> = [
-    "PTS", "REB", "AST", "STL", "BLK", "TO", "3PM", "FGM", "FGA", "FTM", "FTA",
-  ];
   const out = {} as StatLine;
-  for (const k of keys) {
+  for (const k of VALUE_INPUTS) {
     out[k] = games.length
       ? games.reduce((a, g) => a + Number(g.line[k] ?? 0), 0) / games.length
       : 0;

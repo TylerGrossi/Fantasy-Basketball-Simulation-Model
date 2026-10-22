@@ -85,10 +85,14 @@ export function remainingSide(
     if (removed <= 0) return { ...p, nbaGamesLeft: restScheduled };
 
     changed = true;
-    const m = playerMoments(p.avg, removed, league.variance);
+    // Swap his whole-week moments for his remaining ones rather than subtracting the
+    // played games' worth: the projection-error term grows with games^2, so it is not
+    // additive over games (see playerMoments).
+    const full = playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError);
+    const rest = playerMoments(p.avg, restCounted, league.variance, league.projectionError);
     for (let i = 0; i < mu.length; i++) {
-      mu[i] = Math.max(0, mu[i] - m.mu[i]);
-      vr[i] = Math.max(0, vr[i] - m.var[i]);
+      mu[i] = Math.max(0, mu[i] - full.mu[i] + rest.mu[i]);
+      vr[i] = Math.max(0, vr[i] - full.var[i] + rest.var[i]);
     }
     return { ...p, gamesLeft: restCounted, nbaGamesLeft: restScheduled };
   });

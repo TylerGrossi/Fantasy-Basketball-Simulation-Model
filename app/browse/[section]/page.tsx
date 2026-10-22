@@ -1,13 +1,13 @@
 import { notFound } from "next/navigation";
 import SectionIndex, { type IndexStat } from "@/components/SectionIndex";
 import { careerPlayers, careerTotals, headToHead, managerTable } from "@/lib/career";
-import { categoryRecord, periodLabel, scoreboardRows, winProbability } from "@/lib/league";
-import { loadCareer, loadLeague, myTeam, resolveMatchup } from "@/lib/loadLeague";
-import { livePhase } from "@/lib/matchupPhase";
+import { allPlayStarted, firstWeekFinal } from "@/lib/league";
+import { loadCareer, loadLeague, myTeam } from "@/lib/loadLeague";
 import { INDEXED_SECTIONS, navFor, type SectionKey } from "@/lib/nav";
 
 /**
- * A section's index — the screen This Week / Season / Tools open on a phone.
+ * A section's index — the screen Season / Tools / More open on a phone. (This Week had
+ * one too until 2026-10-21; it is now a single scrolling page, see INDEXED_SECTIONS.)
  *
  * One route for all three, because they differ only in their page list and their figures;
  * three near-identical files would drift. Home and Agent have no index (see
@@ -44,13 +44,11 @@ export default async function Page({
   if (!s) notFound();
 
   const stats =
-    key === "week"
-      ? weekStats(league, me.id)
-      : key === "season"
-        ? seasonStats(league, me.id)
-        : key === "more"
-          ? await moreStats()
-          : toolStats(league);
+    key === "season"
+      ? seasonStats(league, me.id)
+      : key === "more"
+        ? await moreStats()
+        : toolStats(league);
 
   return (
     <SectionIndex
@@ -66,74 +64,17 @@ type League = Awaited<ReturnType<typeof loadLeague>>;
 type Stats = Record<string, IndexStat | undefined>;
 
 /**
- * League and season on every index, so the three headers read the same way.
- *
- * Only This Week departs, and only in its second half: on that screen the period is the
- * scope of everything below it, and it changes week to week, so it earns the slot the year
- * takes elsewhere. Tools used to show a pool count there, which was a fact about the data
- * rather than a heading, and made one of the three headers look unlike its siblings.
+ * League and season on every index, so the headers read the same way. Tools used to show
+ * a pool count there, which was a fact about the data rather than a heading, and made one
+ * header look unlike its siblings.
  */
 function captionFor(key: SectionKey, league: League): string {
   const name = league.leagueName?.trim() || "Your league";
   const year = `${league.season - 1}–${String(league.season).slice(2)}`;
-  if (key === "week") return `${name} · ${periodLabel(league)}`;
   // "More" spans every league you have played in, so the current one's name would be
   // wrong on five of its seven rows.
   if (key === "more") return "Agent, settings and your career history";
   return `${name} · ${year}`;
-}
-
-/* -------------------------------------------------------------------------- */
-/* This Week                                                                   */
-/* -------------------------------------------------------------------------- */
-
-function weekStats(league: League, teamId: number): Stats {
-  const r = resolveMatchup(league, teamId);
-  if (!r) return {};
-  const you = r.isHome ? r.matchup.home : r.matchup.away;
-  const opp = r.isHome ? r.matchup.away : r.matchup.home;
-
-  const rec = categoryRecord(scoreboardRows(league, you.current, opp.current));
-  const phase = livePhase(r.matchup);
-  const score = rec.tie ? `${rec.win}–${rec.loss}–${rec.tie}` : `${rec.win}–${rec.loss}`;
-
-  /*
-   * The Matchup row shows the MODEL, and the model has nothing left to say once the week
-   * is played — it would read 100% for a result the Scoreboard row above it already
-   * states, which is the "a probability is not an outcome" trap in miniature. Once the
-   * week is final it names the result instead, and the probability comes back on its own
-   * the moment there are games left to project.
-   */
-  const matchupStat: IndexStat =
-    phase === "post"
-      ? { value: rec.win > rec.loss ? "Won" : rec.win < rec.loss ? "Lost" : "Tied", tone: rec.win > rec.loss ? "good" : rec.win < rec.loss ? "bad" : "plain", note: "final" }
-      : {
-          value: `${Math.round(
-            winProbability(league, you, opp, you.current, opp.current).win * 100
-          )}%`,
-          tone: "plain",
-          note: "to win",
-        };
-
-  const withGames = you.players.filter((p) => p.gamesLeft > 0).length;
-
-  return {
-    "/scoreboard": {
-      value: score,
-      tone: rec.win > rec.loss ? "good" : rec.win < rec.loss ? "bad" : "plain",
-      note: "categories",
-    },
-    "/scoreboard#odds": matchupStat,
-    "/scoreboard#streamers": {
-      value: String(league.freeAgents.length),
-      note: "free agents",
-    },
-    "/scoreboard#bench": {
-      value: String(withGames),
-      note: withGames === 1 ? "player has games" : "players have games",
-    },
-    "/scoreboard#roster": { value: String(you.players.length), note: "players" },
-  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -146,8 +87,11 @@ function seasonStats(league: League, teamId: number): Stats {
 
   const mine = sd.standings?.find((t) => t.teamId === teamId);
   if (mine) {
-    const place = mine.finalStanding || mine.standing;
-    out["/season"] = { value: ordinal(place), tone: place === 1 ? "good" : "plain", note: `of ${sd.standings?.length ?? 0}` };
+    // No place until week 1 is final: before it, the "standing" is ESPN's tiebreak order.
+    if (firstWeekFinal(league)) {
+      const place = mine.finalStanding || mine.standing;
+      out["/season"] = { value: ordinal(place), tone: place === 1 ? "good" : "plain", note: `of ${sd.standings?.length ?? 0}` };
+    }
     out["/schedule"] = {
       value: `${mine.wins}–${mine.losses}${mine.ties ? `–${mine.ties}` : ""}`,
       note: "category record",
@@ -158,7 +102,10 @@ function seasonStats(league: League, teamId: number): Stats {
   if (pool.length) out["/season-stats"] = { value: String(pool.length), note: "players" };
   if (league.teams.length) out["/league-stats"] = { value: String(league.teams.length), note: "teams" };
 
-  const rank = sd.powerRankings?.teams.find((t) => t.teamId === teamId);
+  // No all-play rank until week 1 is final (see allPlayStarted).
+  const rank = allPlayStarted(league)
+    ? sd.powerRankings?.teams.find((t) => t.teamId === teamId)
+    : undefined;
   if (rank) {
     out["/rankings"] = {
       value: `#${rank.rank}`,

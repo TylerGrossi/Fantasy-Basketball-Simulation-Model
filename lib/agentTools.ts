@@ -20,6 +20,7 @@ import type { LeagueData, PoolPlayer, StandingRow, ScoreboardRow } from "./leagu
 // The same helpers /scoreboard and /matchup use, so the agent's numbers are the page's
 // numbers rather than a second implementation that can drift from it.
 import {
+  allPlayStarted,
   categoryRecord,
   periodLabel,
   scoreboardRows,
@@ -286,7 +287,7 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
   {
     name: "lookup_player",
     description:
-      "Look up one NBA player's full fantasy profile: 9-category value, 15-day and 30-day trend, per-game stats (points, rebounds, assists, steals, blocks, threes, turnovers, double-doubles, shooting %), NBA team, position, fantasy owner, and injury status.",
+      "Look up one NBA player's full fantasy profile: league-category value, 15-day and 30-day trend, per-game stats (points, rebounds, assists, steals, blocks, threes, turnovers, double-doubles, shooting %), NBA team, position, fantasy owner, and injury status.",
     parameters: {
       type: "object",
       properties: {
@@ -314,7 +315,7 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
         sort_by: {
           type: "string",
           enum: Object.keys(SORT_COLUMNS),
-          description: 'How to rank. "value" is the overall 9-cat value.',
+          description: 'How to rank. "value" is the overall value across all the league categories.',
         },
         limit: { type: "integer", description: "How many players to return (1-25)." },
       },
@@ -347,11 +348,11 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
           enum: Object.keys(SORT_COLUMNS),
           description: 'What to rank by — e.g. "rebounds", "fg_pct", "blocks", "value".',
         },
-        min_value: { type: "number", description: "Minimum 9-cat value." },
+        min_value: { type: "number", description: "Minimum value." },
         max_value: {
           type: "number",
           description:
-            "Maximum 9-cat value. Use it to skip untouchable stars when looking for a realistic trade — the top ~20 in the league will not be sold at a discount.",
+            "Maximum value. Use it to skip untouchable stars when looking for a realistic trade — the top ~20 in the league will not be sold at a discount.",
         },
         min_fg_pct: { type: "number", description: "Minimum field-goal %, as 0-1 (0.5 = 50%)." },
         min_ft_pct: { type: "number", description: "Minimum free-throw %, as 0-1." },
@@ -367,7 +368,7 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
   {
     name: "league_rosters",
     description:
-      "Every fantasy team's roster in one call, each player with position, 9-cat value and 15-day trend. Use it to survey the league before proposing a trade — who is deep where, and which manager has a surplus of what. Cheaper than calling team_roster for each team.",
+      "Every fantasy team's roster in one call, each player with position, value and 15-day trend. Use it to survey the league before proposing a trade — who is deep where, and which manager has a surplus of what. Cheaper than calling team_roster for each team.",
     parameters: {
       type: "object",
       properties: {
@@ -800,7 +801,7 @@ export function createToolRunner(
               ? spreadRank(p.playerId, p.value, consistencyPool, pool)
               : null;
           const line =
-            `Consistency (per-game 9-cat value) — median night ${signed(con.median)}, ` +
+            `Consistency (per-game value) — median night ${signed(con.median)}, ` +
             `average ${signed(con.avg)}, spread ±${con.sd.toFixed(1)} game to game; ` +
             `${Math.round(con.aboveOwn * 100)}% of games at or above his own average, ` +
             `${Math.round(con.abovePool * 100)}% above the pool average (startable nights).`;
@@ -1032,6 +1033,8 @@ export function createToolRunner(
       case "power_rankings": {
         const teams = league.seasonData.powerRankings?.teams ?? [];
         if (!teams.length) return "Power-ranking data is unavailable right now.";
+        if (!allPlayStarted(league))
+          return "All-play power rankings start once week 1 is final; until then the league ranks by week-0 total roster value (see the Rankings page).";
         return [
           "League power rankings (by cumulative all-play):",
           ...teams.map((t) => {
@@ -1239,7 +1242,8 @@ export function systemInstruction(
     "wins (games the player's NBA team wins while he plays). Volume counts here (FGM, FGA, " +
     "3PA are categories), so high-usage scorers are worth more than in standard 9-cat, and " +
     "non-shooting bigs lose ground in the three three-point categories. " +
-    'In the in-season tools, "Value" is a 9-category z-score rating: ' +
+    'In the in-season tools, "Value" is a z-score rating across ALL of these categories ' +
+    "(the league's own, not the standard nine): " +
     "higher is better, ~0 is replacement level, and positive means a useful fantasy " +
     'player. A player\'s "15-day" / "30-day" trend is how their recent value compares ' +
     "to their season value (positive = heating up, negative = cooling off).\n\n" +
@@ -1292,7 +1296,7 @@ export function systemInstruction(
     "filter and search again rather than falling back on generalities.\n" +
     "RESPECT A STATED STRATEGY. If the user says they are punting a category, stop " +
     "recommending fixes for it and stop counting it against a target - rank candidates " +
-    "by the categories they actually want. A punt build makes the overall 9-cat 'value' " +
+    "by the categories they actually want. A punt build makes the overall 'value' " +
     "number misleading, so lean on the per-category figures instead.\n" +
     "2. web_search (Google) - use this LIBERALLY for anything the league data can't " +
     "answer and anything current or that you're not fully certain of: live news, " +

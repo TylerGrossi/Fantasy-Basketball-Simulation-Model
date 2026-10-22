@@ -62,7 +62,8 @@ export default function WinProbChart({
   if (all.length === 0) {
     return (
       <p className="caption">
-        No readings yet — a point is added at every data refresh (twice a day).
+        No readings yet — a point is added at each data refresh (every two hours, outside
+        game time).
       </p>
     );
   }

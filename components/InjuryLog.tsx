@@ -140,7 +140,8 @@ async function missedGames(
   season: number
 ): Promise<{ played: number; total: number; stints: Stint[] }> {
   // Shared with the game-log table and the rolling-value chart — one request, not three.
-  const log = await fetchGameLog(playerId);
+  // The SAME season as the team schedules below, asked for explicitly.
+  const log = await fetchGameLog(playerId, season);
 
   const meta = log.events ?? {};
   const played = new Set<string>();

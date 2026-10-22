@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict
 
 from config import (
+    CATEGORIES,
     INJURED_STATUSES,
     MAX_PLAYERS_PER_DAY,
     MAX_ROSTER_SIZE,
@@ -288,23 +289,72 @@ def _get_games_by_day_for_week(roster, week, year, injury_data=None, trust_retur
     return dict(games_by_day)
 
 
-def _pts_rank_scores_from_df(df):
-    """Per-player PTS from stats df (higher = prioritized when trimming roster or busy days)."""
+# The value is THIS LEAGUE's categories (config.CATEGORIES, all 15), not the standard
+# nine (owner, 2026-10-21): FGM, FGA, 3PA, 3P%, DD and TW are scored here, so a value
+# that ignored them ranked players by a game this league does not play. Every category
+# counts "more is better" except these — FGA and 3PA included, as the league scores them.
+VALUE_LOWER_IS_BETTER = {"TO"}
+# Percentages are VOLUME-WEIGHTED: makes above what a league-average shooter makes on the
+# same attempts, so 4-6 counts twice 2-3 (it moves a team's percentage twice as far).
+VALUE_RATE_CATS = {"FG%": ("FGM", "FGA"), "FT%": ("FTM", "FTA"), "3P%": ("3PM", "3PA")}
+# Every column the value reads.
+VALUE_COLUMNS = (
+    {c for c in CATEGORIES if c not in VALUE_RATE_CATS}
+    | {col for pair in VALUE_RATE_CATS.values() for col in pair}
+)
+
+
+def league_value(df, ref):
+    """
+    The league's category z-score value for each row of ``df``, scored against the
+    distribution in ``ref`` (so season and last-30 are on the same scale and can be
+    differenced into a trend). One z-score per scored category, summed; a lower-is-better
+    category subtracts; a percentage scores its volume-weighted impact.
+
+    lib/percentiles.ts (`makeValuer`) is the same formula, term for term — the Player
+    Card recomputes parts of it client-side and they have to agree.
+    """
+    if df is None or df.empty:
+        return pd.Series([], dtype=float)
+    val = pd.Series(0.0, index=df.index)
+    for cat in CATEGORIES:
+        if cat in VALUE_RATE_CATS:
+            made, att = VALUE_RATE_CATS[cat]
+            lg = ref[made].sum() / ref[att].sum() if ref[att].sum() > 0 else 0.0
+            imp_ref = ref[made] - lg * ref[att]
+            sd = imp_ref.std(ddof=0)
+            if sd > 0:
+                val = val + (df[made] - lg * df[att] - imp_ref.mean()) / sd
+            continue
+        sd = ref[cat].std(ddof=0)
+        if sd > 0:
+            z = (df[cat] - ref[cat].mean()) / sd
+            val = val - z if cat in VALUE_LOWER_IS_BETTER else val + z
+    return val
+
+
+def _value_rank_scores_from_df(df, ref=None):
+    """
+    Per-player league value (higher = prioritized when trimming the roster or on a day with
+    more games than starting spots). Scored against ``ref`` — the whole league's lines,
+    when the caller has them — else against ``df`` itself.
+
+    Was points per game until 2026-10-21 (owner): a 25-point scorer who shoots 40% and
+    turns it over is not the player you start over a 15/10/5 big in a category league.
+    """
     if df is None or df.empty or "Player" not in df.columns:
         return {}
-    if "PTS" not in df.columns:
+    needed = VALUE_COLUMNS
+    if not needed.issubset(df.columns):
         return {}
-    out = {}
-    for _, row in df.iterrows():
-        name = row["Player"]
-        v = row["PTS"]
-        out[name] = float(v) if pd.notna(v) else 0.0
-    return out
+    base = ref if ref is not None and not ref.empty and needed.issubset(ref.columns) else df
+    vals = league_value(df.fillna(0.0), base.fillna(0.0))
+    return {name: float(v) for name, v in zip(df["Player"], vals)}
 
 
 def _roster_for_projection_caps(roster, rank_scores, max_roster_size):
     """
-    If roster exceeds max_roster_size, keep the top players by rank_scores (PTS), tie-break by name.
+    If roster exceeds max_roster_size, keep the top players by rank_scores (value), tie-break by name.
     Returns (trimmed_roster, kept_player_names).
     """
     if max_roster_size is None or len(roster) <= max_roster_size:
@@ -321,7 +371,7 @@ def _roster_for_projection_caps(roster, rank_scores, max_roster_size):
 def _accumulate_counted_games_by_day(games_by_day, rank_scores, max_per_day):
     """
     Each calendar day, at most max_per_day rostered players get a counted NBA game.
-    When more than max_per_day have a game, keep the top max_per_day by PTS (rank_scores).
+    When more than max_per_day have a game, keep the top max_per_day by value (rank_scores).
     """
     player_effective = defaultdict(float)
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
@@ -343,18 +393,19 @@ def _accumulate_counted_games_by_day(games_by_day, rank_scores, max_per_day):
 
 
 def add_games_in_week(df, roster, week, year, injury_data=None, max_per_day=None, trust_return_dates=True,
-                      max_roster_size=None):
+                      max_roster_size=None, rank_ref=None):
     """
     Add 'Games This Week' column for a specific fantasy week (injury-aware).
     Used for projected roster strength in playoff simulation.
     At most max_roster_size players contribute (default 13); lower projections are dropped.
     When more than max_per_day players have an NBA game the same day, only the top max_per_day
-    by PTS get a counted game for that day (default max_per_day from config).
+    by league value get a counted game for that day (default max_per_day from config).
     trust_return_dates: if False, non-ACTIVE players are treated as out the full week.
+    rank_ref: the league's lines to score that value against (else the roster's own).
     """
     df = df.copy()
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
-    rank_scores = _pts_rank_scores_from_df(df)
+    rank_scores = _value_rank_scores_from_df(df, rank_ref)
     cap_roster = max_roster_size if max_roster_size is not None else MAX_ROSTER_SIZE
     roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster)
     games_by_day = _get_games_by_day_for_week(roster_eff, week, year, injury_data, trust_return_dates)
@@ -697,6 +748,8 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
             per_game["DD"] = safe_num(total_block.get("DD", 0)) / gp
             per_game["TW"] = safe_num(total_block.get("TW", 0)) / gp
         source = "current" if gp > 0 else ""
+        # Games the line RESTS ON — `gp` unless it is blended with last season's (below).
+        sample_gp = gp
         if use_prior and PRIOR_MODE == "last_season":
             # Player pages: real numbers only. This season's actuals once he has played;
             # until then his LAST-season line; a rookie (no last season) his projection.
@@ -735,6 +788,11 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
                     per_game = {k: w * per_game.get(k, 0.0) + (1 - w) * base.get(k, 0.0)
                                 for k in keys}
                     source = "blend"
+                    # A blend rests on both seasons' games. `gp` alone (1 on opening
+                    # week) hid every star who had played behind a Min GP filter, while
+                    # one who had not (a pure last-season line, gp 65) passed it.
+                    if last:
+                        sample_gp = gp + float(last.get("gp", 0) or 0)
             prior = None
         else:
             prior = _projected_per_game(p, year) if use_prior else None
@@ -785,6 +843,9 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
             "TW": per_game.get("TW", 0),
             # Where this line came from: current | blend | proj | last (see PRIOR_MODE).
             "StatSource": source,
+            # The games behind the line: GP, plus last season's for a blend. What a Min GP
+            # filter or a percentile's qualifying bar tests (lib/percentiles.ts gamesFor).
+            "SampleGP": sample_gp,
         })
     return pd.DataFrame(rows)
 
@@ -1019,7 +1080,8 @@ def add_games_left(df, week_span=1, period_end_date=None, window_start=None, win
 
 def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
                                trust_return_dates=True, week_span=1, period_end_date=None,
-                               window_start=None, window_end=None, max_roster_size=None):
+                               window_start=None, window_end=None, max_roster_size=None,
+                               rank_ref=None):
     """
     Add Games Left column using ESPN estimated return dates.
     Non-ACTIVE players with return date: count only games on/after that date.
@@ -1029,12 +1091,13 @@ def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
 
     At most max_roster_size players contribute (default 13); others get 0 counted games.
     When more than max_per_day players have an NBA game the same day, only the top max_per_day
-    by PTS get a counted game that day (default max_per_day from config).
+    by league value get a counted game that day (default max_per_day from config).
     trust_return_dates: if False, any non-ACTIVE player is treated as out the full period.
+    rank_ref: the league's lines to score that value against (else the roster's own).
     """
     df = df.copy()
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
-    rank_scores = _pts_rank_scores_from_df(df)
+    rank_scores = _value_rank_scores_from_df(df, rank_ref)
     cap_roster = max_roster_size if max_roster_size is not None else MAX_ROSTER_SIZE
     roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster)
     games_by_day = _get_games_by_day_for_roster(

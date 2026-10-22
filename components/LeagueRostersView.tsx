@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer, Team } from "@/lib/league";
 import {
+  bestLineup,
   headshotUrl,
   playerStatus,
   VALUE_BASES,
@@ -24,7 +25,8 @@ import StatusBadge from "./StatusBadge";
  *    the page is a value board, not a standings repeat).
  *  - ROWS inside a card follow the SLOT layout, because that is what makes the Slot
  *    column mean anything; ranking rows by value would leave the slot labels in a
- *    scrambled order that reads as a bug.
+ *    scrambled order that reads as a bug. Who sits in each slot is the best lineup by
+ *    value (see fillSlots), not ESPN's.
  *
  * Nothing is greyed out. Injury is carried by the badge next to the name, exactly as ESPN
  * does it — dimming a whole row buries the value figure that the page exists to show.
@@ -193,50 +195,36 @@ export default function LeagueRostersView({
 }
 
 /**
- * Fill the slot layout from the roster.
+ * Fill the slot layout from the roster — by VALUE, the Lineup tab's way (owner,
+ * 2026-10-21), not the slots ESPN reports.
  *
- * Each player goes in the slot ESPN itself reports for them (`lineupSlot`), best-valued
- * first within a label — with three UTIL and three Bench spots, the order inside a label
- * is otherwise arbitrary.
+ * ESPN's slots are whatever the manager last set, so a card could show Keyonte George at
+ * PG with Stephen Curry in a UTIL spot. The starters are now `bestLineup` — the same
+ * function the Lineup tab and the Team Card seat their best ten with: the highest-value
+ * players who can legally be seated, the best eligible one in each slot in layout order,
+ * so PG holds the best point guard. Then the bench by value, then IR (who cannot start).
  *
- * A label can OVERFLOW its layout count: two teams in this league carry a fourth bench
- * player. The extra row is emitted alongside the other Bench rows rather than tacked onto
- * the end of the card, so the slot column stays in blocks — a lone "Bench" row printed
- * below the IR rows reads as a rendering bug. Labels the layout doesn't mention at all
- * (older export, unused slot) still go last, because there is nowhere else for them; a
- * board that silently drops a player would be worse than one with a trailing row.
+ * A label can OVERFLOW its layout count — two teams carry a fourth bench player — so
+ * Bench and IR print every player they hold, never fewer rows than the layout's spots.
  */
 function fillSlots(players: PoolPlayer[], layout: string[]) {
-  const pending = new Map<string, PoolPlayer[]>();
-  for (const p of [...players].sort((a, b) => (b.value ?? 0) - (a.value ?? 0))) {
-    const key = p.lineupSlot || "";
-    const list = pending.get(key) ?? [];
-    list.push(p);
-    pending.set(key, list);
-  }
+  const byValue = (a: PoolPlayer, b: PoolPlayer) => (b.value ?? 0) - (a.value ?? 0);
+  const ir = players.filter((p) => p.lineupSlot === "IR").sort(byValue);
+  const active = players.filter((p) => p.lineupSlot !== "IR");
+  const starterSlots = layout.filter((s) => s !== "Bench" && s !== "IR");
+  const starters = bestLineup(active, starterSlots);
+  const seated = new Set(starters.filter((p): p is PoolPlayer => !!p).map((p) => p.name));
+  const bench = active.filter((p) => !seated.has(p.name)).sort(byValue);
 
-  const counts = new Map<string, number>();
-  for (const slot of layout) counts.set(slot, (counts.get(slot) ?? 0) + 1);
-
-  const rows: Array<{ slot: string; player?: PoolPlayer }> = [];
-  const seen = new Set<string>();
-  for (const slot of layout) {
-    if (seen.has(slot)) continue;
-    seen.add(slot);
-    const held = pending.get(slot) ?? [];
-    // Every spot the layout defines, plus any extra the roster actually holds.
-    const n = Math.max(counts.get(slot) ?? 0, held.length);
-    for (let i = 0; i < n; i++) rows.push({ slot, player: held[i] });
-    pending.delete(slot);
-  }
-
-  const leftover: Array<{ slot: string; player: PoolPlayer }> = [];
-  for (const [slot, list] of pending) {
-    for (const player of list) leftover.push({ slot: slot || "—", player });
-  }
-  leftover.sort((a, b) => (b.player.value ?? 0) - (a.player.value ?? 0));
-
-  return [...rows, ...leftover];
+  const spots = (label: string, held: PoolPlayer[]) => {
+    const n = Math.max(layout.filter((s) => s === label).length, held.length);
+    return Array.from({ length: n }, (_, i) => ({ slot: label, player: held[i] }));
+  };
+  return [
+    ...starterSlots.map((slot, i) => ({ slot, player: starters[i] ?? undefined })),
+    ...spots("Bench", bench),
+    ...spots("IR", ir),
+  ];
 }
 
 function RosterCard({

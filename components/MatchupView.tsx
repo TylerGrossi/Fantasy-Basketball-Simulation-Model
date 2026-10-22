@@ -497,7 +497,7 @@ function PreGameForecast({
       <div className="fc-row">
         <div className="fc-cell">
           <span className="eyebrow">Forecast</span>
-          <span className="fc-v mono">{(forecast.win * 100).toFixed(0)}%</span>
+          <span className="fc-v mono">{(forecast.win * 100).toFixed(1)}%</span>
           <span className="fc-sub mono">to win · {forecast.expected.toFixed(1)} cats</span>
         </div>
         <div className="fc-cell">

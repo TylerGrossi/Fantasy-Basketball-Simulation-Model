@@ -135,7 +135,7 @@ export function phasedMatchup(
     const mu = league.stats.map(() => 0);
     const va = league.stats.map(() => 0);
     for (const p of players) {
-      const pm = playerMoments(p.avg, p.gamesLeft, league.variance);
+      const pm = playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError);
       for (let i = 0; i < mu.length; i++) {
         mu[i] += pm.mu[i];
         va[i] += pm.var[i];

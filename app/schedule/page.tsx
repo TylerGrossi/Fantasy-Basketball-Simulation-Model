@@ -1,7 +1,10 @@
 import Link from "next/link";
-import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { loadLeague, myTeam, trimLeague } from "@/lib/loadLeague";
+import LiveSeed from "@/components/LiveSeed";
+import ScheduleLiveWeek from "@/components/ScheduleLiveWeek";
+import { liveSeed } from "@/lib/liveMatchup";
 import { weeklyAllPlay } from "@/lib/history";
-import { periodLabel, winProbability } from "@/lib/league";
+import { periodLabel, winPctText } from "@/lib/league";
 
 /**
  * Your season, matchup by matchup — what happened, and what would have happened against
@@ -68,11 +71,10 @@ export default async function Page() {
    * (whole categories, ties left out — owner, 2026-10-20) and the chance of winning the
    * matchup.
    *
-   * The CURRENT week comes from the matchup snapshot, the same numbers the Current
-   * Matchup page opens on (before its live refresh), so the two pages agree. Every later
-   * week comes from the playoff model's simulated seasons (`projWeeks`), the same weeks
-   * the playoff odds are built from. Either source may be missing on an older export,
-   * and then the row just shows dashes.
+   * The CURRENT week is LIVE (ScheduleLiveWeek): the same win probability Current
+   * Matchup, League Home and Game Day show, to the decimal. Every later week comes from
+   * the playoff model's simulated seasons (`projWeeks`), the same weeks the playoff odds
+   * are built from. A missing source (an older export) leaves the row showing dashes.
    */
   const projOf = new Map<number, { score: string; win: number }>();
   const odds = league.seasonData?.playoffOdds?.find((o) => o.teamId === me.id);
@@ -80,16 +82,20 @@ export default async function Page() {
     const [pw, pl] = p.score;
     projOf.set(Number(period), { score: `${Math.round(pw)}-${Math.round(pl)}`, win: p.win });
   }
-  const live = league.matchups.find((m) => m.homeId === me.id || m.awayId === me.id);
-  if (live && !league.seasonOver) {
-    const [you, opp] = live.homeId === me.id ? [live.home, live.away] : [live.away, live.home];
-    const o = winProbability(league, you, opp, you.current, opp.current);
-    // The peak of the categories-won distribution: distribution[k] = P(win exactly k).
-    const n = o.categoryProbs.length;
-    const k = o.distribution.reduce((best, p, i, d) => (p > d[best] ? i : best), 0);
-    projOf.set(league.period, { score: `${k}-${n - k}`, win: o.win });
-  }
-  const pctText = (p: number) => `${(p * 100).toFixed(0)}%`;
+  const live = league.seasonOver
+    ? undefined
+    : league.matchups.find((m) => m.homeId === me.id || m.awayId === me.id);
+  // The current week, live; seeded so its first paint is already live (LiveSeed).
+  const liveWeek = live && {
+    league: trimLeague(league, { matchupTeamId: me.id }),
+    matchup: live,
+    isHome: live.homeId === me.id,
+    teamId: me.id,
+  };
+  const seed = liveWeek ? await liveSeed(league.period, me.id) : null;
+  const isLiveWeek = (r: { period: number; result: string }) =>
+    !!liveWeek && r.period === league.period && !r.result;
+  const pctText = winPctText;
 
   const w = rows.filter((r) => r.result === "W").length;
   const l = rows.filter((r) => r.result === "L").length;
@@ -108,7 +114,7 @@ export default async function Page() {
   );
 
   return (
-    <>
+    <LiveSeed period={league.period} teamId={me.id} data={seed}>
       <h1>Schedule</h1>
 
       <div className="metrics sched-desk">
@@ -188,7 +194,9 @@ export default async function Page() {
               <span className={played ? `msched-score ${tone}` : "msched-preview"}>
                 {played
                   ? r.score || "—"
-                  : projOf.has(r.period)
+                  : isLiveWeek(r)
+                    ? <ScheduleLiveWeek {...liveWeek!} variant="mobile" />
+                    : projOf.has(r.period)
                     ? `${pctText(projOf.get(r.period)!.win)} win`
                     : "Preview"}
               </span>
@@ -251,7 +259,9 @@ export default async function Page() {
                 </td>
                 {/* A finished week shows what happened; an unfinished one shows the
                     projection, muted and marked "proj" so it never reads as a result. */}
-                {r.result || !projOf.has(r.period) ? (
+                {isLiveWeek(r) ? (
+                  <ScheduleLiveWeek {...liveWeek!} variant="cells" />
+                ) : r.result || !projOf.has(r.period) ? (
                   <>
                     <td className="num">{r.score || "—"}</td>
                     <td className="num">—</td>
@@ -280,7 +290,7 @@ export default async function Page() {
           </tbody>
         </table>
       </div>
-    </>
+    </LiveSeed>
   );
 }
 

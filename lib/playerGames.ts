@@ -26,9 +26,11 @@ export type { PlayerGame } from "./espnLive";
 /** The player's games, valued. Empty until the shared log resolves. */
 export function usePlayerGames(
   playerId: number | null,
-  pool: PoolPlayer[]
+  pool: PoolPlayer[],
+  /** ESPN season year (2027 = 2026-27); ESPN's default season when omitted. */
+  season?: number
 ): { games: PlayerGame[]; loading: boolean } {
-  const { log, state } = useGameLog(playerId);
+  const { log, state } = useGameLog(playerId, season);
   const value = useMemo(() => makeValuer(pool), [pool]);
   const games = useMemo(() => (log ? parseGameLog(log, value) : []), [log, value]);
   return { games, loading: state === "loading" };

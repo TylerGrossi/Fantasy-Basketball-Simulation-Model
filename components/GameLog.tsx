@@ -78,9 +78,12 @@ const COMPACT_ROWS = 10;
 
 export default function GameLog({
   playerId,
+  season,
   compact = false,
 }: {
   playerId: number | null;
+  /** The season the card is set to (ESPN year); ESPN's default when omitted. */
+  season?: number;
   /**
    * Drops the card chrome and shows only the most recent games.
    *
@@ -90,7 +93,7 @@ export default function GameLog({
    */
   compact?: boolean;
 }) {
-  const { log, state } = useGameLog(playerId);
+  const { log, state } = useGameLog(playerId, season);
   const parsed = useMemo(
     () => (log ? parse(log) : { rows: [], index: {} }),
     [log]

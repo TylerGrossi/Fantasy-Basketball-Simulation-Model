@@ -858,32 +858,37 @@ def _playoff_team_ids_ordered(league_stats, playoff_teams=4):
 
 def current_matchup_period_effective(league, regular_season_weeks=19, playoff_weeks_per_round=2):
     """
-    Resolve current matchup period from scoringPeriodId -> matchup_ids when available.
-    This handles ESPN states where currentMatchupPeriod can lag the active scoring period.
+    Resolve the current (app) matchup period: scoringPeriodId -> matchup_ids when
+    available, else currentMatchupPeriod. This handles ESPN states where
+    currentMatchupPeriod can lag the active scoring period.
+
+    scoringPeriodId is a DAY, not a week — it must never be returned as the period
+    itself. It used to be whenever it was <= the regular-season length, which put day 2
+    of the 2026-27 season (Oct 21) in "Matchup 2" and showed matchup 1 as final.
+
+    A playoff round is ONE ESPN matchup period but spans `playoff_weeks_per_round` app
+    periods, keyed by the round's start (rs+1, rs+1+plen, ...) — the same arithmetic as
+    build_data.matchup_period_id_for, inverted.
     """
     cw = int(getattr(league, "currentMatchupPeriod", 0) or 0)
     sp = int(getattr(league, "scoringPeriodId", 0) or 0)
     rs = int(regular_season_weeks)
     plen = max(1, int(playoff_weeks_per_round))
-    if sp > 0:
-        if sp <= rs:
-            return sp
-        # Two-week playoff rounds represented by matchup-period *start* id:
-        # rs+1..rs+plen -> rs+1, next block -> rs+1+plen, etc.
-        round_idx = (sp - rs - 1) // plen
-        return rs + 1 + round_idx * plen
+
+    espn = cw
     mids = getattr(league, "matchup_ids", {}) or {}
-    if not isinstance(mids, dict):
-        return cw
-    try:
-        sp_s = str(sp)
-        for mp, scoring_ids in mids.items():
-            vals = {str(x) for x in (scoring_ids or [])}
-            if sp_s in vals:
-                return int(mp)
-    except Exception:
-        return cw
-    return cw
+    if sp > 0 and isinstance(mids, dict):
+        try:
+            sp_s = str(sp)
+            for mp, scoring_ids in mids.items():
+                if sp_s in {str(x) for x in (scoring_ids or [])}:
+                    espn = int(mp)
+                    break
+        except Exception:
+            espn = cw
+    if espn <= rs:
+        return espn
+    return rs + 1 + (espn - rs - 1) * plen
 
 
 def _infer_semifinal_pairs_standard(seed_order_ids):

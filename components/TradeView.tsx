@@ -180,14 +180,16 @@ export default function TradeView({
       .map((x) => x.p);
   }, [net, active, mine, theirRoster, give, get]);
 
-  // Sell high: your risers. Buy low: quality, slumping, NOT elite.
+  // Sell high: your risers. Buy low: quality, slumping, NOT elite. Thresholds are on the
+  // fifteen-category scale (2026-10-21) — 1.8x the old nine-category spread, so the old
+  // 0.3 / 3.0 became 0.5 / 5.5.
   const risers = mine
     .slice()
     .sort((a, b) => b.trend - a.trend)
     .slice(0, 5)
-    .filter((p) => p.trend > 0.3);
+    .filter((p) => p.trend > 0.5);
   const targets = theirs
-    .filter((p) => p.value > 3.0 && p.trend < -0.3 && !eliteNames.has(p.name))
+    .filter((p) => p.value > 5.5 && p.trend < -0.5 && !eliteNames.has(p.name))
     .sort((a, b) => a.trend - b.trend)
     .slice(0, 5);
 

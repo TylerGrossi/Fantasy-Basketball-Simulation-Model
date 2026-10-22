@@ -97,6 +97,8 @@ export const FLAT_NAV: NavEntry[] = [
   { kind: "link", label: "League Home", href: "/league" },
   // One page now (2026-10-20), so a link rather than a menu of its sections.
   { kind: "link", label: "Current Matchup", href: "/scoreboard" },
+  // FantasyPros-style live night (2026-10-21): every game, your players' lines, the feed.
+  { kind: "link", label: "Game Day", href: "/gameday" },
   {
     kind: "menu",
     /*
@@ -120,6 +122,8 @@ export const FLAT_NAV: NavEntry[] = [
       { label: "League Stats", href: "/league-stats" },
       { label: "Power Rankings", href: "/rankings" },
       { label: "Rosters", href: "/league-rosters" },
+      // Any team's card: record, lineup by value, category bars (owner, 2026-10-21).
+      { label: "Team Card", href: "/team" },
       { label: "Recent Moves", href: "/recent-moves" },
       { label: "Season Summary", href: "/season" },
     ],
@@ -191,6 +195,7 @@ export const SEASON_PAGES: NavPage[] = [
   // No longer promises "how they got it": the Acq column is hidden on a phone, which is
   // where this blurb is read.
   { label: "Rosters", href: "/league-rosters", blurb: "Every team's roster" },
+  { label: "Team Card", href: "/team", blurb: "A team's record, lineup and category ranks" },
   { label: "Recent Moves", href: "/recent-moves", blurb: "Adds, drops and trades, newest first" },
 ];
 
@@ -202,7 +207,7 @@ export const SEASON_PAGES: NavPage[] = [
  */
 export const TOOLS_PAGES: NavPage[] = [
   { label: "Player Card", href: "/player", blurb: "Profile, value, form, last ten games" },
-  { label: "Player Value", href: "/player-value", blurb: "Rostered and free agents by 9-cat value" },
+  { label: "Player Value", href: "/player-value", blurb: "Rostered and free agents by league value" },
   { label: "Trade", href: "/trade", blurb: "What a deal does to each category" },
   { label: "Compare", href: "/compare", blurb: "Two players side by side" },
   { label: "Lineup", href: "/lineup", blurb: "Who to start, and what each swap costs" },
@@ -232,13 +237,17 @@ export const MORE_PAGES: NavPage[] = [
 export type SectionKey = "home" | "week" | "season" | "tools" | "more";
 
 /**
- * Sections that open an INDEX rather than a page on mobile — the three with more than one
- * page to their name. `/browse/[section]` renders them all; see app/browse.
+ * Sections that open an INDEX rather than a page on mobile — the ones with several pages
+ * to their name. `/browse/[section]` renders them all; see app/browse.
  *
  * Home is deliberately absent: it already IS an index (the tile grid), so an index in
  * front of it would be a screen you tap through to reach another screen of links.
+ *
+ * So is This Week (owner, 2026-10-21): it is ONE scrolling page now (/scoreboard), so its
+ * icon opens that page — an index of anchors into a single page was a screen between you
+ * and the thing every entry on it led to.
  */
-export const INDEXED_SECTIONS = ["week", "season", "tools", "more"] as const;
+export const INDEXED_SECTIONS = ["season", "tools", "more"] as const;
 export type IndexedSection = (typeof INDEXED_SECTIONS)[number];
 
 export function indexHref(key: SectionKey): string {
@@ -262,14 +271,23 @@ export interface Section {
 
 /** Mobile bottom bar: one icon per section. */
 export const SECTIONS: Section[] = [
-  { key: "home", label: "Home", landing: "/", pages: [{ label: "Home", href: "/" }] },
+  {
+    key: "home",
+    label: "Home",
+    landing: "/",
+    pages: [
+      { label: "Home", href: "/" },
+      // Tonight's games, live (2026-10-21). Home on a phone, not This Week (owner): it is
+      // a tile on the Home grid, and This Week is the one matchup page.
+      { label: "Game Day", href: "/gameday", blurb: "Tonight's games, live, and what they do to you" },
+    ],
+  },
   /*
-   * The three indexed sections open their index, not a page. Each used to land on a
-   * chosen "first" page (Scoreboard, Season Summary, Player Card) with the rest of the
-   * section in a strip above it; the index shows all of them at once instead, so there
-   * is no first page to choose and no strip to keep in step with it.
+   * The indexed sections open their index, not a page. Each used to land on a chosen
+   * "first" page with the rest of the section in a strip above it; the index shows all of
+   * them at once instead. This Week is the exception: it is one page, and opens it.
    */
-  { key: "week", label: "This Week", landing: indexHref("week"), pages: WEEK_PAGES },
+  { key: "week", label: "This Week", landing: "/scoreboard", pages: WEEK_PAGES },
   { key: "season", label: "Season", landing: indexHref("season"), pages: SEASON_PAGES },
   { key: "tools", label: "Tools", landing: indexHref("tools"), pages: TOOLS_PAGES },
   // The fifth icon is MORE: Agent, Settings and the five History pages. It used to be
@@ -299,6 +317,8 @@ export const SECTIONS: Section[] = [
  */
 export const IN_SEASON_ONLY = [
   "/playoffs",
+  // A night of games with nothing riding on them is an NBA scoreboard, not this page.
+  "/gameday",
   "/streamers",
   "/bench",
   // The same two, as sections of the one-page Current Matchup.

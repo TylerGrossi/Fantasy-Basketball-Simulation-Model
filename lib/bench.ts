@@ -57,7 +57,7 @@ export function analyzeBench(
   const perPlayer: BenchPlayerImpact[] = players
     .filter((p) => p.gamesLeft > 0)
     .map((p) => {
-      const pm = playerMoments(p.avg, p.gamesLeft, league.variance);
+      const pm = playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError);
       const out = matchupOutcome(league, subtractMoments(teamMoments, pm), oppMoments);
       const deltaCats = out.expectedCats - play.expectedCats;
       return {

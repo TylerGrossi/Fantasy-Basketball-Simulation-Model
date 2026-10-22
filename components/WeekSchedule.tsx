@@ -12,8 +12,8 @@ import PlayerLink from "./PlayerLink";
  * have games than you have starting spots?
  *
  * Who loses the start on such a day follows the projection's own rule (engine/data.py
- * `_accumulate_counted_games_by_day`): the top N healthy players by points per game play,
- * the rest sit. So the greyed cells here are exactly the games the projections already
+ * `_accumulate_counted_games_by_day`): the top N healthy players by 9-cat VALUE play, the
+ * rest sit (points per game until 2026-10-21, and still the fallback on an older export). So the greyed cells here are exactly the games the projections already
  * leave out — the "(1)" beside a GL of 3 on the other tables.
  */
 
@@ -44,9 +44,10 @@ export default function WeekSchedule({
   const side = sides[which] ?? sides[0];
   const grid = useMemo(() => {
     if (!sched || !side) return null;
-    const players = [...side.players].sort(
-      (a, b) => (b.avg[ptsIdx] ?? 0) - (a.avg[ptsIdx] ?? 0)
-    );
+    // By value, best first — the order starts are handed out in on a crowded day.
+    const byValue = side.players.every((p) => typeof p.value === "number");
+    const rank = (p: PlayerRow) => (byValue ? (p.value ?? 0) : (p.avg[ptsIdx] ?? 0));
+    const players = [...side.players].sort((a, b) => rank(b) - rank(a));
     const healthy = (p: PlayerRow) => !p.injured && playerStatus(p.status)[1] !== "out";
     const gameOf = (p: PlayerRow, d: string) => sched.teams[p.nbaTeam]?.[d] ?? null;
 
@@ -99,7 +100,7 @@ export default function WeekSchedule({
               spots
             </b>{" "}
             ({overDays.map((x) => `${dayLabel(x.d)} ${x.count}`).join(", ")}). Greyed games are
-            the ones that would sit — the lowest scorers by points per game.
+            the ones that would sit — the lowest-value players that day.
           </>
         )}
       </p>
@@ -147,7 +148,7 @@ export default function WeekSchedule({
                         }${d === today ? " ws-today" : ""}${today && d < today ? " ws-past" : ""}`}
                         title={
                           sits
-                            ? `${p.name} has a game but more players than starting spots — the lowest scorers sit`
+                            ? `${p.name} has a game but more players than starting spots — the lowest-value players sit`
                             : out
                               ? `${p.name} is ${code || "out"}`
                               : undefined

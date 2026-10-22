@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { PoolPlayer } from "@/lib/league";
 import { averageLine, usePlayerGames, type PlayerGame } from "@/lib/playerGames";
-import { makeValuer } from "@/lib/percentiles";
+import { makeValuer, valueTotal } from "@/lib/percentiles";
 import { useTeamDefense } from "@/lib/teamDefense";
 
 /**
@@ -35,11 +35,14 @@ const TIERS = [
 export default function OpponentDefense({
   playerId,
   pool,
+  season,
 }: {
   playerId: number | null;
   pool: PoolPlayer[];
+  /** The season the card is set to (ESPN year); ESPN's default when omitted. */
+  season?: number;
 }) {
-  const { games, loading } = usePlayerGames(playerId, pool);
+  const { games, loading } = usePlayerGames(playerId, pool, season);
   const defense = useTeamDefense();
   const value = useMemo(() => makeValuer(pool), [pool]);
 
@@ -88,8 +91,7 @@ export default function OpponentDefense({
               <tbody>
                 {rows.map((r) => {
                   const line = averageLine(r.games);
-                  const { off, def } = value(line);
-                  const v = off + def;
+                  const v = valueTotal(value(line));
                   const c = (k: string) => Number(line[k] ?? 0).toFixed(1);
                   return (
                     <tr key={r.key}>

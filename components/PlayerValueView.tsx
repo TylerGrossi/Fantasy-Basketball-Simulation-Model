@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { LeagueData, PoolPlayer } from "@/lib/league";
+import type { ArchivedPool } from "@/lib/loadLeague";
 import MultiSelect from "./MultiSelect";
 import FilterBar from "./FilterBar";
 import PlayerLink from "./PlayerLink";
@@ -15,6 +16,8 @@ import {
   VALUE_COL,
   type ValueBasis,
   playerStatus,
+  seasonLabel,
+  thisSeasonOnly,
 } from "@/lib/playerPool";
 
 /**
@@ -61,8 +64,27 @@ const score = (v: number | undefined) => {
 const perGame = (v: number) => ({ sort: v, text: v.toFixed(1) });
 const pctCell = (v: number) => ({ sort: v, text: (v * 100).toFixed(1) });
 
-export default function PlayerValueView({ league }: { league: LeagueData }) {
-  const pool = league.seasonData.playerPool ?? [];
+export default function PlayerValueView({
+  league,
+  archives = [],
+}: {
+  league: LeagueData;
+  archives?: ArchivedPool[];
+}) {
+  /*
+   * WHICH SEASON (owner, 2026-10-21), this one by default — and this one means only this
+   * season's games: a player who has not played is left out, and one under ten games is
+   * shown on his actual line, not the ranking blend with last season (thisSeasonOnly).
+   * Past seasons come from the archive, as they stand at that season's end.
+   */
+  const [season, setSeason] = useState(league.season);
+  const current = season === league.season;
+  const pool = useMemo(() => {
+    if (!current) return archives.find((a) => a.season === season)?.pool ?? [];
+    return (league.seasonData.playerPool ?? [])
+      .filter((p) => p.statSource === "current" || p.statSource === "blend")
+      .map(thisSeasonOnly);
+  }, [current, season, archives, league.seasonData.playerPool]);
 
   const [name, setName] = useState("");
   const [positions, setPositions] = useState<string[]>([]);
@@ -70,7 +92,14 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
   const [owners, setOwners] = useState<string[]>([]);
   const [basis, setBasis] = useState<ValueBasis>("Regular");
   const [showInjured, setShowInjured] = useState(true);
-  const [minGp, setMinGp] = useState(10);
+  /*
+   * Null until the reader picks one: then the default follows the season. Ten games is
+   * the right bar for a season in full, and an empty table in a season's first weeks —
+   * nobody has ten games yet — so the current season starts at Any until it does.
+   */
+  const [pickedMinGp, setMinGp] = useState<number | null>(null);
+  const young = current && Math.max(0, ...pool.map((p) => p.gp ?? 0)) < 10;
+  const minGp = pickedMinGp ?? (young ? 0 : 10);
 
   const valueCol = VALUE_COL[basis];
 
@@ -156,6 +185,21 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
           onChange={setOwners}
           className="pv-f-owner"
         />
+        <div className="ms pv-f-season">
+          <div className="ms-label">Season</div>
+          <select
+            className="field field-select"
+            value={season}
+            onChange={(e) => setSeason(Number(e.target.value))}
+            aria-label="Season"
+          >
+            {[league.season, ...archives.map((a) => a.season)].map((s) => (
+              <option key={s} value={s}>
+                {seasonLabel(s)}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="ms pv-f-basis">
           <div className="ms-label">Value basis</div>
           <select
@@ -202,7 +246,7 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
         // Keyed on the basis: switching it re-ranks everything, so start back on the
         // value sort rather than keeping a column sort over the old numbers.
         <SortableTable
-          key={basis}
+          key={`${season}-${basis}`}
           cols={COLS}
           rows={rows}
           defaultKey="rank"
@@ -214,14 +258,18 @@ export default function PlayerValueView({ league }: { league: LeagueData }) {
 
       {/* A footnote, not something that needs to sit above the data. */}
       <p className="caption" style={{ marginTop: "1rem" }}>
-        <strong>Value</strong> is a 9-category z-score (points above/below an average
-        leaguer, turnovers and percentages included); <strong>30D</strong> and{" "}
+        <strong>Value</strong> is a z-score across all 15 of this league&rsquo;s categories
+        (points above/below an average leaguer — shooting volume, DD and TW included);{" "}
+        <strong>30D</strong> and{" "}
         <strong>15D</strong> are the same score over the last 30 and 15 days, and the{" "}
         <strong>Δ</strong> columns are those minus the season: positive = heating up.{" "}
         <strong>#</strong> ranks by the value basis, and GP and the stat columns follow it
         {basis === "Regular" ? " (season per-game)" : ` (last ${basis === "30D" ? 30 : 15} days per-game)`}.
         STK is steals + blocks. Click any header to sort. Covers every rostered player plus
-        the top free agents.
+        the top free agents.{" "}
+        {current
+          ? `${seasonLabel(season)} counts only games played this season — a player who has not played yet is not listed.`
+          : `${seasonLabel(season)} as it stood at the end of that season.`}
       </p>
     </>
   );

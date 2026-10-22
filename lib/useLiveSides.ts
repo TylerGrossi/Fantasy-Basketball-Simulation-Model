@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { LeagueData, Matchup } from "./league";
+import { winProbability, type LeagueData, type Matchup } from "./league";
 import { remainingSide } from "./liveAdjust";
 import { useLiveTotals } from "./useLiveTotals";
 
@@ -37,4 +37,25 @@ export function useLiveSides(
   );
 
   return { live, you, opp };
+}
+
+/**
+ * THE week's win probability, live — the number every page shows for your matchup
+ * (Current Matchup's gauge, League Home, Game Day, Schedule). ESPN's live totals plus the
+ * projection minus every game they already count, through `winProbability`; `.win` is a
+ * win outright (a tied matchup is not one). Read it from here, never recompute it.
+ */
+export function useLiveWin(
+  league: LeagueData,
+  matchup: Matchup,
+  isHome: boolean,
+  teamId: number,
+  enabled = true
+) {
+  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, enabled);
+  const outcome = useMemo(
+    () => winProbability(league, you, opp, live.you, live.opp),
+    [league, you, opp, live.you, live.opp]
+  );
+  return { live, outcome };
 }

@@ -76,7 +76,10 @@ export default function CategoryShape({
    */
   const z = useMemo(() => {
     const rows = percentileRows(pool, player, "Regular");
-    const by = new Map(rows.map((r) => [r.spec.key as StatKey, r.percentile]));
+    // Qualified standings only — the shape is a claim about who he is, not a sketch.
+    const by = new Map(
+      rows.map((r) => [r.spec.key as StatKey, r.qualified ? r.percentile : null])
+    );
     return Object.fromEntries(
       CAT_AXES.map((c) => [c, by.get(c as StatKey) ?? 0])
     ) as Record<CatAxis, number>;

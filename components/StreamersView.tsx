@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { LeagueData, Matchup } from "@/lib/league";
+import type { AcquisitionSummary, LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeStreamers } from "@/lib/streamers";
 import { dayLabel, etDate } from "@/lib/dates";
@@ -10,6 +10,7 @@ import { useSettings } from "@/lib/useSettings";
 import LiveBadge from "./LiveBadge";
 import PlayerLink from "./PlayerLink";
 import FilterBar from "./FilterBar";
+import SortableTable, { type SortCol, type SortRow } from "./SortableTable";
 
 interface Props {
   league: LeagueData;
@@ -18,9 +19,28 @@ interface Props {
   teamId: number;
   /** false = freeze on the snapshot, never fetch (?demo=1). */
   live?: boolean;
+  /**
+   * This matchup's acquisitions, used of allowed — ESPN's "Matchup Acquisition Limit",
+   * one per day of the matchup (6 in a six-day week, 7 in a normal one). Absent when the
+   * export could not work it out.
+   */
+  acq?: AcquisitionSummary;
 }
 
 const SHOWN = ["PTS", "REB", "AST", "3PM", "STL", "BLK"];
+
+const STREAMER_COLS: SortCol[] = [
+  { key: "rank", label: "#", num: true },
+  { key: "add", label: "Add" },
+  { key: "nba", label: "NBA" },
+  { key: "gl", label: "GL", num: true },
+  { key: "netGames", label: "Δ Games", num: true },
+  { key: "games", label: "Games" },
+  { key: "deltaCats", label: "Δ Cats", num: true },
+  { key: "deltaWin", label: "Δ Win %", num: true },
+  { key: "drop", label: "Drop" },
+  ...SHOWN.map((s) => ({ key: s, label: s, num: true })),
+];
 
 export default function StreamersView({
   league,
@@ -28,6 +48,7 @@ export default function StreamersView({
   isHome,
   teamId,
   live: liveEnabled = true,
+  acq,
 }: Props) {
   // Live totals + each side's projection minus the games those totals already count.
   const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
@@ -52,17 +73,24 @@ export default function StreamersView({
     setToday(etDate());
   }, []);
   /*
-   * The games a pickup made NOW could still play (2026-10-20): later days, plus today's
-   * only if it has not tipped off yet (live NBA scoreboard; unknown counts as not
-   * started). A game that is over or under way can no longer be added — the export's
-   * count, made that morning, still included them.
+   * ESPN'S ROSTER LOCK (owner, 2026-10-21). This league's rosterLocktimeType is
+   * FIRSTGAME_SCORINGPERIOD: once the first NBA game of the day tips off, adds and drops
+   * made that day take effect the NEXT day, whoever's game it is. (Lineup moves lock per
+   * game — that is a different setting, and not what an add is subject to.)
+   *
+   * So the day is locked as soon as any game today has started (live NBA scoreboard:
+   * `gameLeft` below 1 for some team). Unknown — no live data yet — counts as unlocked.
+   */
+  const rosterLocked =
+    !!today && !!live.gameLeft && Object.values(live.gameLeft).some((left) => left < 1);
+  /*
+   * The games a pickup made NOW could still play: later days, plus today's only while
+   * the day is unlocked. Before the first tip-off no game today has started, so every
+   * game today is still addable.
    */
   const gameDates = (nbaTeam: string): string[] =>
     Object.keys(league.weekSchedule?.teams[nbaTeam] ?? {})
-      .filter(
-        (d) =>
-          !today || d > today || (d === today && (live.gameLeft?.[nbaTeam] ?? 1) >= 1)
-      )
+      .filter((d) => !today || d > today || (d === today && !rosterLocked))
       .sort();
   const pickupLeague = useMemo(() => {
     if (!today || !league.weekSchedule) return league;
@@ -75,7 +103,25 @@ export default function StreamersView({
       ),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [league, today, live.gameLeft]);
+  }, [league, today, rosterLocked]);
+  /*
+   * The days a move made now affects, for the day-by-day lineup (lib/streamers.ts
+   * DailyLineup): the rest of the week, starting today while the roster is unlocked and
+   * tomorrow once it is. The lock holds the DROP too — dropped after tip-off, he is still
+   * yours for today — which falls out of leaving today off the list.
+   */
+  const daily = useMemo(() => {
+    const sched = league.weekSchedule;
+    if (!sched) return undefined;
+    const dates = new Set<string>();
+    for (const team of Object.values(sched.teams)) for (const d of Object.keys(team)) dates.add(d);
+    const affected = [...dates]
+      .filter((d) => !today || d > today || (d === today && !rosterLocked))
+      .sort();
+    const slots =
+      (league.rosterSlots ?? []).filter((s) => s !== "Bench" && s !== "IR").length || 10;
+    return { dates: affected, teams: sched.teams, slots };
+  }, [league.weekSchedule, league.rosterSlots, today, rosterLocked]);
 
   // Recomputed on every toggle, in milliseconds, with no server round trip. This is the
   // whole point of moving the maths client-side.
@@ -84,9 +130,11 @@ export default function StreamersView({
       analyzeStreamers(pickupLeague, you.players, youMoments, oppMoments, {
         hasOpenSpot: openSpot,
         untouchables: untouchable,
+        daily,
       }),
-    [pickupLeague, you.players, youMoments, oppMoments, openSpot, untouchable]
+    [pickupLeague, you.players, youMoments, oppMoments, openSpot, untouchable, daily]
   );
+  const addsLeft = acq ? Math.max(0, acq.max - acq.used) : null;
 
   const anyGamesLeft = pickupLeague.freeAgents.some((f) => f.gamesLeft > 0);
 
@@ -121,68 +169,87 @@ export default function StreamersView({
               Baseline: {baseline.expectedCats.toFixed(1)} expected cats ·{" "}
               {(baseline.win * 100).toFixed(0)}% win
             </span>
+            {acq && (
+              <span
+                className="caption"
+                style={{ margin: 0, color: addsLeft === 0 ? "var(--bad)" : undefined }}
+              >
+                Adds: {acq.used} of {acq.max} used this week
+                {addsLeft === 0 ? " — none left" : ""}
+              </span>
+            )}
+            {rosterLocked && (
+              <span className="caption" style={{ margin: 0 }}>
+                Today&rsquo;s games have started, so a move made now counts from tomorrow.
+              </span>
+            )}
           </FilterBar>
 
           {/* About ten rows tall, scrolling inside itself (owner, 2026-10-20): the full
               candidate list made this section the longest on the one-page matchup. The
-              header row stays pinned while the rows scroll under it. */}
-          <div className="table-scroll st-scroll">
-            <table className="sheet">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Add</th>
-                  <th>NBA</th>
-                  <th className="num">GL</th>
-                  <th>Games</th>
-                  <th className="num">Δ Cats</th>
-                  <th className="num">Δ Win %</th>
-                  <th>Drop</th>
-                  {SHOWN.map((s) => (
-                    <th key={s} className="num">
-                      {s}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r, i) => (
-                  <tr key={r.add.name}>
-                    <td className="num">{i + 1}</td>
-                    <td><PlayerLink name={r.add.name} /></td>
-                    <td>{r.add.nbaTeam}</td>
-                    <td className="num">{r.add.gamesLeft}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      {gameDates(r.add.nbaTeam).map(dayLabel).join(" · ") || "-"}
-                    </td>
-                    <td
-                      className="num"
-                      style={{
-                        color: r.deltaCats > 0 ? "var(--good)" : "var(--ink-3)",
-                        fontWeight: r.deltaCats > 0 ? 700 : 400,
-                      }}
-                    >
-                      {r.deltaCats >= 0 ? "+" : ""}
-                      {r.deltaCats.toFixed(2)}
-                    </td>
-                    <td
-                      className="num"
-                      style={{ color: r.deltaWinPct > 0 ? "var(--good)" : "var(--ink-3)" }}
-                    >
-                      {r.deltaWinPct >= 0 ? "+" : ""}
-                      {r.deltaWinPct.toFixed(1)}
-                    </td>
-                    <td>{r.drop ? r.drop.name : <em>open spot</em>}</td>
-                    {SHOWN.map((s) => (
-                      <td key={s} className="num">
-                        {r.add.avg[league.stats.indexOf(s)].toFixed(1)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              header row stays pinned while the rows scroll under it. Sortable on every
+              column; opens on Δ Cats, the order analyzeStreamers ranks by, and # keeps
+              that rank whatever the current sort. */}
+          <SortableTable
+            scrollClassName="st-scroll"
+            defaultKey="deltaCats"
+            cols={STREAMER_COLS}
+            rows={results.map((r, i): SortRow => {
+              // Net games your lineup gains — the count the Δ Cats maths used: the
+              // pickup's started games, less the drop's and any starter he benches.
+              const netGames = r.netGames;
+              const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
+              const iso = gameDates(r.add.nbaTeam);
+              const dates = iso.map(dayLabel).join(" · ") || "-";
+              return {
+                id: r.add.name,
+                cells: {
+                  rank: { sort: i + 1, text: String(i + 1) },
+                  add: { sort: r.add.name, text: r.add.name, node: <PlayerLink name={r.add.name} /> },
+                  nba: { sort: r.add.nbaTeam, text: r.add.nbaTeam },
+                  gl: { sort: r.add.gamesLeft, text: String(r.add.gamesLeft) },
+                  netGames: {
+                    sort: netGames,
+                    // Whole games with the day-by-day lineup; one decimal only on the
+                    // fallback (no week schedule), where a drop's games can be fractional.
+                    text: `${netGames > 0 ? "+" : ""}${
+                      Number.isInteger(netGames) ? netGames : netGames.toFixed(1)
+                    }`,
+                    color: netGames > 0 ? "var(--good)" : netGames < 0 ? "var(--bad)" : "var(--ink-3)",
+                  },
+                  games: {
+                    // By the dates themselves (earliest schedule first), not the
+                    // "Wed 10/21" labels, which would sort by weekday name.
+                    sort: iso.join(" ") || "~",
+                    text: dates,
+                    node: <span style={{ whiteSpace: "nowrap" }}>{dates}</span>,
+                  },
+                  deltaCats: {
+                    sort: r.deltaCats,
+                    text: signed(r.deltaCats, 2),
+                    color: r.deltaCats > 0 ? "var(--good)" : "var(--ink-3)",
+                    node: r.deltaCats > 0 ? <strong>{signed(r.deltaCats, 2)}</strong> : undefined,
+                  },
+                  deltaWin: {
+                    sort: r.deltaWinPct,
+                    text: signed(r.deltaWinPct, 1),
+                    color: r.deltaWinPct > 0 ? "var(--good)" : "var(--ink-3)",
+                  },
+                  drop: {
+                    sort: r.drop?.name ?? "",
+                    text: r.drop?.name ?? "open spot",
+                    node: r.drop ? undefined : <em>open spot</em>,
+                  },
+                  ...Object.fromEntries(
+                    SHOWN.map((s) => {
+                      const v = r.add.avg[league.stats.indexOf(s)];
+                      return [s, { sort: v, text: v.toFixed(1) }];
+                    })
+                  ),
+                },
+              };
+            })}
+          />
 
           <h2>Protect from dropping</h2>
           <p className="caption">

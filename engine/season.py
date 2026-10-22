@@ -7,7 +7,7 @@ its `@st.cache_data`/`@st.cache_resource` decorator. They were proven pure by an
 of the whole file before this module existed: zero `st.*` calls anywhere in their bodies,
 their only module-level dependencies are `config`, `data` and `simulation` (already plain
 Python, no Streamlit), plus a closed set of small helpers moved alongside them here
-(`_category_record`, `_log5`, `_nine_cat_value`, the two playoff-date constants). None of
+(`_category_record`, `_log5`, `_league_value`, the two playoff-date constants). None of
 that touches `styles.py`, `visualizations.py`, `assistant.py` or `assets/` — the actual
 Streamlit UI, which stayed in `legacy/` and is what made the split possible.
 
@@ -26,7 +26,8 @@ byte. See the commit that introduced this file for the diff.
 """
 
 import functools
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -37,6 +38,7 @@ from data import (
     connect_to_espn,
     flatten_stat_dict,
     get_week_date_range,
+    league_value as _league_value,
 )
 from simulation import (
     _team_ids_from_raw_schedule_matchup,
@@ -347,14 +349,23 @@ def get_team_schedule_data(league_id, year, espn_s2, swid, team_id):
             my_stats = flatten_stat_dict(m.home_stats if mine_home else m.away_stats)
             opp_stats = flatten_stat_dict(m.away_stats if mine_home else m.home_stats)
             break
-        played = (float(my_stats.get("PTS", 0) or 0) + float(opp_stats.get("PTS", 0) or 0)) > 0
-
         if period > REGULAR_SEASON_WEEKS:
             idx = (period - REGULAR_SEASON_WEEKS - 1) // 2
             s, e = PLAYOFF_SCORING_DATES[idx] if 0 <= idx < len(PLAYOFF_SCORING_DATES) else (None, None)
         else:
             s, e = get_week_date_range(period, year)
         dates = f"{s:%b %d} - {e:%b %d}" if s and e else ""
+
+        # A RESULT only once the week is OVER (its last day has passed, Eastern). It used
+        # to be "any points scored", so the week in progress read as decided after one
+        # night: 3-10-2, an L, and a 0-1 record, while the matchup was actually 10-5
+        # (owner, 2026-10-21). A week under way has no result; the page shows its live
+        # projection instead.
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        played = (
+            e is not None and today > e
+            and (float(my_stats.get("PTS", 0) or 0) + float(opp_stats.get("PTS", 0) or 0)) > 0
+        )
 
         row = {"Matchup": label + (f" ({dates})" if dates else ""),
                "Result": "", "Score": "", "Win %": "",
@@ -456,39 +467,15 @@ def get_power_rankings(league_id, year, espn_s2, swid):
     return {"teams": teams, "weeks": week_labels}
 
 
-_VALUE_COUNT_CATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM"]
+# The value formula itself lives in data.py (league_value, imported above), so the
+# projection's who-sits rule ranks players by the same number this pool shows.
 _AGG_KEYS = ["FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO", "PTS"]
-
-
-def _nine_cat_value(df, ref):
-    """
-    Standard 9-category z-score value for each row of ``df``, scored against the
-    distribution in ``ref`` (so season and last-30 are on the same scale and can be
-    differenced into a trend). Percentage categories use volume-weighted impact.
-    """
-    if df is None or df.empty:
-        return pd.Series([], dtype=float)
-    val = pd.Series(0.0, index=df.index)
-    for c in _VALUE_COUNT_CATS:
-        sd = ref[c].std(ddof=0)
-        if sd > 0:
-            val = val + (df[c] - ref[c].mean()) / sd
-    sd_to = ref["TO"].std(ddof=0)
-    if sd_to > 0:
-        val = val - (df["TO"] - ref["TO"].mean()) / sd_to
-    for made, att, pct in (("FGM", "FGA", "FG%"), ("FTM", "FTA", "FT%")):
-        lg = ref[made].sum() / ref[att].sum() if ref[att].sum() > 0 else 0.0
-        imp_ref = (ref[pct] - lg) * ref[att]
-        sd = imp_ref.std(ddof=0)
-        if sd > 0:
-            val = val + ((df[pct] - lg) * df[att] - imp_ref.mean()) / sd
-    return val
 
 
 def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     """
     Every rostered player (all teams) plus the top free agents, each with per-game
-    category stats, a 9-cat z-score **Value**, last-30/last-15 **Recent**/**Recent15**
+    category stats, a league-category z-score **Value**, last-30/last-15 **Recent**/**Recent15**
     values on the same scale, and **Trend**/**Trend15** (Recent[15] - Value). Powers
     Player Value / Trade Simulator / the JSON export.
     """
@@ -536,9 +523,9 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     if not last15_df.empty:
         last15_df = last15_df.drop_duplicates("Player", keep="first").reset_index(drop=True)
 
-    season_df["Value"] = _nine_cat_value(season_df, season_df).values
+    season_df["Value"] = _league_value(season_df, season_df).values
     if not last30_df.empty:
-        recent = _nine_cat_value(last30_df, season_df)
+        recent = _league_value(last30_df, season_df)
         recent_map = dict(zip(last30_df["Player"], recent))
     else:
         recent_map = {}
@@ -547,7 +534,7 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     season_df["Trend"] = season_df["Recent"] - season_df["Value"]
 
     if not last15_df.empty:
-        recent15 = _nine_cat_value(last15_df, season_df)
+        recent15 = _league_value(last15_df, season_df)
         recent15_map = dict(zip(last15_df["Player"], recent15))
     else:
         recent15_map = {}
@@ -590,7 +577,7 @@ def get_player_pool(league_id, year, espn_s2, swid, fa_size=150):
     keep = (["Player", "NBA_Team", "Position", "EligibleSlots", "Owner", "Status", "PlayerId",
              "LineupSlot", "AcquisitionType", "Value",
              "Recent", "Trend", "Recent15", "Trend15", "FG%", "FT%", "3P%", "DD", "TW",
-             "GP", "StatSource"] + _AGG_KEYS
+             "GP", "SampleGP", "StatSource"] + _AGG_KEYS
             + [c for c in season_df.columns
                if c.startswith("L30_") or c.startswith("L15_")])
     keep = list(dict.fromkeys([c for c in keep if c in season_df.columns]))
