@@ -270,9 +270,11 @@ export default function GameDayView(props: Props) {
         const id = ids[row.name];
         const t = byName.get(row.name);
         const n = id != null ? nba.get(id) : undefined;
-        // Fantasy line first (it is what counts); the NBA box covers the gap while the
-        // fantasy feed is a poll behind.
-        const line = t?.v
+        // Whichever line is further into the game. ESPN's fantasy feed lags the NBA box by
+        // minutes, not a poll: preferring it outright showed a 21-point line next to a GS
+        // scored from the NBA box's 32 (owner, 2026-10-23). Ties go to the fantasy line.
+        const fantasy = t?.v && !(n && n.min > t.min);
+        const line = fantasy
           ? Object.fromEntries(league.stats.map((s, i) => [s, t.v![i]]))
           : n
             ? n.line
@@ -284,7 +286,7 @@ export default function GameDayView(props: Props) {
           game: gameOf.get(row.nbaTeam),
           counted: t ? t.counted : true,
           line,
-          min: t?.v ? t.min : (n?.min ?? 0),
+          min: fantasy ? t.min : (n?.min ?? 0),
           onCourt: n?.onCourt ?? false,
         };
       });
