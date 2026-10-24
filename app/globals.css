@@ -7674,7 +7674,8 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
 .lh-game-win { font-size: 0.7rem; color: var(--ink-3); }
 .lh-game-rec { font-size: 0.95rem; font-weight: 700; color: var(--ink); min-width: 4.2rem; text-align: right; }
 
-/* Recent Activity */
+/* Recent Activity: five rows tall, the rest scroll under the sticky header. */
+.lh-moves-scroll { max-height: 11.55rem; overflow-y: auto; }
 table.sheet.lh-moves td { white-space: nowrap; }
 .lh-when { color: var(--ink-2); }
 .lh-time { color: var(--ink-3); font-size: 0.85em; }

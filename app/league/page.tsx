@@ -26,7 +26,8 @@ import { playerStatus } from "@/lib/playerPool";
  */
 
 const ET = "America/New_York";
-const RECENT_MOVES = 8;
+/** Recent Activity: this many moves load; the first five show and the rest scroll. */
+const RECENT_MOVES = 15;
 const TREND_ROWS = 6;
 /** Best Players (before the trends start): the top 10, five to a column. */
 const BEST_ROWS = 10;
@@ -213,7 +214,7 @@ function MovesCard({ league, pool }: { league: LeagueData; pool: PoolPlayer[] })
       {moves.length === 0 ? (
         <p className="caption">No adds, drops or trades since the draft.</p>
       ) : (
-        <div className="table-scroll">
+        <div className="table-scroll lh-moves-scroll">
           <table className="sheet lh-moves">
             <thead>
               <tr>
