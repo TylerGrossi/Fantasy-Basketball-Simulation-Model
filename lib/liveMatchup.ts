@@ -175,7 +175,7 @@ const NON_COUNTING_SLOTS = new Set([12, 13]);
  * and the NBA game it came from. ESPN keeps a benched player's stats on the roster entry,
  * so the slot is the only way to tell his 30 points from ones that are on the board.
  */
-function todayLines(side: any, meta: StatMeta) {
+function todayLines(side: any, meta: StatMeta, returns: Record<string, string> | null) {
   const entries: any[] = side?.rosterForCurrentScoringPeriod?.entries ?? [];
   return entries.map((e) => {
     const player = e?.playerPoolEntry?.player ?? {};
@@ -184,9 +184,15 @@ function todayLines(side: any, meta: StatMeta) {
         s?.statSourceId === 0 && s?.statSplitTypeId === 5 && Number(s?.scoringPeriodId ?? 0) > 0
     );
     const st = line?.stats ?? {};
+    const name = String(player.fullName ?? "");
     return {
-      name: String(player.fullName ?? ""),
+      name,
       playerId: Number(player.id ?? e?.playerId) || null,
+      // ESPN's injury status NOW (owner, 2026-10-27: an export hours old still had Anthony
+      // Edwards ACTIVE after ESPN ruled him out), and his expected return from the NBA
+      // injuries feed — the same two inputs the export counts his games from.
+      status: String(player.injuryStatus ?? ""),
+      returnDate: returns?.[name] ?? null,
       counted: !NON_COUNTING_SLOTS.has(Number(e?.lineupSlotId)),
       // ESPN's NBA event id — the same id the NBA scoreboard uses. Empty before tip-off.
       gameId: String(line?.externalId ?? ""),
@@ -230,6 +236,33 @@ async function todaysGameLeft(): Promise<Record<string, number> | null> {
       for (const c of comp?.competitors ?? []) {
         const ab = String(c?.team?.abbreviation ?? "");
         if (ab) out[SITE_TO_FANTASY[ab] ?? ab] = left;
+      }
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Expected return dates (YYYY-MM-DD) by player name, from ESPN's public NBA injuries feed
+ * — engine/data.py `get_espn_injury_data`, which the export reads them from. The fantasy
+ * roster carries the status but not the date. Null if the feed could not be read.
+ */
+async function injuryReturns(): Promise<Record<string, string> | null> {
+  try {
+    const res = await fetch(
+      "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries",
+      { cache: "no-store", signal: AbortSignal.timeout(10_000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const out: Record<string, string> = {};
+    for (const team of data?.injuries ?? []) {
+      for (const inj of team?.injuries ?? []) {
+        const name = String(inj?.athlete?.displayName ?? "");
+        const date = String(inj?.details?.returnDate ?? "").slice(0, 10);
+        if (name && /^\d{4}-\d{2}-\d{2}$/.test(date)) out[name] = date;
       }
     }
     return out;
@@ -305,6 +338,7 @@ export async function liveMatchup(period: number, teamId: number): Promise<LiveM
   try {
     // Started alongside the fantasy request, not after it: the two are independent.
     const gameLeftPromise = todaysGameLeft();
+    const returnsPromise = injuryReturns();
     const res = await fetch(endpoint, {
       headers: {
         accept: "application/json",
@@ -361,6 +395,7 @@ export async function liveMatchup(period: number, teamId: number): Promise<LiveM
     const theirs = isHome ? game.away : game.home;
 
     const meta = statMeta();
+    const returns = await returnsPromise;
     return {
       status: 200,
       body: {
@@ -419,8 +454,8 @@ export async function liveMatchup(period: number, teamId: number): Promise<LiveM
           youPlayedToday: playedToday(myside),
           oppPlayedToday: playedToday(theirs),
           // Each side's single-day lines for today, with lineup slot (Game Day).
-          youToday: todayLines(myside, meta),
-          oppToday: todayLines(theirs, meta),
+          youToday: todayLines(myside, meta, returns),
+          oppToday: todayLines(theirs, meta, returns),
           // Players on today's roster the export does not have there yet (pickups).
           youAdded: addedRows(teamId, myside),
           oppAdded: addedRows(theirs?.teamId, theirs),

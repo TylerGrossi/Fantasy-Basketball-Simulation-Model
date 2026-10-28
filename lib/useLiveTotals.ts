@@ -46,6 +46,10 @@ export interface LiveTotals {
 export interface TodayLine {
   name: string;
   playerId: number | null;
+  /** ESPN's injury status now ("ACTIVE", "OUT", …). Absent from older deploys of the route. */
+  status?: string;
+  /** Expected return (YYYY-MM-DD) from ESPN's NBA injuries feed, when it has one. */
+  returnDate?: string | null;
   /** In a lineup slot that counts — false on the bench or IR. */
   counted: boolean;
   /** ESPN's NBA event id. Empty before his game starts. */

@@ -121,11 +121,15 @@ export function liveRoster(
   added: PlayerRow[] | null
 ): TeamSide {
   if (!today || today.length === 0) return side;
-  const on = new Set(today.map((t) => t.name));
-  const gone = side.players.filter((p) => !on.has(p.name));
+  const byName = new Map(today.map((t) => [t.name, t]));
+  const gone = side.players.filter((p) => !byName.has(p.name));
   const have = new Set(side.players.map((p) => p.name));
-  const joined = (added ?? []).filter((p) => on.has(p.name) && !have.has(p.name));
-  if (gone.length === 0 && joined.length === 0) return side;
+  const joined = (added ?? []).filter((p) => byName.has(p.name) && !have.has(p.name));
+  const kept = [...side.players.filter((p) => byName.has(p.name)), ...joined];
+  const players = kept.map((p) => liveStatus(league, p, byName.get(p.name)));
+  if (gone.length === 0 && joined.length === 0 && players.every((p, i) => p === kept[i])) {
+    return side;
+  }
 
   const mu = side.projMu.slice();
   const vr = side.projVar.slice();
@@ -138,12 +142,41 @@ export function liveRoster(
   };
   gone.forEach((p) => shift(p, -1));
   joined.forEach((p) => shift(p, 1));
-  return {
-    ...side,
-    players: [...side.players.filter((p) => on.has(p.name)), ...joined],
-    projMu: mu,
-    projVar: vr,
-  };
+  // A status change swaps his whole moments, never the difference (see playerMoments).
+  players.forEach((p, i) => {
+    if (p.gamesLeft === kept[i].gamesLeft) return;
+    shift(kept[i], -1);
+    shift(p, 1);
+  });
+  return { ...side, players, projMu: mu, projVar: vr };
+}
+
+/** Statuses the export counts a player's games for (engine/data.py ACTIVE_STATUSES). */
+const PLAYS = new Set(["ACTIVE", "", "DTD", "DAY_TO_DAY"]);
+/** Statuses that mean UNAVAILABLE (config.INJURED_STATUSES) — the export's `injured`. */
+const INJURED = new Set(["OUT", "INJURY_RESERVE", "SSPD"]);
+
+/**
+ * His row under ESPN's status NOW rather than the export's (owner, 2026-10-27: Anthony
+ * Edwards read healthy hours after ESPN ruled him out). A changed status recounts his
+ * games the way the export does (engine/data.py `count_games_left_for_player`): a playing
+ * status gets every team game from today on; any other only those on or after his
+ * expected return, and none without one. Counted games keep the export's slot-cap ratio
+ * (`gamesLeft` / `nbaGamesLeft`); a player the export had at zero gets them uncapped.
+ * Unchanged when the status is (or the route is an older deploy that sends none).
+ */
+function liveStatus(league: LeagueData, p: PlayerRow, t: TodayLine | undefined): PlayerRow {
+  if (t?.status == null) return p;
+  const up = t.status.toUpperCase().trim();
+  if (up === String(p.status ?? "").toUpperCase().trim()) return p;
+  const marked = { ...p, status: t.status, injured: INJURED.has(up) };
+  const games = league.weekSchedule?.teams[p.nbaTeam];
+  if (!games) return marked;
+  const from = PLAYS.has(up) ? etDate() : t.returnDate;
+  const scheduled = from ? Object.keys(games).filter((d) => d >= from).length : 0;
+  const before = p.nbaGamesLeft ?? p.gamesLeft;
+  const counted = before > 0 ? (p.gamesLeft * scheduled) / before : scheduled;
+  return { ...marked, gamesLeft: counted, nbaGamesLeft: scheduled };
 }
 
 /**
