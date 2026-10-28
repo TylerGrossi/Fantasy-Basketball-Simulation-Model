@@ -1,6 +1,7 @@
 import type { LeagueData, PlayerRow, TeamSide } from "./league";
 import { playerMoments } from "./league";
 import { etDate } from "./dates";
+import type { TodayLine } from "./useLiveTotals";
 
 /**
  * Take the games that ESPN's live totals ALREADY COUNT out of a side's projection, so the
@@ -100,6 +101,49 @@ export function remainingSide(
   const touched = players.some((p, i) => p !== side.players[i]);
   if (!touched) return side;
   return changed ? { ...side, players, projMu: mu, projVar: vr } : { ...side, players };
+}
+
+/**
+ * The side's roster as ESPN has it NOW, not as of the last export (owner, 2026-10-27): a
+ * player dropped since then leaves, and one picked up joins from `added` (the live
+ * route's `youAdded` / `oppAdded`, which carry his projection row). Each move swaps his
+ * whole moments in or out of the projection, as `remainingSide` does. Run it BEFORE
+ * `remainingSide`, so an arrival's games already played are taken out like everyone
+ * else's.
+ *
+ * Returns the side unchanged without a live roster (first paint, demo, an older deploy of
+ * the route) or with an empty one (the offseason), rather than emptying the team.
+ */
+export function liveRoster(
+  league: LeagueData,
+  side: TeamSide,
+  today: TodayLine[] | null,
+  added: PlayerRow[] | null
+): TeamSide {
+  if (!today || today.length === 0) return side;
+  const on = new Set(today.map((t) => t.name));
+  const gone = side.players.filter((p) => !on.has(p.name));
+  const have = new Set(side.players.map((p) => p.name));
+  const joined = (added ?? []).filter((p) => on.has(p.name) && !have.has(p.name));
+  if (gone.length === 0 && joined.length === 0) return side;
+
+  const mu = side.projMu.slice();
+  const vr = side.projVar.slice();
+  const shift = (p: PlayerRow, sign: number) => {
+    const m = playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError);
+    for (let i = 0; i < mu.length; i++) {
+      mu[i] = Math.max(0, mu[i] + sign * m.mu[i]);
+      vr[i] = Math.max(0, vr[i] + sign * m.var[i]);
+    }
+  };
+  gone.forEach((p) => shift(p, -1));
+  joined.forEach((p) => shift(p, 1));
+  return {
+    ...side,
+    players: [...side.players.filter((p) => on.has(p.name)), ...joined],
+    projMu: mu,
+    projVar: vr,
+  };
 }
 
 /**

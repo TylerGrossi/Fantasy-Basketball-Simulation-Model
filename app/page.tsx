@@ -62,7 +62,7 @@ const TILES = [
   { href: "/trade", label: "Trade Simulator", Icon: ShuffleIcon },
 ];
 
-const GAME_DAY_TILE = { href: "/gameday", label: "Game Day", Icon: BroadcastIcon };
+const GAME_DAY_TILE = { href: "/gameday", label: "Game Time", Icon: BroadcastIcon };
 
 /**
  * What the site is for, as the four questions it answers.

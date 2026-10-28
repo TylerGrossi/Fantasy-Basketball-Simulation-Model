@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { winPctText, type LeagueData, type Matchup, type PlayerRow } from "@/lib/league";
 import { periodLabel as quarter, type GameDayData, type NbaGame, type Play } from "@/lib/gameday";
 import { nightImpact } from "@/lib/gamedayImpact";
+import { liveRoster } from "@/lib/liveAdjust";
 import { useLiveWin } from "@/lib/useLiveSides";
 import { useLiveTotals, type TodayLine } from "@/lib/useLiveTotals";
 import PlayerLink from "./PlayerLink";
@@ -232,12 +233,21 @@ export default function GameDayView(props: Props) {
   );
 
   const { outcome: winNow } = useLiveWin(league, matchup, isHome, teamId, live);
+  // Today's ESPN rosters (pickups and drops since the export), as every live page uses.
+  const youSide = useMemo(
+    () => liveRoster(league, youRaw, totals.youToday, totals.youAdded),
+    [league, youRaw, totals.youToday, totals.youAdded]
+  );
+  const oppSide = useMemo(
+    () => liveRoster(league, oppRaw, totals.oppToday, totals.oppAdded),
+    [league, oppRaw, totals.oppToday, totals.oppAdded]
+  );
   const impact = useMemo(
     () =>
       nightImpact(
         league,
-        youRaw,
-        oppRaw,
+        youSide,
+        oppSide,
         totals.you,
         totals.opp,
         totals.youToday,
@@ -245,7 +255,7 @@ export default function GameDayView(props: Props) {
         games,
         gd?.day ?? null
       ),
-    [league, youRaw, oppRaw, totals.you, totals.opp, totals.youToday, totals.oppToday, games, gd]
+    [league, youSide, oppSide, totals.you, totals.opp, totals.youToday, totals.oppToday, games, gd]
   );
 
   /** Whose a player is, by ESPN id. */
@@ -267,8 +277,9 @@ export default function GameDayView(props: Props) {
     const build = (side: Side, rows: PlayerRow[], today: TodayLine[] | null): PlayerNight[] => {
       const byName = new Map((today ?? []).map((t) => [t.name, t]));
       return rows.map((row) => {
-        const id = ids[row.name];
         const t = byName.get(row.name);
+        // A pickup since the export has no id there; ESPN's roster line carries it.
+        const id = ids[row.name] ?? t?.playerId ?? undefined;
         const n = id != null ? nba.get(id) : undefined;
         // Whichever line is further into the game. ESPN's fantasy feed lags the NBA box by
         // minutes, not a poll: preferring it outright showed a 21-point line next to a GS
@@ -292,10 +303,10 @@ export default function GameDayView(props: Props) {
       });
     };
     return {
-      you: build("you", youRaw.players, totals.youToday),
-      opp: build("opp", oppRaw.players, totals.oppToday),
+      you: build("you", youSide.players, totals.youToday),
+      opp: build("opp", oppSide.players, totals.oppToday),
     };
-  }, [games, gd, ids, league.stats, youRaw, oppRaw, totals.youToday, totals.oppToday]);
+  }, [games, gd, ids, league.stats, youSide, oppSide, totals.youToday, totals.oppToday]);
 
   /* ---- every player tonight: the NBA box, with your matchup's players merged in ---- */
   const box = useMemo(() => {
@@ -314,7 +325,7 @@ export default function GameDayView(props: Props) {
         name: m?.row.name ?? l.name,
         team: l.team,
         owner,
-        ownerTag: ownerTagOf(owner, owners[id], teamAbbrevs),
+        ownerTag: ownerTagOf(owner, m ? (m.side === "you" ? teamId : oppId) : owners[id], teamAbbrevs),
         game: gameById.get(l.gameId),
         counted: m ? m.counted : true,
         line: m?.line ?? l.line,
@@ -419,7 +430,7 @@ export default function GameDayView(props: Props) {
     <div className={`gd gd-tab-${phoneTab}`}>
       {/* ------------------------------------------------------ title + odds */}
       <div className="gd-top">
-        <h1>Game Day</h1>
+        <h1>Game Time</h1>
         <span className="gd-top-sub">{subtitle}</span>
         <span className="gd-top-odds">
           <b className="mono">{winPctText(nowShare)}</b> to win the week

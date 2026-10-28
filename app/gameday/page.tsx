@@ -6,7 +6,7 @@ import { periodLabel } from "@/lib/league";
 import { loadBoxScores, loadLeague, myTeam, resolveMatchup, trimLeague } from "@/lib/loadLeague";
 
 /**
- * Game Day — every NBA game tonight, live, and what it is doing to your matchup. See
+ * Game Time — every NBA game tonight, live, and what it is doing to your matchup. See
  * components/GameDayView.tsx for the design and the two feeds behind it.
  *
  * `?demo=1` freezes the page on the export snapshot and skips both live fetches.
@@ -25,10 +25,10 @@ export default async function Page({
   if (league.seasonOver || !r) {
     return (
       <>
-        <h1>Game Day</h1>
+        <h1>Game Time</h1>
         <p className="caption">
           {league.seasonOver
-            ? "The season is over — Game Day comes back with the first game night of the next one."
+            ? "The season is over — Game Time comes back with the first game night of the next one."
             : `No matchup found for ${me.name} in ${periodLabel(league)}.`}
         </p>
       </>

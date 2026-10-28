@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { winProbability, type LeagueData, type Matchup } from "./league";
-import { remainingSide } from "./liveAdjust";
+import { liveRoster, remainingSide } from "./liveAdjust";
 import { useLiveTotals } from "./useLiveTotals";
 
 /**
@@ -27,13 +27,27 @@ export function useLiveSides(
 
   const live = useLiveTotals(league.period, teamId, youRaw.current, oppRaw.current, enabled);
 
+  // Today's ESPN rosters first (pickups and drops since the export), then the games
+  // already played come out of what is left.
   const you = useMemo(
-    () => remainingSide(league, youRaw, live.youPlayed, live.gameLeft),
-    [league, youRaw, live.youPlayed, live.gameLeft]
+    () =>
+      remainingSide(
+        league,
+        liveRoster(league, youRaw, live.youToday, live.youAdded),
+        live.youPlayed,
+        live.gameLeft
+      ),
+    [league, youRaw, live.youToday, live.youAdded, live.youPlayed, live.gameLeft]
   );
   const opp = useMemo(
-    () => remainingSide(league, oppRaw, live.oppPlayed, live.gameLeft),
-    [league, oppRaw, live.oppPlayed, live.gameLeft]
+    () =>
+      remainingSide(
+        league,
+        liveRoster(league, oppRaw, live.oppToday, live.oppAdded),
+        live.oppPlayed,
+        live.gameLeft
+      ),
+    [league, oppRaw, live.oppToday, live.oppAdded, live.oppPlayed, live.gameLeft]
   );
 
   return { live, you, opp };

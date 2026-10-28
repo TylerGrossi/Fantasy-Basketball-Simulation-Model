@@ -2,10 +2,9 @@ import BenchView from "@/components/BenchView";
 import LiveBoxScores from "@/components/LiveBoxScores";
 import MatchupDeck from "@/components/MatchupDeck";
 import MatchupView from "@/components/MatchupView";
-import RosterView from "@/components/RosterView";
+import { LiveRosterView, LiveWeekSchedule } from "@/components/LiveRosters";
 import Scoreboard from "@/components/Scoreboard";
 import StreamersView from "@/components/StreamersView";
-import WeekSchedule from "@/components/WeekSchedule";
 import { forecastFor, winProbHistory } from "@/lib/predictions";
 import ScoreboardTabs from "@/components/ScoreboardTabs";
 import { buildWeekRecap } from "@/components/WeekRecap";
@@ -227,20 +226,25 @@ export default async function Page({
               oppLines={lines(r.oppId)}
             />
           }
+          // Today's ESPN rosters, so a pickup shows before the next export.
           schedule={
-            <WeekSchedule
+            <LiveWeekSchedule
+              live={!demo}
               league={deckLeague}
-              sides={[
-                { label: r.youName, players: you.players },
-                { label: r.oppName, players: oppSide.players },
-              ]}
+              matchup={r.matchup}
+              isHome={r.isHome}
+              teamId={me.id}
+              youName={r.youName}
+              oppName={r.oppName}
             />
           }
           roster={
-            <RosterView
+            <LiveRosterView
+              live={!demo}
               league={deckLeague}
-              you={you}
-              opp={oppSide}
+              matchup={r.matchup}
+              isHome={r.isHome}
+              teamId={me.id}
               youName={r.youName}
               oppName={r.oppName}
             />

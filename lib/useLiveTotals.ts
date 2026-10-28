@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { StatVector } from "./probability";
 import type { BoxLine } from "./loadLeague";
+import type { PlayerRow } from "./league";
 
 export type LiveState = "snapshot" | "live" | "error" | "frozen";
 
@@ -33,6 +34,12 @@ export interface LiveTotals {
   /** Each side's lines for TODAY, with whether the lineup slot counts (Game Day). */
   youToday: TodayLine[] | null;
   oppToday: TodayLine[] | null;
+  /**
+   * Projection rows for players on today's roster the export has not got on that team yet
+   * (a pickup since the last export). Applied with lib/liveAdjust.ts `liveRoster`.
+   */
+  youAdded: PlayerRow[] | null;
+  oppAdded: PlayerRow[] | null;
 }
 
 /** One player's single-day line for today's scoring period. */
@@ -105,6 +112,8 @@ export function useLiveTotals(
     games: LiveGame[] | null;
     youToday: TodayLine[] | null;
     oppToday: TodayLine[] | null;
+    youAdded: PlayerRow[] | null;
+    oppAdded: PlayerRow[] | null;
   }>({
     youLines: seed?.youLines ?? null,
     oppLines: seed?.oppLines ?? null,
@@ -114,6 +123,8 @@ export function useLiveTotals(
     games: seed?.games ?? null,
     youToday: seed?.youToday ?? null,
     oppToday: seed?.oppToday ?? null,
+    youAdded: seed?.youAdded ?? null,
+    oppAdded: seed?.oppAdded ?? null,
   });
 
   useEffect(() => {
@@ -134,6 +145,8 @@ export function useLiveTotals(
           games: r.games,
           youToday: r.youToday,
           oppToday: r.oppToday,
+          youAdded: r.youAdded,
+          oppAdded: r.oppAdded,
         });
         setFetchedAt(r.fetchedAt);
         setState("live");
@@ -183,6 +196,8 @@ export function toLiveResult(data: any): LiveOk | null {
     games: Array.isArray(data.games) ? data.games : null,
     youToday: Array.isArray(data.youToday) ? data.youToday : null,
     oppToday: Array.isArray(data.oppToday) ? data.oppToday : null,
+    youAdded: Array.isArray(data.youAdded) ? data.youAdded : null,
+    oppAdded: Array.isArray(data.oppAdded) ? data.oppAdded : null,
     fetchedAt: clock(data.fetchedAt),
   };
 }
@@ -202,6 +217,8 @@ type LiveResult =
       games: LiveGame[] | null;
       youToday: TodayLine[] | null;
       oppToday: TodayLine[] | null;
+      youAdded: PlayerRow[] | null;
+      oppAdded: PlayerRow[] | null;
       fetchedAt: string;
     }
   | { ok: false };

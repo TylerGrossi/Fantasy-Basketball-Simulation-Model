@@ -3,8 +3,8 @@ import GamesLeftCell from "./GamesLeftCell";
 import PlayerLink from "./PlayerLink";
 
 /**
- * Both rosters, with per-game averages and games left. Server-rendered — nothing here
- * changes during a matchup except games left, which comes from the scheduled rebuild.
+ * Both rosters, with per-game averages and games left. Rendered through LiveRosterView,
+ * which hands it today's ESPN rosters (pickups and drops) on top of the export.
  */
 
 const SHOWN = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGM", "FGA"];

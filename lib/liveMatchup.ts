@@ -34,17 +34,83 @@ interface StatMeta {
   statIds: Record<string, number>;
 }
 
-let cachedMeta: StatMeta | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cachedLeague: any = null;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function leagueFile(): any {
+  if (cachedLeague) return cachedLeague;
+  const file = path.join(process.cwd(), "public", "data", "league.json");
+  cachedLeague = JSON.parse(readFileSync(file, "utf8"));
+  return cachedLeague;
+}
 
 function statMeta(): StatMeta {
-  if (cachedMeta) return cachedMeta;
-  const file = path.join(process.cwd(), "public", "data", "league.json");
-  const parsed = JSON.parse(readFileSync(file, "utf8"));
+  const parsed = leagueFile();
   if (!Array.isArray(parsed?.stats) || !parsed?.statIds) {
     throw new Error("league.json is missing stats/statIds — run `npm run data`");
   }
-  cachedMeta = { stats: parsed.stats, statIds: parsed.statIds };
-  return cachedMeta;
+  return { stats: parsed.stats, statIds: parsed.statIds };
+}
+
+/** Statuses that mean UNAVAILABLE (config.INJURED_STATUSES) — the export's `injured`. */
+const INJURED = new Set(["OUT", "INJURY_RESERVE", "SSPD"]);
+
+/**
+ * Projection rows for players on a side's LIVE ESPN roster that the export does not have
+ * on that team — a pickup or trade since the last scheduled export (owner, 2026-10-27:
+ * "this should be live and should be updated as soon as I add him"). The browser drops
+ * players who have left (lib/liveAdjust.ts `liveRoster`) on its own, but cannot project
+ * an arrival without his line, and only the server holds the whole export. Looked up in
+ * the waiver pool first (same shape and value scale as a roster row), then the other
+ * teams' rosters (a trade), then the season player pool, whose games left come from the
+ * week's NBA schedule. A name found in none of them is left out: there is nothing to
+ * project him from.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function addedRows(teamId: number | null | undefined, side: any): any[] {
+  const lg = leagueFile();
+  const today: string[] = (side?.rosterForCurrentScoringPeriod?.entries ?? []).map((e: any) =>
+    String(e?.playerPoolEntry?.player?.fullName ?? "")
+  );
+  const sides = (lg.matchups ?? []).flatMap((m: any) => [
+    { id: m.homeId, side: m.home },
+    { id: m.awayId, side: m.away },
+  ]);
+  const mine = new Set<string>(
+    (sides.find((s: any) => s.id === teamId)?.side?.players ?? []).map((p: any) => p.name)
+  );
+  const out = [];
+  for (const name of today) {
+    if (!name || mine.has(name)) continue;
+    const fa = (lg.freeAgents ?? []).find((f: any) => f.name === name);
+    const traded = sides
+      .flatMap((s: any) => s.side?.players ?? [])
+      .find((p: any) => p.name === name);
+    const pool = (lg.seasonData?.playerPool ?? []).find((p: any) => p.name === name);
+    if (traded) {
+      out.push(traded);
+    } else if (fa) {
+      out.push({
+        ...fa,
+        nbaGamesLeft: fa.gamesLeft,
+        injured: INJURED.has(String(fa.status ?? "").toUpperCase()),
+      });
+    } else if (pool) {
+      const games = Object.keys(lg.weekSchedule?.teams?.[pool.nbaTeam] ?? {}).length;
+      const injured = INJURED.has(String(pool.status ?? "").toUpperCase());
+      out.push({
+        name,
+        nbaTeam: pool.nbaTeam,
+        gamesLeft: injured ? 0 : games,
+        nbaGamesLeft: injured ? 0 : games,
+        avg: lg.stats.map((s: string) => Number(pool[s] ?? 0) || 0),
+        status: pool.status ?? "",
+        injured,
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -355,6 +421,9 @@ export async function liveMatchup(period: number, teamId: number): Promise<LiveM
           // Each side's single-day lines for today, with lineup slot (Game Day).
           youToday: todayLines(myside, meta),
           oppToday: todayLines(theirs, meta),
+          // Players on today's roster the export does not have there yet (pickups).
+          youAdded: addedRows(teamId, myside),
+          oppAdded: addedRows(theirs?.teamId, theirs),
           fetchedAt: new Date().toISOString(),
       },
     };

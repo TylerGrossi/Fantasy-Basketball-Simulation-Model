@@ -93,17 +93,21 @@ export default function StreamersView({
       .filter((d) => !today || d > today || (d === today && !rosterLocked))
       .sort();
   const pickupLeague = useMemo(() => {
-    if (!today || !league.weekSchedule) return league;
+    // Anyone already on either live roster is not a free agent any more, whatever the
+    // export (which can be hours old) says.
+    const taken = new Set([...(live.youToday ?? []), ...(live.oppToday ?? [])].map((t) => t.name));
+    const pool = league.freeAgents.filter((fa) => !taken.has(fa.name));
+    if (!today || !league.weekSchedule) return { ...league, freeAgents: pool };
     return {
       ...league,
-      freeAgents: league.freeAgents.map((fa) =>
+      freeAgents: pool.map((fa) =>
         league.weekSchedule!.teams[fa.nbaTeam]
           ? { ...fa, gamesLeft: Math.min(fa.gamesLeft, gameDates(fa.nbaTeam).length) }
           : fa
       ),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [league, today, rosterLocked]);
+  }, [league, today, rosterLocked, live.youToday, live.oppToday]);
   /*
    * The days a move made now affects, for the day-by-day lineup (lib/streamers.ts
    * DailyLineup): the rest of the week, starting today while the roster is unlocked and
