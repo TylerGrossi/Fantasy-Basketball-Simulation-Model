@@ -55,5 +55,14 @@ const nextConfig = {
     maxInactiveAge: 60 * 60 * 1000,
     pagesBufferLength: 100,
   },
+
+  /**
+   * Game Time lived at /gameday until 2026-10-28 (owner: the URL should match the name).
+   * Old links and home-screen bookmarks still land on it. The NBA feed keeps its internal
+   * name, /api/gameday — nobody sees that URL.
+   */
+  async redirects() {
+    return [{ source: "/gameday", destination: "/gametime", permanent: true }];
+  },
 };
 export default nextConfig;

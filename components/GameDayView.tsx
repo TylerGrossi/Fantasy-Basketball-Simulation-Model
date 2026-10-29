@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { winPctText, type LeagueData, type Matchup, type PlayerRow } from "@/lib/league";
+import {
+  categoryValue,
+  formatValue,
+  winPctText,
+  type LeagueData,
+  type Matchup,
+  type PlayerRow,
+} from "@/lib/league";
+import type { StatVector } from "@/lib/probability";
+import { tally } from "./BoxScoreSheet";
 import { periodLabel as quarter, type GameDayData, type NbaGame, type Play } from "@/lib/gameday";
 import { nightImpact } from "@/lib/gamedayImpact";
 import { liveRoster } from "@/lib/liveAdjust";
@@ -195,11 +204,12 @@ export default function GameDayView(props: Props) {
   const [liveOnly, setLiveOnly] = useState(false);
   /*
    * PHONE ONLY: which of the three panels is showing. A phone has room for one, so the
-   * play feed, the box and the matchup scoreboard sit behind a segmented control (the
-   * same `.sbx-tabs` Current Matchup uses) instead of stacking into one long scroll. The
-   * feed leads — it is what this page is for. Desktop ignores it and shows all three.
+   * players, the play feed and the matchup scoreboard sit behind a segmented control (the
+   * same `.sbx-tabs` Current Matchup uses) instead of stacking into one long scroll.
+   * Players lead (owner, 2026-10-28; the feed led before). Desktop ignores it and shows
+   * everything at once.
    */
-  const [phoneTab, setPhoneTab] = useState<"plays" | "box" | "matchup">("plays");
+  const [phoneTab, setPhoneTab] = useState<"plays" | "box" | "matchup">("box");
   /*
    * The picked games — empty = all of them. A click picks one game (or clears it, if it
    * was the only one picked); Ctrl/Cmd-click adds or removes a game, so any handful of
@@ -422,9 +432,10 @@ export default function GameDayView(props: Props) {
 
   /*
    * ONE SCREEN (owner, 2026-10-21): the page used to be a long scroll of stacked cards.
-   * Now it is the Current Matchup scoreboard, a strip of every game (tap one and the
-   * whole page narrows to it), one filter, and two panes side by side — the box and the
-   * play feed — that fill the rest of the window and scroll inside themselves.
+   * Desktop (2026-10-28): a two-row category board, then three columns — every game
+   * (tap one and the whole page narrows to it), the box under one filter, and the play
+   * feed — filling the rest of the window and scrolling inside themselves. The full
+   * Current Matchup scoreboard is the phone's Matchup tab only.
    */
   return (
     <div className={`gd gd-tab-${phoneTab}`}>
@@ -444,7 +455,18 @@ export default function GameDayView(props: Props) {
         </span>
       </div>
 
-      {/* The same scoreboard as Current Matchup, rendered by the page. */}
+      {/* Desktop: the week as a two-row board. Phone: hidden — the Matchup tab carries
+          Current Matchup's own scoreboard (below) instead. */}
+      <MatchupSheet
+        league={league}
+        you={totals.you}
+        opp={totals.opp}
+        youLabel={youAbbrev}
+        oppLabel={oppAbbrev}
+      />
+
+      {/* The same scoreboard as Current Matchup, rendered by the page. Phone only now: the
+          Matchup tab. */}
       <div className="gd-board">{header}</div>
 
       {/* ------------------------------------------------------ games strip */}
@@ -471,8 +493,9 @@ export default function GameDayView(props: Props) {
           .sort((a, b) => stateRank(a) - stateRank(b) || a.start.localeCompare(b.start))
           .map((g) => {
             const inGame = [...nights.you, ...nights.opp].filter((p) => p.game?.id === g.id);
-            const mine = inGame.filter((p) => p.side === "you").length;
-            const theirs = inGame.filter((p) => p.side === "opp").length;
+            // Starters only (owner, 2026-10-28): a benched player's night counts for nothing.
+            const mine = inGame.filter((p) => p.side === "you" && p.counted).length;
+            const theirs = inGame.filter((p) => p.side === "opp" && p.counted).length;
             const on = focus.includes(g.id);
             return (
               <button
@@ -555,8 +578,8 @@ export default function GameDayView(props: Props) {
       <div className="sbx-tabs gd-tabs" role="tablist" aria-label="Show">
         {(
           [
-            ["plays", "Play by Play"],
-            ["box", "Box Score"],
+            ["box", "Players"],
+            ["plays", "Plays"],
             ["matchup", "Matchup"],
           ] as const
         ).map(([k, label]) => (
@@ -624,6 +647,68 @@ export default function GameDayView(props: Props) {
 }
 
 const stateRank = (g: NbaGame) => (g.state === "in" ? 0 : g.state === "pre" ? 1 : 2);
+
+/**
+ * The week so far as a two-row board (owner, 2026-10-28): a row per team, a column per
+ * league category, and the leader's cell filled in that team's colour. It replaced the
+ * full Current Matchup scoreboard at the top of the desktop page, which took most of the
+ * window and left the box a strip at the bottom. Same tally and formatting as
+ * CategorySheet, so the two pages never disagree on a number.
+ */
+function MatchupSheet({
+  league,
+  you,
+  opp,
+  youLabel,
+  oppLabel,
+}: {
+  league: LeagueData;
+  you: StatVector;
+  opp: StatVector;
+  youLabel: string;
+  oppLabel: string;
+}) {
+  const rec = tally(league, you, opp);
+  const lower = new Set(league.lowerIsBetter);
+  const rows = [
+    { side: "you", label: youLabel, vec: you, other: opp, score: `${rec.win}-${rec.loss}-${rec.tie}` },
+    { side: "opp", label: oppLabel, vec: opp, other: you, score: `${rec.loss}-${rec.win}-${rec.tie}` },
+  ] as const;
+  return (
+    <div className="gd-sheet">
+      <table className="gd-sheet-table">
+        <thead>
+          <tr>
+            <th aria-label="Team" />
+            {league.categories.map((c) => (
+              <th key={c}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.side} className={r.side}>
+              <td className="gd-sheet-team">
+                <span className={`gd-owner ${r.side}`}>{r.label}</span>
+                <b className="mono">{r.score}</b>
+              </td>
+              {league.categories.map((c) => {
+                const a = categoryValue(league.stats, r.vec, c);
+                const b = categoryValue(league.stats, r.other, c);
+                const lead = lower.has(c) ? a < b : a > b;
+                return (
+                  <td key={c} className={`mono${lead ? " lead" : ""}`}>
+                    {formatValue(c, a)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function ownerTagOf(owner: Owner, teamId: number | undefined, abbrevs: Record<string, string>) {
   if (owner === "fa") return "FA";
@@ -710,7 +795,17 @@ function BoxTable({
           {ready ? "Nobody to show yet — lines appear as games tip off." : "Loading…"}
         </p>
       ) : (
-        <div className="table-scroll">
+        <>
+        {/* Phone: a card per player, no sideways scroll (owner, 2026-10-28). The table's
+            thirteen columns needed a swipe on every row. Same rows, same order. */}
+        <div className="only-app">
+          <ol className="gd-cards">
+            {rows.map((r) => (
+              <PlayerCard key={r.key} r={r} />
+            ))}
+          </ol>
+        </div>
+        <div className="table-scroll only-web">
           <table className="sheet sortable gd-ptable">
             <thead>
               <tr>
@@ -778,6 +873,7 @@ function BoxTable({
             </tbody>
           </table>
         </div>
+        </>
       )}
       {offTonight.length > 0 && (
         <p className="gd-foot gd-off">
@@ -792,6 +888,54 @@ function BoxTable({
         </p>
       )}
     </>
+  );
+}
+
+/** One box row as a phone card: who and whose, the game and shooting, then the line. */
+function PlayerCard({ r }: { r: BoxRow }) {
+  const l = r.line;
+  return (
+    <li className={`gd-pc gd-own-${r.owner}${r.counted ? "" : " row-muted"}`}>
+      <div className="gd-pc-top">
+        {r.onCourt && r.game?.state === "in" && <span className="gd-court" title="On the floor" />}
+        <span className="gd-pc-name">
+          <PlayerLink name={r.name} />
+        </span>
+        <span className="gd-team">{r.team}</span>
+        <span className={`gd-owner ${r.owner}`}>{r.ownerTag}</span>
+        {!r.counted && <span className="gd-tag">Bench</span>}
+        {r.value != null && (
+          <span className="gd-pc-gs mono" title="Game Score">
+            {`${r.value >= 0 ? "+" : ""}${r.value.toFixed(1)}`}
+          </span>
+        )}
+      </div>
+      <div className="gd-pc-sub">
+        {r.game && (
+          <span>
+            {r.game.away.abbr === r.team ? `@${r.game.home.abbr}` : `v ${r.game.away.abbr}`} ·{" "}
+            {gameStatus(r.game)}
+          </span>
+        )}
+        {l && (
+          <>
+            <span><span className="mono">{Math.round(r.min)}</span> min</span>
+            <span>FG <span className="mono">{`${l.FGM ?? 0}-${l.FGA ?? 0}`}</span></span>
+            <span>FT <span className="mono">{`${l.FTM ?? 0}-${l.FTA ?? 0}`}</span></span>
+          </>
+        )}
+      </div>
+      {l && (
+        <div className="gd-pc-stats">
+          {COLS.map((c) => (
+            <div key={c}>
+              <span>{c}</span>
+              <b className="mono">{l[c] ?? 0}</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
   );
 }
 

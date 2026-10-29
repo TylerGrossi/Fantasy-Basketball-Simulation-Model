@@ -98,7 +98,7 @@ export const FLAT_NAV: NavEntry[] = [
   // One page now (2026-10-20), so a link rather than a menu of its sections.
   { kind: "link", label: "Current Matchup", href: "/scoreboard" },
   // FantasyPros-style live night (2026-10-21): every game, your players' lines, the feed.
-  { kind: "link", label: "Game Time", href: "/gameday" },
+  { kind: "link", label: "Game Time", href: "/gametime" },
   {
     kind: "menu",
     /*
@@ -279,7 +279,7 @@ export const SECTIONS: Section[] = [
       { label: "Home", href: "/" },
       // Tonight's games, live (2026-10-21). Home on a phone, not This Week (owner): it is
       // a tile on the Home grid, and This Week is the one matchup page.
-      { label: "Game Time", href: "/gameday", blurb: "Tonight's games, live, and what they do to you" },
+      { label: "Game Time", href: "/gametime", blurb: "Tonight's games, live, and what they do to you" },
     ],
   },
   /*
@@ -318,7 +318,7 @@ export const SECTIONS: Section[] = [
 export const IN_SEASON_ONLY = [
   "/playoffs",
   // A night of games with nothing riding on them is an NBA scoreboard, not this page.
-  "/gameday",
+  "/gametime",
   "/streamers",
   "/bench",
   // The same two, as sections of the one-page Current Matchup.

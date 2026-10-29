@@ -8044,33 +8044,34 @@ table.sheet.ws-table tfoot td {
 .three-up .wpc { margin: 0.4rem 0 0; }
 
 /* ===================================================================== GAME DAY
-   /gameday (2026-10-21): tonight's NBA games, live, and what they do to your matchup.
+   /gametime (2026-10-21; was /gameday): tonight's NBA games, live, and what they do to your matchup.
    ONE SCREEN on a laptop (owner, 2026-10-21 — the first cut was a long scroll):
 
      title row ·· odds and how tonight moved them
-     Current Matchup's scoreboard (the Scoreboard component itself)
-     games strip ·· every game, one row; picking one narrows everything below to it
-     players | play by play ·· fill the rest of the window, each scrolling inside itself
+     the week as a two-row category board (2026-10-28; was the whole Scoreboard)
+     games column | box | play by play ·· picking a game narrows everything to it; each
+                                          pane scrolls inside itself
 
-   `.gd` is a flex column exactly as tall as the scroll area, and `.gd-panes` takes what
-   is left. A floor (`min-height`) stops a short window crushing the panes to nothing —
-   below it the page scrolls a little instead. On a phone it is an ordinary stacked page.
+   `.gd` is a grid exactly as tall as the scroll area (see the desktop block below). A
+   floor on the last row stops a short window crushing the box to nothing — below it the
+   page scrolls a little instead. On a phone it is an ordinary stacked page with tabs.
    You are cobalt and the opponent clay, as everywhere else. */
 
 .gd .up { color: var(--good); }
 .gd .dn { color: var(--bad); }
 
-@media (min-width: 768px) {
-  /* The page's 3rem bottom padding would push the one-screen layout into a scroll. */
-  .page:has(> .gd) { padding-bottom: 0; }
-  .gd {
-    display: flex;
-    flex-direction: column;
-    /* -1px: --nav-h is fractional (62.4px) and the rounding left a 1px scroll. */
-    height: calc(100dvh - var(--nav-h) - 1px);
-    padding-bottom: 0.9rem;
-  }
-}
+/* ---- the week, two rows (desktop) ---- */
+.gd-sheet { overflow-x: auto; margin: 0 0 0.7rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.gd-sheet-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.gd-sheet-table th { font-size: 0.66rem; font-weight: 600; color: var(--ink-3); padding: 0.35rem 0.3rem 0.15rem; text-align: center; white-space: nowrap; }
+.gd-sheet-table td { padding: 0.28rem 0.3rem; text-align: center; color: var(--ink-2); white-space: nowrap; }
+.gd-sheet-table tr.you td { border-bottom: 1px solid var(--line-2); }
+.gd-sheet-table td.gd-sheet-team { text-align: left; padding-left: 0.7rem; padding-right: 0.8rem; }
+.gd-sheet-team b { margin-left: 0.45rem; font-size: 0.86rem; }
+.gd-sheet-table tr.you .gd-sheet-team b { color: var(--cobalt); }
+.gd-sheet-table tr.opp .gd-sheet-team b { color: var(--clay); }
+.gd-sheet-table tr.you td.lead { background: var(--cobalt-soft); color: var(--cobalt); font-weight: 700; }
+.gd-sheet-table tr.opp td.lead { background: var(--clay-soft); color: var(--clay); font-weight: 700; }
 
 /* ---- title row ---- */
 .gd-top { flex: none; display: flex; align-items: baseline; gap: 0.4rem 0.9rem; flex-wrap: wrap; margin: 0.9rem 0 0.6rem; }
@@ -8241,16 +8242,102 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
 .gd-chip.neg { color: var(--bad); }
 .gd-more { font: inherit; font-size: 0.78rem; width: 100%; margin-top: 0.6rem; padding: 0.4rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink-2); cursor: pointer; }
 
-/* Narrower laptop / tablet: the box needs ~750px for its fourteen columns, and the feed
-   reads fine narrower — so below 1320px the box takes a bigger share. */
-@media (min-width: 768px) and (max-width: 1320px) {
-  .gd-panes { grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); }
+/* Desktop (owner, 2026-10-28): the full Current Matchup scoreboard used to sit on top and
+   took most of the window, leaving the box a strip at the bottom. Now:
+
+     title row ·································· odds
+     two-row category board (.gd-sheet)
+     games  | filter                      | play
+     column | box (all the height left)   | by play
+
+   A grid, with `.gd-panes` dissolved (display: contents) so the box and the feed are
+   placed directly. Scoreboard (`.gd-board`) is phone-only: the Matchup tab. */
+/* (Placed AFTER the base .gd-* rules on purpose: at equal specificity a later base
+   `.gd-panes { display: grid }` or `.gd-strip { margin; overflow-x }` would win.) */
+@media (min-width: 768px) {
+  /* The page's 3rem bottom padding would push the one-screen layout into a scroll. */
+  .page:has(> .gd) { padding-bottom: 0; }
+  .gd {
+    display: grid;
+    grid-template-columns: 184px minmax(0, 1fr) clamp(270px, 24vw, 380px);
+    /* The floor: on a short window the page scrolls a little rather than the box
+       shrinking to a few rows. */
+    grid-template-rows: auto auto auto minmax(300px, 1fr);
+    grid-template-areas:
+      "top   top    top"
+      "sheet sheet  sheet"
+      "rail  filter feed"
+      "rail  box    feed";
+    column-gap: 1rem;
+    /* -1px: --nav-h is fractional (62.4px) and the rounding left a 1px scroll. */
+    height: calc(100dvh - var(--nav-h) - 1px);
+    padding-bottom: 0.9rem;
+  }
+  .gd-top { grid-area: top; }
+  .gd-sheet { grid-area: sheet; }
+  .gd-filter { grid-area: filter; }
+  .gd-panes { display: contents; }
+  .gd-box { grid-area: box; }
+  .gd-feed { grid-area: feed; }
+  .gd-board { display: none; }
+  /* The games strip, stood on end. */
+  .gd-strip {
+    grid-area: rail;
+    flex-direction: column;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0 0.15rem 0 0;
+  }
+  .gd-strip .gd-game, .gd-strip .gd-game-all { flex: none; max-width: none; }
+}
+/* Narrower laptop / tablet: three columns leave the box too little for its thirteen
+   columns, so the games lie back down into a strip and the box takes the bigger share. */
+@media (min-width: 768px) and (max-width: 1100px) {
+  .gd {
+    grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(300px, 1fr);
+    grid-template-areas:
+      "top    top"
+      "sheet  sheet"
+      "rail   rail"
+      "filter filter"
+      "box    feed";
+  }
+  .gd-strip {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0 0 0.6rem;
+    padding: 0 0 0.25rem;
+  }
+  .gd-strip .gd-game { flex: 1 0 104px; max-width: 170px; }
+  .gd-strip .gd-game-all { flex: 0 0 118px; }
 }
 
-/* Phone: games first, then ONE panel at a time behind the segmented control (Play by
-   Play / Box Score / Matchup — `phoneTab` in GameDayView). Stacked, the three made one
-   endless scroll and the scoreboard's ~800px vertical category sheet buried the games.
-   The page scrolls normally; only the box scrolls sideways, with the name column pinned. */
+/* ---- phone player cards (the box, one card per row) ---- */
+.gd-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.gd-pc { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem 0.65rem 0.45rem; }
+.gd-pc.gd-own-you { box-shadow: inset 3px 0 0 var(--cobalt); }
+.gd-pc.gd-own-opp { box-shadow: inset 3px 0 0 var(--clay); }
+.gd-pc.row-muted { opacity: 0.6; }
+.gd-pc-top { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+.gd-pc-name { font-weight: 600; font-size: 0.88rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-pc.gd-own-you .gd-pc-name a { color: var(--cobalt); }
+.gd-pc.gd-own-opp .gd-pc-name a { color: var(--clay); }
+.gd-pc-gs { margin-left: auto; font-weight: 700; font-size: 0.88rem; }
+.gd-pc-sub { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; margin-top: 0.1rem; font-size: 0.7rem; color: var(--ink-2); }
+.gd-pc-sub .mono { color: var(--ink); }
+.gd-pc-stats { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center; border-top: 1px solid var(--line-2); margin-top: 0.4rem; padding-top: 0.3rem; }
+.gd-pc-stats span { display: block; font-size: 0.58rem; font-weight: 600; color: var(--ink-3); }
+.gd-pc-stats b { font-size: 0.85rem; }
+
+/* Phone: games first, then ONE panel at a time behind the segmented control (Players /
+   Plays / Matchup — `phoneTab` in GameDayView). Stacked, the three made one endless
+   scroll and the scoreboard's ~800px vertical category sheet buried the games. No
+   scoreboard above the tabs (owner, 2026-10-28): the Matchup tab is the scoreboard. The
+   box is player cards here, so nothing scrolls sideways. */
 @media (max-width: 767px) {
   .gd { display: flex; flex-direction: column; }
   .gd-top { order: 0; margin-top: 0.4rem; }
@@ -8277,19 +8364,10 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
   .gd-pane { overflow: visible; }
   .gd-pane-body { max-height: none; overflow: visible; }
   .gd-pane-head { display: none; }
-  .gd-box .gd-pane-body > .table-scroll { overflow-x: auto; }
-  /* Name pinned while the stats scroll under it. */
-  table.sheet.gd-ptable th:first-child,
-  table.sheet.gd-ptable td:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
-  /* The tints are translucent; a pinned cell needs them over a solid card, or the
-     stats scrolling underneath show through. */
-  table.sheet.gd-ptable tr.gd-own-you td:first-child {
-    background: linear-gradient(var(--cobalt-soft), var(--cobalt-soft)), var(--card);
-  }
-  table.sheet.gd-ptable tr.gd-own-opp td:first-child {
-    background: linear-gradient(var(--clay-soft), var(--clay-soft)), var(--card);
-  }
-  table.sheet.gd-ptable th:first-child { z-index: 2; background: var(--surface-2); }
+  .gd-sheet { display: none; }
+  /* The cards are each a card already; the pane's own frame would be a box around boxes. */
+  .gd-box.gd-card { border: none; background: none; }
+  .gd-box .gd-pane-body > p { padding: 0; }
 }
 
 /* ------------------------------------------------------------ team card (/team)
