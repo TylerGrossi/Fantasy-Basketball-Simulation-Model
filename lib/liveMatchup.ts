@@ -194,6 +194,9 @@ function todayLines(side: any, meta: StatMeta, returns: Record<string, string> |
       status: String(player.injuryStatus ?? ""),
       returnDate: returns?.[name] ?? null,
       counted: !NON_COUNTING_SLOTS.has(Number(e?.lineupSlotId)),
+      // ESPN's lineupSlotId today (0 PG ... 11 UTIL, 12 Bench, 13 IR) — the Week Planner
+      // lists your roster in today's lineup order from it.
+      slot: Number(e?.lineupSlotId),
       // ESPN's NBA event id — the same id the NBA scoreboard uses. Empty before tip-off.
       gameId: String(line?.externalId ?? ""),
       min: Number(st[MIN_ID] ?? 0) || 0,

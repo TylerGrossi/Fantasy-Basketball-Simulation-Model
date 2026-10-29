@@ -52,6 +52,8 @@ export interface TodayLine {
   returnDate?: string | null;
   /** In a lineup slot that counts — false on the bench or IR. */
   counted: boolean;
+  /** ESPN's lineupSlotId today (0 PG … 11 UTIL, 12 Bench, 13 IR). Absent from older deploys. */
+  slot?: number;
   /** ESPN's NBA event id. Empty before his game starts. */
   gameId: string;
   min: number;

@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { AcquisitionSummary, LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeStreamers } from "@/lib/streamers";
-import { dayLabel, etDate } from "@/lib/dates";
+import { dayLabel } from "@/lib/dates";
+import { useMoveWindow } from "@/lib/useMoveWindow";
 import { useLiveSides } from "@/lib/useLiveSides";
 import { useSettings } from "@/lib/useSettings";
 import LiveBadge from "./LiveBadge";
 import PlayerLink from "./PlayerLink";
 import FilterBar from "./FilterBar";
+import MultiSelect from "./MultiSelect";
 import SortableTable, { type SortCol, type SortRow } from "./SortableTable";
 
 interface Props {
@@ -39,6 +41,8 @@ const STREAMER_COLS: SortCol[] = [
   { key: "deltaCats", label: "Δ Cats", num: true },
   { key: "deltaWin", label: "Δ Win %", num: true },
   { key: "drop", label: "Drop" },
+  // The pickup's 9-cat value, same scale as the Roster tab's Value column.
+  { key: "value", label: "Value", num: true },
   ...SHOWN.map((s) => ({ key: s, label: s, num: true })),
 ];
 
@@ -65,24 +69,12 @@ export default function StreamersView({
   const youMoments = useMemo(() => sideMoments(you, live.you), [you, live.you]);
   const oppMoments = useMemo(() => sideMoments(opp, live.opp), [opp, live.opp]);
 
-  // Today in Eastern time, set after mount (same reason as WeekSchedule: the server's
-  // clock and the browser's can straddle midnight). Until then every date in the week
-  // shows; after, only the ones a pickup could still play — the dates GL is counting.
-  const [today, setToday] = useState<string | null>(null);
-  useEffect(() => {
-    setToday(etDate());
-  }, []);
-  /*
-   * ESPN'S ROSTER LOCK (owner, 2026-10-21). This league's rosterLocktimeType is
-   * FIRSTGAME_SCORINGPERIOD: once the first NBA game of the day tips off, adds and drops
-   * made that day take effect the NEXT day, whoever's game it is. (Lineup moves lock per
-   * game — that is a different setting, and not what an add is subject to.)
-   *
-   * So the day is locked as soon as any game today has started (live NBA scoreboard:
-   * `gameLeft` below 1 for some team). Unknown — no live data yet — counts as unlocked.
-   */
-  const rosterLocked =
-    !!today && !!live.gameLeft && Object.values(live.gameLeft).some((left) => left < 1);
+  // Today, ESPN's roster lock and the days a move made now still affects — shared with
+  // the Week Planner (lib/useMoveWindow.ts).
+  const { today, rosterLocked, dates: moveDates, teams, slots } = useMoveWindow(
+    league,
+    live.gameLeft
+  );
   /*
    * The games a pickup made NOW could still play: later days, plus today's only while
    * the day is unlocked. Before the first tip-off no game today has started, so every
@@ -111,21 +103,12 @@ export default function StreamersView({
   /*
    * The days a move made now affects, for the day-by-day lineup (lib/streamers.ts
    * DailyLineup): the rest of the week, starting today while the roster is unlocked and
-   * tomorrow once it is. The lock holds the DROP too — dropped after tip-off, he is still
-   * yours for today — which falls out of leaving today off the list.
+   * tomorrow once it is.
    */
-  const daily = useMemo(() => {
-    const sched = league.weekSchedule;
-    if (!sched) return undefined;
-    const dates = new Set<string>();
-    for (const team of Object.values(sched.teams)) for (const d of Object.keys(team)) dates.add(d);
-    const affected = [...dates]
-      .filter((d) => !today || d > today || (d === today && !rosterLocked))
-      .sort();
-    const slots =
-      (league.rosterSlots ?? []).filter((s) => s !== "Bench" && s !== "IR").length || 10;
-    return { dates: affected, teams: sched.teams, slots };
-  }, [league.weekSchedule, league.rosterSlots, today, rosterLocked]);
+  const daily = useMemo(
+    () => (league.weekSchedule ? { dates: moveDates, teams, slots } : undefined),
+    [league.weekSchedule, moveDates, teams, slots]
+  );
 
   // Recomputed on every toggle, in milliseconds, with no server round trip. This is the
   // whole point of moving the maths client-side.
@@ -139,6 +122,23 @@ export default function StreamersView({
     [pickupLeague, you.players, youMoments, oppMoments, openSpot, untouchable, daily]
   );
   const addsLeft = acq ? Math.max(0, acq.max - acq.used) : null;
+
+  /*
+   * GAME DATE filter (owner, 2026-10-29): keep only pickups who play on EVERY picked day —
+   * Fri + Sun finds the players who cover both nights. Options are the days a move made
+   * now can still affect; a picked day that has since passed or locked drops out.
+   */
+  const [pickedDays, setPickedDays] = useState<string[]>([]);
+  const dayOptions = moveDates.filter((d) =>
+    Object.values(league.weekSchedule?.teams ?? {}).some((t) => t[d])
+  );
+  const activeDays = pickedDays.filter((d) => dayOptions.includes(d));
+  const shown = activeDays.length
+    ? results.filter((r) => {
+        const plays = new Set(gameDates(r.add.nbaTeam));
+        return activeDays.every((d) => plays.has(d));
+      })
+    : results;
 
   const anyGamesLeft = pickupLeague.freeAgents.some((f) => f.gamesLeft > 0);
 
@@ -161,6 +161,14 @@ export default function StreamersView({
       ) : (
         <>
           <FilterBar className="controls">
+            <MultiSelect
+              label="Game date"
+              options={dayOptions.map(dayLabel)}
+              selected={activeDays.map(dayLabel)}
+              onChange={(labels) =>
+                setPickedDays(dayOptions.filter((d) => labels.includes(dayLabel(d))))
+              }
+            />
             <label className="check">
               <input
                 type="checkbox"
@@ -194,11 +202,16 @@ export default function StreamersView({
               header row stays pinned while the rows scroll under it. Sortable on every
               column; opens on Δ Cats, the order analyzeStreamers ranks by, and # keeps
               that rank whatever the current sort. */}
+          {activeDays.length > 0 && shown.length === 0 && (
+            <p className="caption">
+              No free agent plays on all of {activeDays.map(dayLabel).join(", ")}.
+            </p>
+          )}
           <SortableTable
             scrollClassName="st-scroll"
             defaultKey="deltaCats"
             cols={STREAMER_COLS}
-            rows={results.map((r, i): SortRow => {
+            rows={shown.map((r, i): SortRow => {
               // Net games your lineup gains — the count the Δ Cats maths used: the
               // pickup's started games, less the drop's and any starter he benches.
               const netGames = r.netGames;
@@ -244,6 +257,14 @@ export default function StreamersView({
                     text: r.drop?.name ?? "open spot",
                     node: r.drop ? undefined : <em>open spot</em>,
                   },
+                  value:
+                    typeof r.add.value === "number"
+                      ? {
+                          sort: r.add.value,
+                          text: `${r.add.value > 0 ? "+" : ""}${r.add.value.toFixed(1)}`,
+                          color: r.add.value > 0 ? "var(--good)" : r.add.value < 0 ? "var(--bad)" : undefined,
+                        }
+                      : { sort: -Infinity, text: "—" },
                   ...Object.fromEntries(
                     SHOWN.map((s) => {
                       const v = r.add.avg[league.stats.indexOf(s)];
@@ -260,7 +281,9 @@ export default function StreamersView({
             Click a player to exclude them from drop suggestions. Recalculates instantly.
           </p>
           <div className="chips">
-            {you.players.map((p) => (
+            {/* Best first by value (owner, 2026-10-29): the players you are most likely to
+                protect lead the list. */}
+            {[...you.players].sort((a, b) => (b.value ?? 0) - (a.value ?? 0)).map((p) => (
               <button
                 key={p.name}
                 type="button"

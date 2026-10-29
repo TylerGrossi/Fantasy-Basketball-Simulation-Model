@@ -101,7 +101,7 @@ const rankOf = (p: Pick<Seatable, "avg" | "value">) =>
  * then only as many as his injury-aware schedule count allows, taken from the END of the
  * window (a player returning mid-week plays the late games, not the early ones).
  */
-function rosterDays(p: PlayerRow, daily: DailyLineup): Set<string> {
+export function rosterDays(p: PlayerRow, daily: Pick<DailyLineup, "dates" | "teams">): Set<string> {
   const team = daily.teams[p.nbaTeam];
   if (!team) return new Set();
   const all = daily.dates.filter((d) => team[d]);

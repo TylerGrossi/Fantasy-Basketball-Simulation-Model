@@ -352,17 +352,26 @@ def _value_rank_scores_from_df(df, ref=None):
     return {name: float(v) for name, v in zip(df["Player"], vals)}
 
 
-def _roster_for_projection_caps(roster, rank_scores, max_roster_size):
+def _roster_for_projection_caps(roster, rank_scores, max_roster_size, playable=None):
     """
     If roster exceeds max_roster_size, keep the top players by rank_scores (value), tie-break by name.
     Returns (trimmed_roster, kept_player_names).
+
+    `playable`: names with at least one countable game in the window. Players WITHOUT one
+    go last (owner, 2026-10-29). The cap is the 13 active spots; ranked by value alone, two
+    stars on IR took two of them and the three lowest-value active players (Wilson,
+    McDaniels, Lendeborg) were counted for 0 games all week. It is "no games", not "on IR",
+    that decides it: in a FUTURE week after Kawhi Leonard's return date he has games, so he
+    ranks by value again and the team's lowest-value player is the one left out — the
+    activate-and-drop that week would actually involve.
     """
     if max_roster_size is None or len(roster) <= max_roster_size:
         trimmed = list(roster)
         return trimmed, {p.name for p in trimmed}
+    idle = (lambda p: p.name not in playable) if playable is not None else (lambda p: False)
     sorted_p = sorted(
         roster,
-        key=lambda p: (-float(rank_scores.get(p.name, 0.0)), p.name),
+        key=lambda p: (idle(p), -float(rank_scores.get(p.name, 0.0)), p.name),
     )
     trimmed = sorted_p[:max_roster_size]
     return trimmed, {p.name for p in trimmed}
@@ -407,8 +416,11 @@ def add_games_in_week(df, roster, week, year, injury_data=None, max_per_day=None
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
     rank_scores = _value_rank_scores_from_df(df, rank_ref)
     cap_roster = max_roster_size if max_roster_size is not None else MAX_ROSTER_SIZE
-    roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster)
-    games_by_day = _get_games_by_day_for_week(roster_eff, week, year, injury_data, trust_return_dates)
+    # Games first (whole roster), so the 13-spot cap can put players with none last.
+    all_days = _get_games_by_day_for_week(roster, week, year, injury_data, trust_return_dates)
+    playable = {n for day in all_days.values() for n, _ in day}
+    roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster, playable)
+    games_by_day = {d: [x for x in day if x[0] in kept_names] for d, day in all_days.items()}
     player_effective = _accumulate_counted_games_by_day(games_by_day, rank_scores, cap)
     name_to_player = {p.name: p for p in roster}
 
@@ -1099,11 +1111,23 @@ def add_games_left_with_injury(df, roster, injury_data=None, max_per_day=None,
     cap = max_per_day if max_per_day is not None else MAX_PLAYERS_PER_DAY
     rank_scores = _value_rank_scores_from_df(df, rank_ref)
     cap_roster = max_roster_size if max_roster_size is not None else MAX_ROSTER_SIZE
-    roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster)
-    games_by_day = _get_games_by_day_for_roster(
-        roster_eff, injury_data, trust_return_dates, week_span, period_end_date,
+    # Games first (whole roster), so the 13-spot cap can put players with none last.
+    all_days = _get_games_by_day_for_roster(
+        roster, injury_data, trust_return_dates, week_span, period_end_date,
         window_start=window_start, window_end=window_end,
     )
+    # In the IR slot NOW: no COUNTED games this matchup until he is activated (owner,
+    # 2026-10-29). The schedule above keeps his games — the GL column and the Week
+    # Planner's Activate move need them — but the projection must not count them: Alperen
+    # Sengun (DTD, on IR) was projected for 2 games and pushed an active player out of the
+    # 13. FUTURE weeks (add_games_in_week) still count him from his return date.
+    stashed = {p.name for p in roster if player_stashed_on_ir(p)}
+    all_days = {
+        d: [x for x in day if x[0] not in stashed] for d, day in all_days.items()
+    }
+    playable = {n for day in all_days.values() for n, _ in day}
+    roster_eff, kept_names = _roster_for_projection_caps(roster, rank_scores, cap_roster, playable)
+    games_by_day = {d: [x for x in day if x[0] in kept_names] for d, day in all_days.items()}
     player_effective = _accumulate_counted_games_by_day(games_by_day, rank_scores, cap)
     name_to_player = {p.name: p for p in roster}
 

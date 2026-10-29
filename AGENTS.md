@@ -347,6 +347,29 @@ suggest dropping a star who is resting. That is correct for the objective it is 
 wrong for the season — which is what the "Protect from dropping" chips are for. Consider
 persisting them (localStorage) rather than resetting each visit.
 
+**Week Planner** (`#planner` on Current Matchup; `lib/planner.ts` + `components/WeekPlanner.tsx`,
+2026-10-29) is the owner's add/drop spreadsheet made automatic: a list of moves
+`{date, add, drop}` applied to the live roster, re-seated DAY BY DAY under the slot cap,
+scored with the Streamers arithmetic (swap each changed player's whole moments) so its
+cats / win numbers agree with the rest of the page. Optimize = greedy best move, then a
+re-pick pass; it keeps any moves already entered, and it finds chains (stream A Thu, drop
+A Sun for B). Verified: the empty plan reproduces the baseline exactly, and the 1-move
+optimum matches brute force over every FA x day x drop on the real export, both
+objectives. Today / roster lock / plannable days come from `lib/useMoveWindow.ts`, which
+Streamers also uses — keep it the one place that rule lives. The plan persists in
+localStorage (`fbb.planner.v1`, one entry for the current season:week:team). IR: a player
+in ESPN's IR slot today (live `lineupSlotId` 13) is inactive until an `activate` move,
+which needs a drop like an add but does NOT count against the acquisition limit; his
+games are taken out of the planner's baseline. CROSS-DEVICE: the plan and Settings
+(keepers, open spot) also save to Upstash Redis through `app/api/sync` (`lib/remoteSync.ts`;
+keys `settings` and `plan:<season>:<period>:<team>`, plans expire after 30 days). The
+server copy wins on load and on every return to the page; localStorage is first paint and
+the offline copy. With no `KV_REST_API_URL`/`KV_REST_API_TOKEN` the route says
+`{configured:false}` and everything stays local — that is the dev default. No login and no
+write key (owner's choice), so anyone who finds the URL could overwrite the plan. Known gaps:
+positional slot eligibility (count-only cap, like the projection), waiver delays, and the
+season cost of a drop (hence "Never drop my top N" plus the shared Protect chips).
+
 ---
 
 ## What this project is

@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LeagueData, PlayerRow } from "@/lib/league";
 import { playerStatus } from "@/lib/playerPool";
-import { dayLabel, etDate } from "@/lib/dates";
+import { dayLabel, dayRange, etDate } from "@/lib/dates";
+import { byLineup, type LineupOrder } from "@/lib/lineupOrder";
 import PlayerLink from "./PlayerLink";
 
 /**
@@ -24,7 +25,8 @@ export default function WeekSchedule({
 }: {
   league: LeagueData;
   /** Your side first; the toggle switches between them. */
-  sides: Array<{ label: string; players: PlayerRow[] }>;
+  /** `lineup` = today's ESPN lineup (lib/lineupOrder.ts), the rows' display order. */
+  sides: Array<{ label: string; players: PlayerRow[]; lineup?: LineupOrder }>;
 }) {
   const sched = league.weekSchedule;
   const [which, setWhich] = useState(0);
@@ -57,7 +59,10 @@ export default function WeekSchedule({
       const starts = new Set(playing.slice(0, slots).map((p) => p.name));
       return { d, count: playing.length, starts };
     });
-    return { players, perDay, gameOf, healthy };
+    // Rows read in today's ESPN lineup order, PG first and IR last; who STARTS on a
+    // crowded day is still the value rule above. Without live slots: by value, as before.
+    const shown = byLineup(side.players, side.lineup ?? new Map(), (a, b) => rank(b) - rank(a));
+    return { players, shown, perDay, gameOf, healthy };
   }, [sched, side, days, slots, ptsIdx]);
 
   if (!sched || !grid) {
@@ -70,6 +75,7 @@ export default function WeekSchedule({
   }
 
   const overDays = grid.perDay.filter((x) => x.count > slots);
+  const slotCol = (side?.lineup?.size ?? 0) > 0;
 
   return (
     <div className="ws">
@@ -106,9 +112,10 @@ export default function WeekSchedule({
       </p>
 
       <div className="table-scroll">
-        <table className="sheet ws-table">
+        <table className="sheet ws-table ws-compact">
           <thead>
             <tr>
+              {slotCol && <th>Slot</th>}
               <th>Player</th>
               {days.map((d) => (
                 <th
@@ -124,17 +131,17 @@ export default function WeekSchedule({
             </tr>
           </thead>
           <tbody>
-            {grid.players.map((p) => {
+            {grid.shown.map((p) => {
               const [code, sev] = playerStatus(p.status);
               const n = days.filter((d) => grid.gameOf(p, d)).length;
               return (
                 <tr key={p.name}>
+                  {slotCol && <td className="slot-cell">{side.lineup?.get(p.name)?.label ?? ""}</td>}
                   <td className="ws-player">
+                    {/* Name and status on one line, no team line (owner, 2026-10-29), so
+                        the whole roster fits in one screen. */}
                     <PlayerLink name={p.name} />
-                    <span className="ws-team">
-                      {p.nbaTeam}
-                      {code && <span className={`ws-st ${sev}`}> {code}</span>}
-                    </span>
+                    {code && <span className={`ws-st ${sev}`}> {code}</span>}
                   </td>
                   {grid.perDay.map(({ d, starts }) => {
                     const g = grid.gameOf(p, d);
@@ -165,6 +172,7 @@ export default function WeekSchedule({
           </tbody>
           <tfoot>
             <tr>
+              {slotCol && <td />}
               <td className="ws-foot-l">Players with games</td>
               {grid.perDay.map(({ d, count }) => (
                 <td
@@ -183,16 +191,4 @@ export default function WeekSchedule({
       </div>
     </div>
   );
-}
-
-/** Inclusive list of ISO dates from start to end. */
-function dayRange(start: string, end: string): string[] {
-  const out: string[] = [];
-  const d = new Date(`${start}T12:00:00Z`);
-  const last = new Date(`${end}T12:00:00Z`);
-  while (d <= last && out.length < 21) {
-    out.push(d.toISOString().slice(0, 10));
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return out;
 }

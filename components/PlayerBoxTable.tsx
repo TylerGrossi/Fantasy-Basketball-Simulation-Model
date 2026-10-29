@@ -99,7 +99,7 @@ export function PlayerBoxTable({
       "v" in src || "gp" in src ? at(src as BoxLine, s) : (src as Record<string, number>)[s] ?? 0;
     const m = get(made);
     const a = get(att);
-    return a || m ? `${m.toLocaleString("en-US")}/${a.toLocaleString("en-US")}` : "—";
+    return `${m.toLocaleString("en-US")}/${a.toLocaleString("en-US")}`;
   };
 
   const cell = (src: Record<string, number> | BoxLine, col: BoxCol): string => {
@@ -115,8 +115,9 @@ export function PlayerBoxTable({
       const att = get(a);
       return att ? `${((get(m) / att) * 100).toFixed(1)}%` : "—";
     }
-    const v = get(col);
-    return v ? v.toLocaleString("en-US") : "—";
+    // A counting stat with nothing in it is a real 0, not missing data (owner, 2026-10-29).
+    // Only a percentage with no attempts stays "—": 0 of 0 is not 0%.
+    return get(col).toLocaleString("en-US");
   };
 
   /** Clicking the active column flips direction; a new column starts at its natural end. */

@@ -17,3 +17,15 @@ export function dayLabel(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   return `${DOW[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${m}/${d}`;
 }
+
+/** Inclusive list of ISO dates from start to end (capped at three weeks). */
+export function dayRange(start: string, end: string): string[] {
+  const out: string[] = [];
+  const d = new Date(`${start}T12:00:00Z`);
+  const last = new Date(`${end}T12:00:00Z`);
+  while (d <= last && out.length < 21) {
+    out.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return out;
+}

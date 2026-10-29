@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { remotePut, useRemotePull } from "./remoteSync";
 
 /**
  * User settings, persisted in localStorage.
@@ -11,6 +12,11 @@ import { useCallback, useEffect, useState } from "react";
  * ought to mean.
  *
  * Nothing here is secret; credentials stay server-side in environment variables.
+ *
+ * CROSS-DEVICE (owner, 2026-10-29): also saved server-side through /api/sync (key
+ * `settings`), so the keeper list set on a phone is the one the laptop sees. localStorage
+ * is still the first paint; the server copy replaces it once fetched, and again whenever
+ * the page comes back into view.
  */
 
 export interface Settings {
@@ -29,6 +35,36 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 const KEY = "fbb.settings.v1";
+/**
+ * Fired on every change so EVERY mounted useSettings sees it at once. Each call of the hook
+ * holds its own copy, so without this a toggle in one section (the Week Planner's Can drop
+ * column) did not reach another on the same page (Streamers' Protect chips) until reload.
+ */
+const EVENT = "fbb:settings";
+/** The latest value, for when storage is blocked and cannot be re-read. */
+let current: Settings | null = null;
+
+function readStored(): Settings {
+  try {
+    const raw = window.localStorage.getItem(KEY);
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    // Corrupt or unavailable storage (private mode).
+  }
+  return current ?? DEFAULT_SETTINGS;
+}
+
+/** Save locally, tell every mounted hook, and (unless it came FROM the server) upload. */
+function apply(next: Settings, upload: boolean) {
+  current = next;
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    // Storage full or blocked — keep the in-memory value rather than throwing.
+  }
+  window.dispatchEvent(new CustomEvent<Settings>(EVENT, { detail: next }));
+  if (upload) remotePut("settings", next);
+}
 
 export function useSettings(): [Settings, (patch: Partial<Settings>) => void, boolean] {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -37,25 +73,28 @@ export function useSettings(): [Settings, (patch: Partial<Settings>) => void, bo
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(KEY);
-      if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
-    } catch {
-      // Corrupt or unavailable storage (private mode) — defaults are fine.
-    }
+    setSettings(readStored());
     setLoaded(true);
+    const sync = (e: Event) => setSettings((e as CustomEvent<Settings>).detail);
+    window.addEventListener(EVENT, sync);
+    return () => window.removeEventListener(EVENT, sync);
   }, []);
 
+  // The server copy, when there is one, is the truth. First visit with sync switched on:
+  // nothing stored yet, so this device's settings seed it.
+  useRemotePull("settings", (got) => {
+    if (!got?.configured) return;
+    const local = readStored();
+    if (got.value && typeof got.value === "object") {
+      const remote = { ...DEFAULT_SETTINGS, ...(got.value as Partial<Settings>) };
+      if (JSON.stringify(remote) !== JSON.stringify(local)) apply(remote, false);
+    } else if (JSON.stringify(local) !== JSON.stringify(DEFAULT_SETTINGS)) {
+      remotePut("settings", local);
+    }
+  });
+
   const update = useCallback((patch: Partial<Settings>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch };
-      try {
-        window.localStorage.setItem(KEY, JSON.stringify(next));
-      } catch {
-        // Storage full or blocked — keep the in-memory value rather than throwing.
-      }
-      return next;
-    });
+    apply({ ...readStored(), ...patch }, true);
   }, []);
 
   return [settings, update, loaded];

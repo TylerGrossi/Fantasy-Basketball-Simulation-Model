@@ -4591,8 +4591,10 @@ table.sheet.lu-table .lu-pos {
   padding-bottom: 0.35rem;
 }
 /* A link, not a card: picking one shows that game below. */
+/* Desktop: the cards share the full width (owner, 2026-10-29: fixed 11rem cut team names
+   off with room to spare). Phones keep the fixed basis below and swipe. */
 .rc-game {
-  flex: 0 0 11rem;
+  flex: 1 1 11rem;
   scroll-snap-align: start;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -4788,13 +4790,22 @@ table.sheet.rc-sheet .rc-win {
   /* Was `grid-template-columns`, which does nothing now the strip is a flex scroller.
      Narrower cards instead, so two fit on a phone with the third peeking. */
   .rc-strip { gap: 0.4rem; }
-  .rc-game { flex-basis: 10rem; }
+  .rc-game { flex: 0 0 10rem; }
   .rc-row { font-size: 0.72rem; }
+  /* A long team name wraps to a second line rather than being cut off (owner). */
+  .rc-name { white-space: normal; overflow: visible; line-height: 1.25; }
 }
 
 /* -------- per-player box score under the recap -------- */
 .rc-box-title { font-size: 1rem; margin: 1.4rem 0 0.5rem; }
 table.sheet.rc-box { font-size: 0.74rem; }
+/* Both teams' box scores share ONE column grid (owner, 2026-10-29): sized from their own
+   numbers, the second table's FGM/FGA sat ~60px left of the first's. Fixed layout, the
+   player column a set width, the stat columns splitting the rest equally — so every
+   column lines up from one table to the next, at every width (it scrolls below 900px). */
+table.sheet.rc-box { width: 100%; min-width: 900px; table-layout: fixed; }
+table.sheet.rc-box th:first-child,
+table.sheet.rc-box td:first-child { width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table.sheet.rc-box td,
 table.sheet.rc-box th { padding: 0.35rem 0.5rem; }
 /* This table opts into the shared sortable-header pattern, but its cells are denser
@@ -7523,7 +7534,8 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
 
 /* GL cell's counted-games figure ("3 (1)") — see GamesLeftCell. Secondary to the
    schedule count it sits beside, so muted and a step smaller. */
-.gl-counted { color: var(--ink-3); font-size: 0.85em; cursor: help; }
+/* Default cursor (owner, 2026-10-29): `help` showed a question mark on hover. The tooltip stays. */
+.gl-counted { color: var(--ink-3); font-size: 0.85em; }
 
 /* ------------------------------------------------------------------ League Home
    ESPN's league front page, in this app's vocabulary: three columns — you and your
@@ -7930,6 +7942,109 @@ table.sheet.ws-table tfoot td {
 .ws-foot-l { color: var(--ink-2); }
 .ws-count { font-family: var(--mono); color: var(--ink-2); }
 .ws-count.ws-over { color: var(--clay); }
+/* ESPN's lineup slot today (lib/lineupOrder.ts) — Schedule and Roster tabs. */
+.slot-cell { color: var(--ink-3); font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+
+/* Week Planner (components/WeekPlanner.tsx): the moves list beside the schedule grid on a
+   desktop, stacked on a phone. The grid reuses the .ws-* cells above and adds three
+   states: off the roster that day, and the day a pickup arrives (cobalt edge) or a
+   dropped player leaves (clay edge). No fills — the owner's spreadsheet used a colour per
+   move; here a move is its number, on the list and on both of its rows. */
+.pl-controls .field-select { min-width: 0; width: auto; }
+.pl-inline { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; color: var(--ink-2); }
+.pl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0 1.2rem; margin-bottom: 0.8rem; }
+.pl-bar .fbar { flex: 1 1 auto; min-width: 0; }
+.pl-bar .controls { margin: 0; }
+.pl-actions { display: inline-flex; gap: 0.4rem; }
+.pl-actions .dg-btn { font-size: 0.82rem; padding: 0.4rem 0.8rem; }
+.dg-btn:disabled { opacity: 0.45; cursor: default; }
+.dg-btn.on:hover:not(:disabled) { color: #fff; }
+.pl-layout { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 1.4rem; align-items: start; }
+.pl-h { font-size: 0.9rem; margin: 0 0 0.5rem; }
+.pl-moves-col .pl-h + .caption { margin-top: 0; }
+.pl-moves { list-style: none; margin: 0 0 1.2rem; padding: 0; border-top: 1px solid var(--line); }
+.pl-move { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.55rem 0; border-bottom: 1px solid var(--line-2); font-size: 0.84rem; }
+.pl-move-body { flex: 1 1 auto; min-width: 0; line-height: 1.45; }
+.pl-num {
+  flex: none; width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  border: 1px solid var(--cobalt); color: var(--cobalt);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+}
+.pl-date { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-2); margin-right: 0.15rem; }
+.pl-team { font-size: 0.72rem; color: var(--ink-3); }
+.pl-move-gain { font-family: var(--mono); font-size: 0.72rem; color: var(--ink-3); }
+.pl-move-bad .pl-num { border-color: var(--clay); color: var(--clay); }
+.pl-move-bad .pl-move-gain { color: var(--clay); font-family: inherit; }
+.pl-form { display: grid; gap: 0.5rem; }
+.pl-form label { display: grid; gap: 0.2rem; font-size: 0.74rem; color: var(--ink-2); }
+.pl-form .field-select { width: 100%; min-width: 0; }
+.pl-form .dg-btn { justify-self: start; font-size: 0.82rem; padding: 0.4rem 0.9rem; }
+.pl-grid-col { min-width: 0; }
+.pl-table td.ws-cell.pl-off { color: var(--line-strong); font-weight: 400; }
+/* One colour per move (owner, 2026-10-29 — the spreadsheet coloured each transaction).
+   Soft fills with the hue's own dark ink, so cell text stays readable; the hues are far
+   apart and the drop side is STRIPED as well as coloured, so a move never depends on
+   colour alone. */
+.pl-c0 { --mc: #2f6fed; --mc-bg: #dce7fd; }
+.pl-c1 { --mc: #c4532a; --mc-bg: #fbe1d5; }
+.pl-c2 { --mc: #2e7d46; --mc-bg: #d7ecdc; }
+.pl-c3 { --mc: #7b4bc4; --mc-bg: #e8dcf7; }
+.pl-c4 { --mc: #94700a; --mc-bg: #f8ebc0; }
+.pl-c5 { --mc: #187e83; --mc-bg: #d3eeef; }
+.pl-c6 { --mc: #b83a72; --mc-bg: #f8d9e6; }
+.pl-c7 { --mc: #56606f; --mc-bg: #e2e5ea; }
+.pl-move[class*="pl-c"] { border-left: 4px solid var(--mc); padding-left: 0.55rem; background: linear-gradient(90deg, var(--mc-bg), transparent 70%); }
+.pl-move[class*="pl-c"] .pl-num { background: var(--mc); border-color: var(--mc); color: #fff; }
+.pl-table td.pl-span { background: var(--mc-bg); color: var(--ink); }
+.pl-table td.pl-span.ws-game { color: var(--mc); }
+.pl-table td.pl-lost {
+  background: repeating-linear-gradient(135deg, var(--mc-bg) 0 5px, transparent 5px 10px);
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+.pl-chip {
+  display: inline-block; margin-top: 0.2rem; padding: 0.05rem 0.45rem; border-radius: 999px;
+  background: var(--mc-bg); color: var(--mc); font-size: 0.68rem; font-weight: 700; white-space: nowrap;
+}
+.pl-chip-drop { background: transparent; border: 1px dashed var(--mc); }
+.pl-group td {
+  background: var(--surface-2); color: var(--ink-2); font-size: 0.74rem; font-weight: 700;
+  padding-top: 0.4rem; padding-bottom: 0.4rem;
+}
+/* Compact rows: name and status on one line, no team line, so the whole roster fits in
+   one screen. Slot is ESPN's lineup slot today. */
+.pl-table td, .pl-table th,
+.ws-compact td, .ws-compact th { padding-top: 0.32rem; padding-bottom: 0.32rem; }
+/* Body cells only — on the header this overrode the shared th font and SLOT read different. */
+.pl-table th.pl-slot { width: 3.2rem; }
+.pl-table td.pl-slot { width: 3.2rem; color: var(--ink-3); font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+.pl-table td.ws-player .pl-chip { margin: 0 0 0 0.4rem; }
+/* Keep column: star = keeper (gold), crossing arrows = droppable streaming slot (clay,
+   the app's "your call" colour). Icon-only, one click switches it. */
+.pl-can { white-space: nowrap; text-align: center; width: 3rem; }
+.pl-can-ic {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%; padding: 0;
+  border: 1px solid transparent; background: transparent; cursor: pointer;
+}
+button.pl-can-ic:hover { border-color: var(--line-strong); background: var(--card); }
+.pl-can-ic.is-keeper { color: #c9970c; }
+.pl-can-ic.is-droppable { color: var(--clay); }
+span.pl-can-ic { cursor: default; opacity: 0.6; }
+.pl-delta { font-size: 0.72rem; }
+.pl-delta.up { color: var(--good); }
+.pl-delta.down { color: var(--bad); }
+.ws-count.pl-gain { color: var(--good); }
+table.sheet.ws-table tfoot tr.pl-foot-base td { border-top: 0; font-weight: 400; color: var(--ink-3); }
+@media (max-width: 1023px) {
+  .pl-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .pl-bar { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+  .pl-actions .dg-btn { flex: 1 1 0; min-height: 44px; }
+  .pl-inline { justify-content: space-between; }
+}
 
 /* Bench strategy: the old Streamlit layout in Analyst Sheet clothes — no gradients, a
    coloured edge instead of a coloured fill. Play is cobalt, bench is clay. */

@@ -5,6 +5,7 @@ import MatchupView from "@/components/MatchupView";
 import { LiveRosterView, LiveWeekSchedule } from "@/components/LiveRosters";
 import Scoreboard from "@/components/Scoreboard";
 import StreamersView from "@/components/StreamersView";
+import WeekPlanner from "@/components/WeekPlanner";
 import { forecastFor, winProbHistory } from "@/lib/predictions";
 import ScoreboardTabs from "@/components/ScoreboardTabs";
 import { buildWeekRecap } from "@/components/WeekRecap";
@@ -188,6 +189,7 @@ export default async function Page({
         <a href="#odds">Win Prob</a>
         <a href="#projections">Projections</a>
         <a href="#streamers">Streamers</a>
+        <a href="#planner">Planner</a>
         <a href="#bench">Bench</a>
       </nav>
       </div>
@@ -273,6 +275,18 @@ export default async function Page({
       <section id="streamers" className="cm-sec">
         <h2 className="cm-h">Streamers</h2>
         <StreamersView
+          live={!demo}
+          league={deckLeague}
+          matchup={r.matchup}
+          isHome={r.isHome}
+          teamId={me.id}
+          acq={youAcq}
+        />
+      </section>
+
+      <section id="planner" className="cm-sec">
+        <h2 className="cm-h">Week Planner</h2>
+        <WeekPlanner
           live={!demo}
           league={deckLeague}
           matchup={r.matchup}
