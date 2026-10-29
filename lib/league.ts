@@ -572,8 +572,12 @@ export function sideMoments(side: TeamSide, current: StatVector): Moments {
  * A win probability as the app prints it EVERYWHERE: one decimal, "71.3%" (owner,
  * 2026-10-21). One formatter so Current Matchup, League Home, Game Day and Schedule can
  * never show the same number two ways.
+ *
+ * Held to 0.1%–99.9%: every caller prints a week still being played (finished weeks show
+ * their score), and a matchup isn't decided until it's over (owner, 2026-10-29).
  */
-export const winPctText = (p: number) => `${(p * 100).toFixed(1)}%`;
+export const winPctText = (p: number) =>
+  `${Math.min(99.9, Math.max(0.1, p * 100)).toFixed(1)}%`;
 
 export function winProbability(
   meta: LeagueMeta,

@@ -28,7 +28,7 @@ import { playerStatus } from "@/lib/playerPool";
 const ET = "America/New_York";
 /** Recent Activity: this many moves load; the first five show and the rest scroll. */
 const RECENT_MOVES = 15;
-const TREND_ROWS = 6;
+const TREND_ROWS = 5;
 /** Best Players (before the trends start): the top 10, five to a column. */
 const BEST_ROWS = 10;
 /** A riser needs a real sample on both sides of the comparison. */
