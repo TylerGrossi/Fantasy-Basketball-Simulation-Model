@@ -343,9 +343,12 @@ function PlayerDetail({
   const active = available.includes(basis) ? basis : "Regular";
   // Every bar on the card, ranked against the league under the chosen basis. Recomputed
   // only when the player or the basis changes — it is a full pass over the pool per stat.
+  // Under 10 games his season line is still a blend with last season's for ranking
+  // purposes, so the season bars count as qualified (see percentileRows `inBlend`).
+  const inBlend = p.statSource === "blend" && rp.statSource === "current";
   const rows = useMemo(
-    () => percentileRows(src.pool, rp, active),
-    [src.pool, rp, active]
+    () => percentileRows(src.pool, rp, active, inBlend),
+    [src.pool, rp, active, inBlend]
   );
   const byKey = new Map(rows.map((r) => [r.spec.key, r]));
 
@@ -543,7 +546,7 @@ function PlayerDetail({
               {/* Every panel follows the season picker (owner, 2026-10-21): the picked
                   season's row (`rp`) against that season's pool, and that season's game
                   log below — not the bars on one season and the rest on another. */}
-              <CategoryShape player={rp} pool={src.pool} />
+              <CategoryShape player={rp} pool={src.pool} inBlend={inBlend} />
               <SimilarPlayers player={rp} pool={src.pool} />
             </div>
             <UsageEfficiency player={rp} pool={src.pool} onPick={onPick} />

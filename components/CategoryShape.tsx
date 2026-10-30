@@ -64,9 +64,12 @@ function point(i: number, pct: number): [number, number] {
 export default function CategoryShape({
   player,
   pool,
+  inBlend = false,
 }: {
   player: PoolPlayer;
   pool: PoolPlayer[];
+  /** Early-season blend: season bars count as qualified (percentileRows `inBlend`). */
+  inBlend?: boolean;
 }) {
   /*
    * Straight from the same function the bars use, so the dial can never disagree with them.
@@ -75,7 +78,7 @@ export default function CategoryShape({
    * there, which is what a zero-attempt shooter does.
    */
   const z = useMemo(() => {
-    const rows = percentileRows(pool, player, "Regular");
+    const rows = percentileRows(pool, player, "Regular", inBlend);
     // Qualified standings only — the shape is a claim about who he is, not a sketch.
     const by = new Map(
       rows.map((r) => [r.spec.key as StatKey, r.qualified ? r.percentile : null])
@@ -83,7 +86,7 @@ export default function CategoryShape({
     return Object.fromEntries(
       CAT_AXES.map((c) => [c, by.get(c as StatKey) ?? 0])
     ) as Record<CatAxis, number>;
-  }, [player, pool]);
+  }, [player, pool, inBlend]);
 
   const pts = CAT_AXES.map((c, i) => point(i, z[c]));
   const poly = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");

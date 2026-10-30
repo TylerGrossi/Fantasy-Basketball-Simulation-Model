@@ -249,7 +249,8 @@ function rankOf(value: number, others: number[], lowerIsBetter?: boolean) {
 export function percentileRows(
   pool: PoolPlayer[],
   player: PoolPlayer,
-  basis: ValueBasis
+  basis: ValueBasis,
+  inBlend = false
 ): PercentileRow[] {
   const min = MIN_GP[basis];
   const qualified = pool.filter((x) => gamesFor(x, basis) >= min);
@@ -302,8 +303,13 @@ export function percentileRows(
    * should be drawn from: ranking a single game against everyone else's month reports a
    * hot night as a hot month. Below the bar every row comes back `qualified: false`, and
    * the card draws its bar dimmed and hatched as "Not qualified".
+   *
+   * `inBlend` exempts the SEASON bar while the site's rankings still blend in last season
+   * (engine/data.py BLEND_FULL_GAMES, first 10 games). The card shows his own few games
+   * (thisSeasonOnly), but every early-season line is that small — marking each one Not
+   * qualified for the opening weeks hatched the whole league (owner, 2026-10-29).
    */
-  const unqualified = gamesFor(player, basis) < min;
+  const unqualified = !(inBlend && basis === "Regular") && gamesFor(player, basis) < min;
 
   const rows: PercentileRow[] = [];
   for (const group of STAT_GROUPS) {
