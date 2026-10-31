@@ -14,6 +14,7 @@ import { tally } from "./BoxScoreSheet";
 import { periodLabel as quarter, type GameDayData, type NbaGame, type Play } from "@/lib/gameday";
 import { nightImpact } from "@/lib/gamedayImpact";
 import { liveRoster } from "@/lib/liveAdjust";
+import { playerStatus } from "@/lib/playerPool";
 import { useLiveWin } from "@/lib/useLiveSides";
 import { useLiveTotals, type TodayLine } from "@/lib/useLiveTotals";
 import PlayerLink from "./PlayerLink";
@@ -522,8 +523,11 @@ export default function GameDayView(props: Props) {
           .map((g) => {
             const inGame = [...nights.you, ...nights.opp].filter((p) => p.game?.id === g.id);
             // Starters only (owner, 2026-10-28): a benched player's night counts for nothing.
-            const mine = inGame.filter((p) => p.side === "you" && p.counted).length;
-            const theirs = inGame.filter((p) => p.side === "opp" && p.counted).length;
+            // Nor does an OUT/IR/suspended one's (owner, 2026-10-31): "1 TyGr" read as a
+            // player in the game when he was sitting.
+            const playing = (p: PlayerNight) => p.counted && playerStatus(p.row.status)[1] !== "out";
+            const mine = inGame.filter((p) => p.side === "you" && playing(p)).length;
+            const theirs = inGame.filter((p) => p.side === "opp" && playing(p)).length;
             const on = focus.includes(g.id);
             return (
               <button
