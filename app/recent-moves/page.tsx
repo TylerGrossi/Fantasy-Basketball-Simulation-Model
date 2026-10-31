@@ -1,4 +1,5 @@
 import { loadLeague } from "@/lib/loadLeague";
+import { buildSeasonContext } from "@/lib/playoffOdds";
 import RecentMovesView from "@/components/RecentMovesView";
 
 /**
@@ -30,6 +31,37 @@ export default async function Page() {
   );
   const rows = moves.map((m) => ({ ...m, value: valueOf.get(m.player) ?? null }));
 
+  // This matchup's "acquisitions used of allowed", per team NAME — ESPN's own counter,
+  // from the current period's results. Absent for a team the export could not resolve.
+  const nameOf = new Map(league.teams.map((t) => [t.id, t.name]));
+  const week: Record<string, { used: number; max: number }> = {};
+  for (const g of league.periodResults?.find((p) => p.period === league.period)?.games ?? []) {
+    if (g.homeAcq) week[nameOf.get(g.homeId) ?? ""] = g.homeAcq;
+    if (g.awayAcq) week[nameOf.get(g.awayId) ?? ""] = g.awayAcq;
+  }
+
+  /*
+   * What each swap does to its team's playoff / title odds (lib/playoffOdds.ts, the same
+   * simulation as the Streamers table). Only the players these moves touch cross to the
+   * client, plus every roster and the remaining schedule — not the pool.
+   */
+  const ctx = league.teams.length
+    ? buildSeasonContext(league, league.teams[0].id, new Set(moves.map((m) => m.player)))
+    : null;
+  const odds = ctx
+    ? {
+        ctx,
+        teamIds: Object.fromEntries(league.teams.map((t) => [t.name, t.id])),
+        meta: {
+          stats: league.stats,
+          categories: league.categories,
+          lowerIsBetter: league.lowerIsBetter,
+          variance: league.variance,
+          projectionError: league.projectionError,
+        },
+      }
+    : null;
+
   if (!rows.length) {
     return (
       <>
@@ -42,7 +74,12 @@ export default async function Page() {
   return (
     <>
       <h1>Recent Moves</h1>
-      <RecentMovesView rows={rows} />
+      <RecentMovesView
+        rows={rows}
+        week={week}
+        teams={league.teams.map((t) => t.name)}
+        odds={odds}
+      />
     </>
   );
 }

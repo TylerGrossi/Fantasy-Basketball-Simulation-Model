@@ -99,7 +99,6 @@ export default function CategoryShape({
     <section className="pd-sheet">
       <div className="pd-sheet-h">
         <h2>Category Shape</h2>
-        <span className="pd-sheet-n">percentile vs pool</span>
       </div>
 
       <div className="pd-shape">

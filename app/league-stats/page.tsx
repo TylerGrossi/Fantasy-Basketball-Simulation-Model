@@ -2,13 +2,14 @@ import SortableTable, { type SortCol, type SortRow } from "@/components/Sortable
 import { loadLeague, myTeam } from "@/lib/loadLeague";
 
 /**
- * Category columns, in the legacy app's order — which is NOT `league.categories`.
+ * Category columns in the career order (lib/catOrder.ts) — NOT `league.categories`.
  * TW is deliberately absent: it was left out of the Streamlit table and adding it here
  * would widen an already-wide table for the least-read category in the league.
  */
 const CATS = [
-  "FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
-  "REB", "AST", "STL", "BLK", "TO", "DD", "PTS",
+  "PTS", "REB", "AST", "STL", "BLK",
+  "FGM", "FGA", "FG%", "3PM", "3PA", "3P%", "FT%",
+  "TO", "DD",
 ];
 
 const rec = (w: number, l: number, t: number) => `${w}-${l}-${t}`;

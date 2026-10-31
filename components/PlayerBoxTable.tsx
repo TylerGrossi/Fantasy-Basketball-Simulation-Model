@@ -13,9 +13,11 @@ import PlayerLink from "./PlayerLink";
  * frozen name. The export still carries `BoxLine.min`, and the draft projection reads it
  * (it is the only place minutes exist in the data); this table just doesn't show it.
  */
+// Career order (lib/catOrder.ts): PTS, REB, AST, STL, BLK first, then the shooting.
 const BOX_COLS = [
-  "FGM/FGA", "FG%", "FTM/FTA", "FT%", "3PM/3PA", "3P%",
-  "REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW",
+  "PTS", "REB", "AST", "STL", "BLK",
+  "FGM/FGA", "FG%", "3PM/3PA", "3P%", "FTM/FTA", "FT%",
+  "TO", "DD", "TW",
 ] as const;
 
 type BoxCol = (typeof BOX_COLS)[number];

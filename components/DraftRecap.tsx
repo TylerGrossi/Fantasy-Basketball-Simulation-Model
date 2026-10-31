@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { careerOrder } from "@/lib/catOrder";
 import { buildLineup, type DraftLeague, type LiveDraft } from "@/lib/draft";
 import { gradeTeams, letterFor, type MockState } from "@/lib/mockDraft";
 import { scoreProjections, type DraftRow, type ProjectedLine } from "@/lib/projection";
@@ -419,7 +420,7 @@ export default function DraftRecap({
             <tr>
               <SortTh k="team" s={catSort} set={setCatSort} asc>Team</SortTh>
               {/* Ranks: 1 is best, so a first click sorts ascending — leaders on top. */}
-              {league.categories.map((c) => (
+              {careerOrder(league.categories).map((c) => (
                 <SortTh key={c} k={c} s={catSort} set={setCatSort} num asc>
                   {c}
                 </SortTh>
@@ -432,7 +433,7 @@ export default function DraftRecap({
               return (
                 <tr key={t.id} className={t.mine ? "dg-me" : ""}>
                   <td>{t.name}</td>
-                  {league.categories.map((c) => {
+                  {careerOrder(league.categories).map((c) => {
                     const r = g?.catRank[c] ?? 0;
                     return (
                       <td key={c} className={`num dg-heat${r <= 2 ? " top" : r >= nTeams - 1 ? " low" : ""}`}>

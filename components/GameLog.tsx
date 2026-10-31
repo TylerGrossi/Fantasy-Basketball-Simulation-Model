@@ -110,9 +110,6 @@ export default function GameLog({
     <section className={compact ? "pd-sheet-plain" : "pd-sheet"}>
       <div className="pd-sheet-h">
         <h2>{compact ? `Last ${COMPACT_ROWS} games` : "Game Log"}</h2>
-        {!compact && rows.length > 0 && (
-          <span className="pd-sheet-n">{rows.length} regular-season games</span>
-        )}
       </div>
 
       {state === "loading" && <p className="pd-sheet-note">Loading…</p>}

@@ -25,6 +25,8 @@ export interface SortCol {
    * best row that happens to be on screen.
    */
   leader?: boolean;
+  /** What the column means, shown when the header is hovered. */
+  title?: string;
 }
 
 export interface SortCell {
@@ -199,6 +201,7 @@ export default function SortableTable({
                   key={c.key}
                   className={c.num ? "num" : undefined}
                   aria-sort={active ? (sort.desc ? "descending" : "ascending") : "none"}
+                  title={c.title}
                 >
                   <button type="button" className="th-sort" onClick={() => click(c)}>
                     {c.shortLabel ? (

@@ -31,8 +31,18 @@ export interface StreamerResult {
   add: FreeAgent;
   /** Best player to drop for them, or null when using an open roster spot. */
   drop: PlayerRow | null;
-  /** Change in expected categories won vs. doing nothing. */
+  /** Change in expected categories won THIS WEEK vs. doing nothing. */
   deltaCats: number;
+  /**
+   * Expected categories the move costs over the REST OF THE SEASON: the dropped player's
+   * full weeks traded for the pickup's, summed over the regular-season weeks after this
+   * one. Negative when the pickup is the better player long-term. 0 for an open spot.
+   */
+  seasonCost: number;
+  /** `deltaCats - seasonCost`: what the move is worth all told. The ranking key. */
+  net: number;
+  /** Your projected rest-of-week after the move — feeds the playoff-odds simulation. */
+  weekMoments: Moments;
   /** Change in matchup win probability (percentage points). */
   deltaWinPct: number;
   /** Win probability after the move, 0-1. */
@@ -72,6 +82,31 @@ export interface StreamerOptions {
   limit?: number;
   /** Seat the swap day by day (see DailyLineup). Without it, whole games left swap. */
   daily?: DailyLineup;
+  /** Charge each drop for the weeks after this one (see SeasonHorizon). */
+  horizon?: SeasonHorizon;
+}
+
+/**
+ * The rest of the season, for pricing a DROP (owner, 2026-10-30: "in no world would I
+ * drop Anthony Edwards for Kris Dunn").
+ *
+ * Scored on this week alone, an injured star is the cheapest possible drop: he has no
+ * games left this week, so losing him costs nothing and any pickup who plays twice
+ * "wins" +0.3 categories. But a drop is permanent — he goes to waivers and someone else
+ * claims him — so the real price is every week after this one with the pickup in his
+ * place.
+ *
+ * Each of those weeks is priced the same way this week is, in expected categories: your
+ * full-strength roster (every player healthy, `gamesPerWeek` games each) against an
+ * evenly matched opponent — a copy of that same roster — once as it is and once with
+ * the swap. An even matchup is where one category matters most, so this is the
+ * conservative side: it protects good players rather than under-pricing them.
+ */
+export interface SeasonHorizon {
+  /** Regular-season weeks after this one. */
+  weeks: number;
+  /** Games a player plays in a typical week. */
+  gamesPerWeek: number;
 }
 
 /** Anyone the lineup rule can seat: a roster player or a free agent. */
@@ -123,6 +158,7 @@ export function analyzeStreamers(
     untouchables = new Set<string>(),
     limit = Infinity,
     daily,
+    horizon,
   } = options;
   ptsIdx = league.stats.indexOf("PTS");
 
@@ -147,6 +183,25 @@ export function analyzeStreamers(
   const dropMoments = new Map<string, Moments>(
     droppable.map((p) => [p.name, playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError)])
   );
+
+  // SEASON COST: a typical full week, your whole roster healthy, against its own copy.
+  // Swapping one player out of the left side and pricing the drop in categories.
+  const seasonCostOf = (() => {
+    if (!horizon || horizon.weeks <= 0) return () => 0;
+    const G = horizon.gamesPerWeek;
+    const m = (avg: number[]) => playerMoments(avg, G, league.variance, league.projectionError);
+    let full: Moments = { mu: league.stats.map(() => 0), var: league.stats.map(() => 0) };
+    for (const p of roster) full = addMoments(full, m(p.avg));
+    const even = categoryProbabilities(league, full, full).reduce((a, b) => a + b, 0);
+    const perDrop = new Map(roster.map((p) => [p.name, subtractMoments(full, m(p.avg))]));
+    return (drop: PlayerRow, add: FreeAgent) => {
+      const without = perDrop.get(drop.name);
+      if (!without) return 0;
+      const swapped = addMoments(without, m(add.avg));
+      const cats = categoryProbabilities(league, swapped, full).reduce((a, b) => a + b, 0);
+      return (even - cats) * horizon.weeks;
+    };
+  })();
 
   const results: StreamerResult[] = [];
   for (const fa of candidates) {
@@ -207,8 +262,12 @@ export function analyzeStreamers(
       // ~1,800 full matchups per render became ~130.
       const expectedCats = categoryProbabilities(league, mine, oppMoments).reduce((a, b) => a + b, 0);
       const deltaCats = expectedCats - base.expectedCats;
-      if (!best || deltaCats > best.deltaCats) {
-        best = { add: fa, drop, deltaCats, deltaWinPct: 0, win: 0, netGames };
+      // The best DROP is the one that leaves the most after the season's bill, not the
+      // one that helps this week most — that is how Edwards kept being picked.
+      const seasonCost = drop ? seasonCostOf(drop, fa) : 0;
+      const net = deltaCats - seasonCost;
+      if (!best || net > best.net) {
+        best = { add: fa, drop, deltaCats, seasonCost, net, deltaWinPct: 0, win: 0, netGames, weekMoments: mine };
         bestMine = mine;
       }
     };
@@ -221,7 +280,7 @@ export function analyzeStreamers(
     }
   }
 
-  results.sort((a, b) => b.deltaCats - a.deltaCats);
+  results.sort((a, b) => b.net - a.net);
   return { baseline, results: results.slice(0, limit) };
 }
 

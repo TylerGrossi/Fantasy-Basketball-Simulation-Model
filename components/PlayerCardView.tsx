@@ -13,6 +13,7 @@ import OpponentDefense from "./OpponentDefense";
 import SimilarPlayers from "./SimilarPlayers";
 import PlayerSplits from "./PlayerSplits";
 import PlayerConsistency from "./PlayerConsistency";
+import CareerStats from "./CareerStats";
 import {
   headshotUrl,
   playerStatus,
@@ -57,13 +58,14 @@ interface Bio {
 
 const BIO_CACHE = new Map<number, Bio>();
 
-type TabKey = "profile" | "splits" | "log";
+type TabKey = "profile" | "splits" | "log" | "career";
 
 /** The sections below the card, grouped by the question they answer. */
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "profile", label: "Profile" },
   { key: "splits", label: "Splits" },
   { key: "log", label: "Game Log" },
+  { key: "career", label: "Career" },
 ];
 
 /** The basis chips spell out the window they select, so nothing beside them has to. */
@@ -590,6 +592,9 @@ function PlayerDetail({
             />
           </>
         )}
+
+        {/* Every season, not the picked one — so it ignores the season picker. */}
+        {tab === "career" && <CareerStats key={`cs-${p.playerId ?? p.name}`} playerId={p.playerId} />}
       </div>
     </div>
   );

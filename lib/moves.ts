@@ -41,6 +41,20 @@ export interface MoveGroup {
 const isAdd = (a: string) => a === "Add" || a === "Waiver Add";
 
 /**
+ * What a transaction did to the team, in player value: everyone added minus everyone
+ * dropped. Only for a real swap — something added AND something dropped, every value
+ * known. A lone add filled an open spot and a lone drop opened one, so neither has a
+ * "for" to net against; a draft is not a transaction at all.
+ */
+export function netValue(g: MoveGroup): number | null {
+  if (!g.adds.length || !g.drops.length || g.drafted.length) return null;
+  const all = [...g.adds, ...g.drops];
+  if (all.some((r) => r.value == null)) return null;
+  const sum = (rs: MoveRow[]) => rs.reduce((a, r) => a + (r.value ?? 0), 0);
+  return sum(g.adds) - sum(g.drops);
+}
+
+/**
  * Group a (already filtered) feed into transactions, newest first.
  *
  * Input order is PRESERVED rather than re-sorted: the export is newest-first already, and

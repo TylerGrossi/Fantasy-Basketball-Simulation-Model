@@ -273,6 +273,12 @@ be ~290 extra ESPN round trips per build for detail almost nobody opens. For the
 reason the Player Value cards only MOUNT their body once the row is opened; rendering all
 289 cards up front added ~80 KB of HTML for nothing.
 
+The Player Card's **Career** tab (`components/CareerStats.tsx`, `lib/careerStats.ts`) is
+the same pattern, fetched only when the tab opens: ESPN's `/athletes/{id}/stats` for the
+counting table (all 15 categories), then per season the core API's PER, team totals (for
+USG% / AST%) and the game log (for TW). Older ESPN game logs are missing games, so TW is
+starred, not scaled, when the log has fewer games than GP.
+
 **The nav is SEASONAL.** `navFor(seasonOver)` in `lib/nav.ts` drops every href in
 `IN_SEASON_ONLY` (currently `/playoffs`) from the desktop dropdowns and the mobile
 indexes once the season is over, and Home swaps its fourth card from Playoff Odds to
@@ -497,7 +503,13 @@ The app now runs on the **2026-27 league** ("Connell 2026-2027 Fantasy", id 1330
 - Vercel needs `ESPN_LEAGUE_ID`/`ESPN_SEASON_YEAR` (and `DRAFT_*`) set to the new league.
 - Draft: Draft Guide (/draft, hidden) and Draft Recap (/draft-recap); the Recap's season
   simulation runs server-side and is cached (`lib/draftSeason.ts`, shared with the Agent's
-  draft_recap / draft_results / player_projection tools).
+  draft_recap / draft_results / player_projection tools). **The Recap is FROZEN** (owner,
+  2026-10-30): `public/data/draft-recap.json` holds the picks and the draft-night season
+  sim (`scripts/freeze_draft_recap.mjs`), and `/api/draft` + `getDraftSeason` read it
+  instead of ESPN. Its Playoff % is that draft-night sim, never the daily export's odds.
+  Next season: delete the file before the draft, re-run the script after it.
+- **Column order for stat tables** is `lib/catOrder.ts` (PTS, REB, AST, STL, BLK, then
+  shooting, then TO/DD/TW). Scoreboards keep ESPN's `league.categories` order.
 
 ## Current product state (season is over)
 

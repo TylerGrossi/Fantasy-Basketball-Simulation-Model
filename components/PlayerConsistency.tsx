@@ -56,7 +56,6 @@ export default function PlayerConsistency({
     <section className="pd-sheet">
       <div className="pd-sheet-h">
         <h2>Consistency</h2>
-        {stats && <span className="pd-sheet-n">{stats.n} games</span>}
       </div>
 
       {loading && <p className="pd-sheet-note">Loading…</p>}

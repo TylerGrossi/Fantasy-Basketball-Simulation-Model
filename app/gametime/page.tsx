@@ -55,6 +55,13 @@ export default async function Page({
     const owner = teamIdByName.get(p.owner);
     if (owner != null && p.playerId != null) owners[String(p.playerId)] = owner;
   }
+  // Injury status by ESPN id, for the box rows outside your matchup (free agents, other
+  // teams). Only players who HAVE one, so it stays a few hundred bytes. Your matchup's
+  // two rosters get ESPN's live status from the roster poll instead.
+  const statuses: Record<string, string> = {};
+  for (const p of pool) {
+    if (p.playerId != null && p.status && p.status !== "ACTIVE") statuses[String(p.playerId)] = p.status;
+  }
 
   // The top of the page is Current Matchup's own scoreboard, fed exactly as that page
   // feeds it. It joins the same live poller as the view below, so it costs no extra fetch.
@@ -81,6 +88,7 @@ export default async function Page({
         oppId={r.oppId}
         ids={ids}
         owners={owners}
+        statuses={statuses}
         teamAbbrevs={Object.fromEntries(league.teams.map((t) => [String(t.id), abbrev(t.id)]))}
         live={!demo}
         subtitle={`${periodLabel(league)} · ${r.youName} vs ${r.oppName}`}

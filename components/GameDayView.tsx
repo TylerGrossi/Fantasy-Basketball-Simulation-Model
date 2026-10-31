@@ -17,6 +17,7 @@ import { liveRoster } from "@/lib/liveAdjust";
 import { useLiveWin } from "@/lib/useLiveSides";
 import { useLiveTotals, type TodayLine } from "@/lib/useLiveTotals";
 import PlayerLink from "./PlayerLink";
+import StatusBadge from "./StatusBadge";
 
 /**
  * GAME DAY (2026-10-21) — ESPN's FantasyCast / FantasyPros' Game Day, for a head-to-head
@@ -70,6 +71,8 @@ interface Props {
   owners: Record<string, number>;
   /** Fantasy team id -> its ESPN abbreviation ("TyGr"), for the owner column. */
   teamAbbrevs: Record<string, string>;
+  /** ESPN id -> injury status from the export, for players outside your matchup. */
+  statuses: Record<string, string>;
   live: boolean;
   /** "Week 3 · You vs Them", beside the title. */
   subtitle: string;
@@ -154,6 +157,8 @@ interface PlayerNight {
   game: NbaGame | undefined;
   /** In a counting lineup slot. Unknown (true) until the fantasy feed lands. */
   counted: boolean;
+  /** In an IR slot (ESPN lineupSlotId 13) rather than on the bench. */
+  ir: boolean;
   /** Tonight's line by stat name, or null before his game. */
   line: Record<string, number> | null;
   min: number;
@@ -170,6 +175,10 @@ interface BoxRow {
   ownerTag: string;
   game: NbaGame | undefined;
   counted: boolean;
+  /** Not counted because he is on IR, not the bench — the tag says which. */
+  ir: boolean;
+  /** ESPN injury status ("OUT", "DAY_TO_DAY", …), "" when healthy. */
+  status: string;
   line: Record<string, number> | null;
   min: number;
   onCourt: boolean;
@@ -188,7 +197,7 @@ function gameOrder(g: NbaGame | undefined): number {
 /* ---------------------------------------------------------------------- view */
 
 export default function GameDayView(props: Props) {
-  const { league, matchup, isHome, teamId, oppId, ids, owners, teamAbbrevs, live, subtitle, header } =
+  const { league, matchup, isHome, teamId, oppId, ids, owners, teamAbbrevs, statuses, live, subtitle, header } =
     props;
   const youRaw = isHome ? matchup.home : matchup.away;
   const oppRaw = isHome ? matchup.away : matchup.home;
@@ -306,6 +315,7 @@ export default function GameDayView(props: Props) {
           id,
           game: gameOf.get(row.nbaTeam),
           counted: t ? t.counted : true,
+          ir: t?.slot === 13,
           line,
           min: fantasy ? t.min : (n?.min ?? 0),
           onCourt: n?.onCourt ?? false,
@@ -338,6 +348,9 @@ export default function GameDayView(props: Props) {
         ownerTag: ownerTagOf(owner, m ? (m.side === "you" ? teamId : oppId) : owners[id], teamAbbrevs),
         game: gameById.get(l.gameId),
         counted: m ? m.counted : true,
+        ir: m ? m.ir : false,
+        // Your matchup's players: ESPN's live roster status. Everyone else: the export's.
+        status: m ? m.row.status : (statuses[id] ?? ""),
         line: m?.line ?? l.line,
         min: m?.line ? m.min : l.min,
         onCourt: l.onCourt,
@@ -356,6 +369,8 @@ export default function GameDayView(props: Props) {
         ownerTag: p.side === "you" ? youAbbrev : oppAbbrev,
         game: p.game,
         counted: p.counted,
+        ir: p.ir,
+        status: p.row.status,
         line: p.line,
         min: p.min,
         onCourt: p.onCourt,
@@ -369,7 +384,7 @@ export default function GameDayView(props: Props) {
         (b.value ?? 0) - (a.value ?? 0) ||
         gameOrder(a.game) - gameOrder(b.game)
     );
-  }, [games, gd, nights, ownerOf, owners, teamAbbrevs, youAbbrev, oppAbbrev]);
+  }, [games, gd, nights, ownerOf, owners, statuses, teamAbbrevs, youAbbrev, oppAbbrev]);
 
   const nameOfId = useMemo(() => {
     const m = new Map<string, string>();
@@ -452,6 +467,19 @@ export default function GameDayView(props: Props) {
               {pp(nowShare - startShare)} tonight
             </span>
           )}
+          {/* Expected categories won (owner, 2026-10-30), with tonight's change beside it
+              the same way as the win %. */}
+          <span className="gd-top-xcats">
+            <b className="mono">{winNow.expectedCats.toFixed(1)}</b> xCats
+            {impact.start && (() => {
+              const d = winNow.expectedCats - impact.start.expectedCats;
+              return (
+                <span className={`gd-delta mono ${d > 0.05 ? "up" : d < -0.05 ? "dn" : ""}`}>
+                  {`${d >= 0 ? "+" : ""}${d.toFixed(1)}`} tonight
+                </span>
+              );
+            })()}
+          </span>
         </span>
       </div>
 
@@ -843,7 +871,8 @@ function BoxTable({
                       )}
                       <PlayerLink name={r.name} />
                       <span className="gd-team">{r.team}</span>
-                      {!r.counted && <span className="gd-tag">Bench</span>}
+                      <StatusBadge status={r.status} />
+                      {!r.counted && <span className="gd-tag">{r.ir ? "IR" : "Bench"}</span>}
                     </td>
                     <td>
                       <span className={`gd-owner ${r.owner}`}>{r.ownerTag}</span>
@@ -902,8 +931,9 @@ function PlayerCard({ r }: { r: BoxRow }) {
           <PlayerLink name={r.name} />
         </span>
         <span className="gd-team">{r.team}</span>
+        <StatusBadge status={r.status} />
         <span className={`gd-owner ${r.owner}`}>{r.ownerTag}</span>
-        {!r.counted && <span className="gd-tag">Bench</span>}
+        {!r.counted && <span className="gd-tag">{r.ir ? "IR" : "Bench"}</span>}
         {r.value != null && (
           <span className="gd-pc-gs mono" title="Game Score">
             {`${r.value >= 0 ? "+" : ""}${r.value.toFixed(1)}`}

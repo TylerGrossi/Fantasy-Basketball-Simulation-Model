@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type DragEvent } from "react";
+import { Fragment, useMemo, useState, type DragEvent } from "react";
+import { careerOrder } from "@/lib/catOrder";
 import { categoryValue, formatValue } from "@/lib/league";
 import { headshotUrl, playerStatus } from "@/lib/playerPool";
 import PlayerLink from "./PlayerLink";
@@ -36,10 +37,12 @@ interface Props {
 /** The columns ESPN shows that this export can actually fill. */
 const SHOOTING: Array<[string, string, string]> = [
   ["FG", "FGM", "FGA"],
-  ["FT", "FTM", "FTA"],
   ["3PT", "3PM", "3PA"],
+  ["FT", "FTM", "FTA"],
 ];
-const COUNTING = ["REB", "AST", "STL", "BLK", "TO", "DD", "PTS", "TW"];
+// Career order (lib/catOrder.ts): the headline line, the shooting, then the rest.
+const HEADLINE = ["PTS", "REB", "AST", "STL", "BLK"];
+const TRAILING = ["TO", "DD", "TW"];
 
 /**
  * Which 9-cat number the board ranks and totals by.
@@ -491,7 +494,7 @@ export default function LineupView({
             of the best available ten. Green/red is vs that benchmark, not an opponent. */}
         <h3 className="lu-rail-h">Projected per game</h3>
         <div className="lu-totals">
-          {categories.map((c) => {
+          {careerOrder(categories).map((c) => {
             const v = totals[c] ?? 0;
             const b = bestTotals[c] ?? 0;
             const d = v - b;
@@ -674,15 +677,18 @@ function DetailTable({
             <tr>
               <th>Player</th>
               <th>Pos</th>
-              {SHOOTING.map(([label]) => (
-                <th key={label} className="num">
-                  {label}
+              {HEADLINE.map((c) => (
+                <th key={c} className="num">
+                  {c}
                 </th>
               ))}
-              <th className="num">FG%</th>
-              <th className="num">FT%</th>
-              <th className="num">3P%</th>
-              {COUNTING.map((c) => (
+              {SHOOTING.map(([label]) => (
+                <Fragment key={label}>
+                  <th className="num">{label}</th>
+                  <th className="num">{label === "3PT" ? "3P" : label}%</th>
+                </Fragment>
+              ))}
+              {TRAILING.map((c) => (
                 <th key={c} className="num">
                   {c}
                 </th>
@@ -705,15 +711,18 @@ function DetailTable({
                   {p.injured && <span className="tag">{p.status || "OUT"}</span>}
                 </td>
                 <td className="lu-pos">{positionLabel(p)}</td>
-                {SHOOTING.map(([label, made, att]) => (
-                  <td key={label} className="num">
-                    {pair(p, made, att)}
+                {HEADLINE.map((c) => (
+                  <td key={c} className="num">
+                    {(p.avg[idx[c]] ?? 0).toFixed(1)}
                   </td>
                 ))}
-                <td className="num">{pct(p, "FGM", "FGA")}</td>
-                <td className="num">{pct(p, "FTM", "FTA")}</td>
-                <td className="num">{pct(p, "3PM", "3PA")}</td>
-                {COUNTING.map((c) => (
+                {SHOOTING.map(([label, made, att]) => (
+                  <Fragment key={label}>
+                    <td className="num">{pair(p, made, att)}</td>
+                    <td className="num">{pct(p, made, att)}</td>
+                  </Fragment>
+                ))}
+                {TRAILING.map((c) => (
                   <td key={c} className="num">
                     {(p.avg[idx[c]] ?? 0).toFixed(1)}
                   </td>

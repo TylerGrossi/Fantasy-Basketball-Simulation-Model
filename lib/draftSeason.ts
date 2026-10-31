@@ -75,9 +75,29 @@ export function neutralRows(data: DraftData): DraftRow[] {
   });
 }
 
+/**
+ * The draft as it was saved after it happened (scripts/freeze_draft_recap.mjs), or null
+ * before that. The draft is final, so once this file exists nothing re-fetches ESPN or
+ * re-simulates: the recap shows the draft-night projection forever (owner, 2026-10-30).
+ */
+export interface FrozenDraft {
+  frozenAt: string;
+  feed: DraftFeed;
+  results: SeasonResult[];
+}
+export async function loadFrozenDraft(): Promise<FrozenDraft | null> {
+  try {
+    const file = path.join(process.cwd(), "public", "data", "draft-recap.json");
+    return JSON.parse(await readFile(file, "utf8")) as FrozenDraft;
+  } catch {
+    return null;
+  }
+}
+
 /** The graded draft, or null when ESPN has not published picks yet. */
 export async function getDraftSeason(): Promise<DraftSeason | null> {
-  const feed = await fetchDraftFeed();
+  const frozen = await loadFrozenDraft();
+  const feed = frozen?.feed ?? (await fetchDraftFeed());
   if (!feed.picks.length) return null;
   const data = await loadDraftData();
   const key =
@@ -122,7 +142,7 @@ export async function getDraftSeason(): Promise<DraftSeason | null> {
   );
   const drafted = new Set(feed.picks.map((p) => p.playerId));
   const repl = replacementLine(rows.filter((r) => r.playerId == null || !drafted.has(r.playerId)));
-  const results = simulateSeason(
+  const results = frozen?.results ?? simulateSeason(
     rosters,
     league.schedule ?? [],
     league.categories,

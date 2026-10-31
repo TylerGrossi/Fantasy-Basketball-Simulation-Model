@@ -290,11 +290,6 @@ export default function InjuryLog({
     <section className="pd-sheet">
       <div className="pd-sheet-h">
         <h2>Availability</h2>
-        {report && report.total > 0 && (
-          <span className="pd-sheet-n">
-            {report.played} of {report.total} team games
-          </span>
-        )}
       </div>
       <div>
         {state === "loading" && <p className="pd-sheet-note">Loading…</p>}

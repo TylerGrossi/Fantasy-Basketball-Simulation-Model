@@ -76,19 +76,29 @@ export default function UsageEfficiency({
     // Qualified players only: a four-game cameo at 90% true shooting is not a data point
     // about the trade-off, it is a data point about small samples.
     const qualified = pool.filter((p) => gamesFor(p, "Regular") >= MIN_GP.Regular);
-    const pts: Pt[] = qualified.map((p) => ({
+    const all: Pt[] = qualified.map((p) => ({
       name: p.name,
       x: usage(p),
       y: efficiency(p),
       value: p.value,
       gp: p.gp ?? 0,
     }));
+    // He is drawn once, as the blue dot, FROM HIS POOL ROW — the same line every other
+    // card plots him with. The card hands in his this-season-only line, which early in a
+    // season differs from the pool's blended row: he showed up as two dots, then jumped
+    // to a new spot when you clicked his grey dot on someone else's card (owner,
+    // 2026-10-30). Plotting both from the pool row keeps him in one place everywhere.
+    const own =
+      pool.find((p) =>
+        player.playerId != null ? p.playerId === player.playerId : p.name === player.name
+      ) ?? player;
+    const pts = all.filter((p) => p.name !== player.name);
     const me: Pt = {
       name: player.name,
-      x: usage(player),
-      y: efficiency(player),
-      value: player.value,
-      gp: player.gp ?? 0,
+      x: usage(own),
+      y: efficiency(own),
+      value: own.value,
+      gp: own.gp ?? 0,
     };
     const xs = [...pts.map((p) => p.x), me.x];
     const ys = [...pts.map((p) => p.y), me.y];
@@ -105,8 +115,8 @@ export default function UsageEfficiency({
         y0: Math.min(...ys) * 0.94,
         y1: Math.max(...ys) * 1.04,
       },
-      mx: mid(pts.map((p) => p.x)),
-      my: mid(pts.map((p) => p.y)),
+      mx: mid(all.map((p) => p.x)),
+      my: mid(all.map((p) => p.y)),
     };
   }, [player, pool]);
 
@@ -149,7 +159,6 @@ export default function UsageEfficiency({
     <section className="pd-sheet pd-desktop-only">
       <div className="pd-sheet-h">
         <h2>Volume vs Efficiency</h2>
-        <span className="pd-sheet-n">{quadrant(me)}</span>
       </div>
 
       <div>
@@ -200,7 +209,27 @@ export default function UsageEfficiency({
             />
           ))}
 
-          {/* Whoever is hovered, promoted out of the cloud and NAMED where he sits.
+          {/* Him. The one mark that is allowed to be loud, and always named. */}
+          <circle
+            cx={px(me.x)}
+            cy={py(me.y)}
+            r={5.5}
+            fill="var(--cobalt)"
+            stroke="var(--card)"
+            strokeWidth={2}
+          />
+          <text
+            className="pd-ue-tag pd-ue-tag-me"
+            x={px(me.x) + (px(me.x) > W * 0.72 ? -10 : 10)}
+            y={py(me.y) + 3.5}
+            textAnchor={px(me.x) > W * 0.72 ? "end" : "start"}
+          >
+            {me.name}
+          </text>
+
+          {/* Whoever is hovered, promoted out of the cloud and NAMED where he sits. Drawn
+              AFTER him, so a hovered player near him sits on top rather than under his
+              dot and label (owner, 2026-10-30).
               Labelling in place is the whole reason the side panel could go: the answer
               appears at the point you are pointing at, not in a column across the card. */}
           {hover && hover.name !== me.name && (
@@ -223,24 +252,6 @@ export default function UsageEfficiency({
               </text>
             </>
           )}
-
-          {/* Him. The one mark that is allowed to be loud, and always named. */}
-          <circle
-            cx={px(me.x)}
-            cy={py(me.y)}
-            r={5.5}
-            fill="var(--cobalt)"
-            stroke="var(--card)"
-            strokeWidth={2}
-          />
-          <text
-            className="pd-ue-tag pd-ue-tag-me"
-            x={px(me.x) + (px(me.x) > W * 0.72 ? -10 : 10)}
-            y={py(me.y) + 3.5}
-            textAnchor={px(me.x) > W * 0.72 ? "end" : "start"}
-          >
-            {me.name}
-          </text>
 
           {/* Axes. Ticks are round numbers so the grid reads without being drawn. */}
           <line x1={PAD_L} y1={H - PAD_B} x2={W - PAD_R} y2={H - PAD_B} stroke="var(--line-strong)" strokeWidth={1} />

@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AcquisitionSummary, LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeStreamers } from "@/lib/streamers";
+import { makeOddsSimulator, type Odds, type SeasonContext, type SimPlayer } from "@/lib/playoffOdds";
+import { categoryProbabilities } from "@/lib/probability";
 import { dayLabel } from "@/lib/dates";
 import { useMoveWindow } from "@/lib/useMoveWindow";
 import { useLiveSides } from "@/lib/useLiveSides";
@@ -27,23 +29,81 @@ interface Props {
    * export could not work it out.
    */
   acq?: AcquisitionSummary;
+  /** Rosters, schedule and records for the playoff / title odds (lib/playoffOdds.ts). */
+  season?: SeasonContext | null;
 }
 
 const SHOWN = ["PTS", "REB", "AST", "3PM", "STL", "BLK"];
 
+// Every header explains itself on hover (owner, 2026-10-30).
 const STREAMER_COLS: SortCol[] = [
-  { key: "rank", label: "#", num: true },
-  { key: "add", label: "Add" },
-  { key: "nba", label: "NBA" },
-  { key: "gl", label: "GL", num: true },
-  { key: "netGames", label: "Δ Games", num: true },
-  { key: "games", label: "Games" },
-  { key: "deltaCats", label: "Δ Cats", num: true },
-  { key: "deltaWin", label: "Δ Win %", num: true },
-  { key: "drop", label: "Drop" },
-  // The pickup's 9-cat value, same scale as the Roster tab's Value column.
-  { key: "value", label: "Value", num: true },
-  ...SHOWN.map((s) => ({ key: s, label: s, num: true })),
+  {
+    key: "rank",
+    label: "#",
+    num: true,
+    title: "Best move first: this week's Δ Cats plus the Season Δ Cats.",
+  },
+  { key: "add", label: "Add", title: "The free agent to pick up." },
+  { key: "nba", label: "NBA", title: "His NBA team." },
+  {
+    key: "gl",
+    label: "GL",
+    num: true,
+    title: "Games left: the games he can still play this week if you add him now.",
+  },
+  {
+    key: "netGames",
+    label: "Δ Games",
+    num: true,
+    title:
+      "Change in games your lineup actually plays this week: his starts, minus the drop's, minus any starter he pushes to the bench on a full day.",
+  },
+  { key: "games", label: "Games", title: "The days he plays this week." },
+  {
+    key: "deltaCats",
+    label: "Δ Cats",
+    num: true,
+    title:
+      "This week only: how many more categories you are expected to win this matchup if you make the move. +0.30 = about a third of a category.",
+  },
+  {
+    key: "season",
+    label: "Season Δ Cats",
+    num: true,
+    title:
+      "The rest of the regular season: how many more categories you are expected to win, in total over every week after this one, with the pickup on your roster instead of the drop. Negative = the drop is the better player, and you lose that much by letting him go.",
+  },
+  {
+    key: "deltaWin",
+    label: "Δ Win %",
+    num: true,
+    title: "Change in your chance of winning this week's matchup, in percentage points.",
+  },
+  {
+    key: "dPlayoff",
+    label: "Δ Playoff",
+    num: true,
+    title:
+      "How much the move changes your playoff chance, in percentage points: this week's result and every week after it, with the pickup instead of the drop.",
+  },
+  {
+    key: "dChamp",
+    label: "Δ Champ",
+    num: true,
+    title: "How much the move changes your title chance, in percentage points.",
+  },
+  {
+    key: "drop",
+    label: "Drop",
+    title: "Who to release to make room: the one that leaves you best off this week and for the season.",
+  },
+  {
+    key: "value",
+    label: "Value",
+    num: true,
+    title: "The pickup's season value, the same scale as the Roster and Player Value pages.",
+  },
+  ...SHOWN.map((s) => ({ key: s, label: s, num: true, title: `The pickup's ${s} per game.` })),
 ];
 
 export default function StreamersView({
@@ -53,6 +113,7 @@ export default function StreamersView({
   teamId,
   live: liveEnabled = true,
   acq,
+  season,
 }: Props) {
   // Live totals + each side's projection minus the games those totals already count.
   const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
@@ -110,16 +171,38 @@ export default function StreamersView({
     [league.weekSchedule, moveDates, teams, slots]
   );
 
+  /*
+   * The rest of the season, so a drop is charged for every week after this one (see
+   * SeasonHorizon in lib/streamers.ts). 3.5 games is a typical NBA week.
+   */
+  const horizon = useMemo(
+    () => ({
+      weeks: Math.max(0, (league.regularSeasonWeeks ?? 0) - league.period),
+      gamesPerWeek: 3.5,
+    }),
+    [league.regularSeasonWeeks, league.period]
+  );
+  /*
+   * Never a drop: players you protected, and anyone in an IR slot — dropping him frees
+   * an IR spot, not a bench spot, so there is still nowhere to put the pickup.
+   */
+  const noDrop = useMemo(() => {
+    const out = new Set(untouchable);
+    for (const t of live.youToday ?? []) if (t.slot === 13) out.add(t.name);
+    return out;
+  }, [untouchable, live.youToday]);
+
   // Recomputed on every toggle, in milliseconds, with no server round trip. This is the
   // whole point of moving the maths client-side.
   const { baseline, results } = useMemo(
     () =>
       analyzeStreamers(pickupLeague, you.players, youMoments, oppMoments, {
         hasOpenSpot: openSpot,
-        untouchables: untouchable,
+        untouchables: noDrop,
         daily,
+        horizon,
       }),
-    [pickupLeague, you.players, youMoments, oppMoments, openSpot, untouchable, daily]
+    [pickupLeague, you.players, youMoments, oppMoments, openSpot, noDrop, daily, horizon]
   );
   const addsLeft = acq ? Math.max(0, acq.max - acq.used) : null;
 
@@ -133,12 +216,66 @@ export default function StreamersView({
     Object.values(league.weekSchedule?.teams ?? {}).some((t) => t[d])
   );
   const activeDays = pickedDays.filter((d) => dayOptions.includes(d));
-  const shown = activeDays.length
+  const onDays = activeDays.length
     ? results.filter((r) => {
         const plays = new Set(gameDates(r.add.nbaTeam));
         return activeDays.every((d) => plays.has(d));
       })
     : results;
+  const shown = onDays;
+
+  /*
+   * PLAYOFF / TITLE ODDS per move (lib/playoffOdds.ts). The simulator is built once per
+   * roster set; the baseline and each move are then ~10ms apiece, run in small batches
+   * after paint so the table appears at once and the odds fill in over about a second.
+   */
+  const sim = useMemo(
+    () => (season ? makeOddsSimulator(league, season, teamId) : null),
+    [season, league, teamId]
+  );
+  const simPlayer = (name: string, avg: number[], value?: number): SimPlayer =>
+    season?.players[name] ?? { v: avg, value: value ?? 0 };
+  const [odds, setOdds] = useState<{ base: Odds; byMove: Map<string, Odds> } | null>(null);
+  const moveKey = (r: (typeof results)[number]) => `${r.add.name}|${r.drop?.name ?? ""}`;
+  useEffect(() => {
+    if (!sim) return;
+    let alive = true;
+    const mine = you.players.map((p) => simPlayer(p.name, p.avg, p.value));
+    const base = sim(mine, categoryProbabilities(league, youMoments, oppMoments));
+    const byMove = new Map<string, Odds>();
+    setOdds({ base, byMove: new Map(byMove) });
+    let i = 0;
+    let timer = 0 as unknown as ReturnType<typeof setTimeout>;
+    const step = () => {
+      if (!alive) return;
+      for (const end = Math.min(results.length, i + 8); i < end; i++) {
+        const r = results[i];
+        const roster = [
+          ...you.players
+            .filter((p) => p.name !== r.drop?.name)
+            .map((p) => simPlayer(p.name, p.avg, p.value)),
+          simPlayer(r.add.name, r.add.avg, r.add.value),
+        ];
+        byMove.set(moveKey(r), sim(roster, categoryProbabilities(league, r.weekMoments, oppMoments)));
+      }
+      setOdds({ base, byMove: new Map(byMove) });
+      if (i < results.length) timer = setTimeout(step, 0);
+    };
+    timer = setTimeout(step, 0);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sim, results, you.players, oppMoments, youMoments]);
+  // The change this model's simulation measures for the move, in percentage points.
+  const shownOdds = (r: (typeof results)[number]) => {
+    const o = odds?.byMove.get(moveKey(r));
+    if (!o || !odds) return null;
+    const dP = o.playoff - odds.base.playoff;
+    const dC = o.champ - odds.base.champ;
+    return { dP, dC };
+  };
 
   const anyGamesLeft = pickupLeague.freeAgents.some((f) => f.gamesLeft > 0);
 
@@ -177,9 +314,12 @@ export default function StreamersView({
               />
               I have an open roster spot
             </label>
+
             <span className="caption" style={{ margin: 0 }}>
               Baseline: {baseline.expectedCats.toFixed(1)} expected cats ·{" "}
               {(baseline.win * 100).toFixed(0)}% win
+              {season?.baseline &&
+                ` · ${season.baseline.playoff.toFixed(1)}% playoffs · ${season.baseline.champ.toFixed(1)}% title`}
             </span>
             {acq && (
               <span
@@ -200,16 +340,16 @@ export default function StreamersView({
           {/* About ten rows tall, scrolling inside itself (owner, 2026-10-20): the full
               candidate list made this section the longest on the one-page matchup. The
               header row stays pinned while the rows scroll under it. Sortable on every
-              column; opens on Δ Cats, the order analyzeStreamers ranks by, and # keeps
+              column; opens on Net, the order analyzeStreamers ranks by, and # keeps
               that rank whatever the current sort. */}
-          {activeDays.length > 0 && shown.length === 0 && (
+          {activeDays.length > 0 && onDays.length === 0 && (
             <p className="caption">
               No free agent plays on all of {activeDays.map(dayLabel).join(", ")}.
             </p>
           )}
           <SortableTable
             scrollClassName="st-scroll"
-            defaultKey="deltaCats"
+            defaultKey="dPlayoff"
             cols={STREAMER_COLS}
             rows={shown.map((r, i): SortRow => {
               // Net games your lineup gains — the count the Δ Cats maths used: the
@@ -241,11 +381,31 @@ export default function StreamersView({
                     text: dates,
                     node: <span style={{ whiteSpace: "nowrap" }}>{dates}</span>,
                   },
+                  ...(() => {
+                    const o = shownOdds(r);
+                    const tone = (d: number) =>
+                      d > 0.05 ? "var(--good)" : d < -0.05 ? "var(--bad)" : "var(--ink-3)";
+                    if (!o) {
+                      const wait = { sort: -Infinity, text: "…", color: "var(--ink-3)" };
+                      return { dPlayoff: wait, dChamp: wait };
+                    }
+                    // Only the change (owner, 2026-10-30); your current odds are in the
+                    // header line above the table.
+                    return {
+                      dPlayoff: { sort: o.dP, text: signed(o.dP, 1), color: tone(o.dP) },
+                      dChamp: { sort: o.dC, text: signed(o.dC, 1), color: tone(o.dC) },
+                    };
+                  })(),
                   deltaCats: {
                     sort: r.deltaCats,
                     text: signed(r.deltaCats, 2),
                     color: r.deltaCats > 0 ? "var(--good)" : "var(--ink-3)",
-                    node: r.deltaCats > 0 ? <strong>{signed(r.deltaCats, 2)}</strong> : undefined,
+                  },
+                  // Shown as a GAIN, same sign as Δ Cats, so Net is simply the sum of the two.
+                  season: {
+                    sort: -r.seasonCost,
+                    text: r.drop ? signed(-r.seasonCost, 2) : "—",
+                    color: r.seasonCost < 0 ? "var(--good)" : r.seasonCost > 0 ? "var(--bad)" : "var(--ink-3)",
                   },
                   deltaWin: {
                     sort: r.deltaWinPct,

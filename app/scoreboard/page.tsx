@@ -8,11 +8,13 @@ import StreamersView from "@/components/StreamersView";
 import WeekPlanner from "@/components/WeekPlanner";
 import { forecastFor, winProbHistory } from "@/lib/predictions";
 import ScoreboardTabs from "@/components/ScoreboardTabs";
+import SectionHash from "@/components/SectionHash";
 import { buildWeekRecap } from "@/components/WeekRecap";
 import WeekSelect from "@/components/WeekSelect";
 import LiveSeed from "@/components/LiveSeed";
 import { liveSeed } from "@/lib/liveMatchup";
 import { periodLabel } from "@/lib/league";
+import { buildSeasonContext } from "@/lib/playoffOdds";
 import {
   loadBoxScores,
   loadPredictions,
@@ -160,6 +162,13 @@ export default async function Page({
    * One trimmed league (with free agents, for Streamers) is handed to all of them.
    */
   const deckLeague = trimLeague(league, { matchupTeamId: me.id, freeAgents: true });
+  // The Streamers table's playoff / title odds: every roster and the remaining schedule,
+  // compact — only your roster's and the free agents' lines, not the whole pool.
+  const mySide = r.isHome ? r.matchup.home : r.matchup.away;
+  const seasonCtx = buildSeasonContext(league, me.id, [
+    ...mySide.players.map((p) => p.name),
+    ...league.freeAgents.map((f) => f.name),
+  ]);
   const you = r.isHome ? r.matchup.home : r.matchup.away;
   const oppSide = r.isHome ? r.matchup.away : r.matchup.home;
   const preWeekLog = await loadPredictions();
@@ -193,6 +202,9 @@ export default async function Page({
         <a href="#bench">Bench</a>
       </nav>
       </div>
+      {/* Each section's own address: /scoreboard#streamers etc. The URL follows your
+          scroll, and opening one (or coming back to it) lands on that section. */}
+      <SectionHash ids={SECTION_IDS} />
 
       <section id="scoreboard" className="cm-sec">
         <Scoreboard
@@ -281,6 +293,7 @@ export default async function Page({
           isHome={r.isHome}
           teamId={me.id}
           acq={youAcq}
+          season={seasonCtx}
         />
       </section>
 
@@ -309,6 +322,9 @@ export default async function Page({
     </LiveSeed>
   );
 }
+
+/** The page's sections, top to bottom — the ids the jump links and SectionHash use. */
+const SECTION_IDS = ["scoreboard", "odds", "projections", "streamers", "planner", "bench"];
 
 /**
  * The weeks this team actually played, newest last.

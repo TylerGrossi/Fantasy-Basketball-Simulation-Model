@@ -68,7 +68,6 @@ export default function SimilarPlayers({
     <section className="pd-sheet">
       <div className="pd-sheet-h">
         <h2>Similar Players</h2>
-        <span className="pd-sheet-n">by category profile</span>
       </div>
 
       {/*

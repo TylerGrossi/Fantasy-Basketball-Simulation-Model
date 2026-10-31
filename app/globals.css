@@ -5416,6 +5416,95 @@ table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
 }
 .rm-team { color: var(--ink-2); }
 
+/* ---- Recent Moves: team strip + Transactions format (owner, 2026-10-30) ---- */
+.rm-strip {
+  display: grid;
+  /* Four across, so the 8-team league is two even rows (owner, 2026-10-30). */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+}
+@media (max-width: 1100px) and (min-width: 768px) {
+  .rm-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.rm-ts {
+  font: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.rm-ts:hover { border-color: var(--line-strong); }
+.rm-ts-on { border-color: var(--cobalt); background: var(--cobalt-soft); }
+.rm-ts-name { font-weight: 700; font-size: 0.86rem; margin-bottom: 0.15rem; }
+.rm-ts-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--ink-2);
+  min-width: 0;
+}
+.rm-ts-row > span:first-child { flex: none; width: 4.2rem; color: var(--ink-3); }
+.rm-ts-row b { margin-left: auto; font-size: 0.72rem; white-space: nowrap; }
+.rm-ts-swap { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-none { color: var(--ink-3); }
+
+.rm-view { align-self: flex-end; }
+table.sheet.rm-pairs { table-layout: fixed; min-width: 60rem; }
+table.sheet.rm-pairs th:nth-child(1) { width: 9rem; }
+table.sheet.rm-pairs th:nth-child(2) { width: 12rem; }
+table.sheet.rm-pairs th:nth-child(5),
+table.sheet.rm-pairs th:nth-child(6),
+table.sheet.rm-pairs th:nth-child(7) { width: 6.5rem; }
+table.sheet.rm-pairs td { vertical-align: top; }
+.rm-plist { display: flex; flex-direction: column; gap: 0.15rem; }
+.rm-pl { display: flex; align-items: baseline; gap: 0.45rem; min-width: 0; }
+.rm-pl > a { min-width: 0; overflow: hidden; }
+
+/* FitText (components/FitText.tsx): full text, or "J. Poeltl" once it would be cut off.
+   Its own box carries the ellipsis in case even the short form does not fit. */
+.fit-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.rm-pl-v { font-size: 0.7rem; color: var(--ink-3); }
+.rm-card-net { margin-left: 0.6rem; font-weight: 700; }
+
+/* The table scrolls inside its own box, not the page (owner, 2026-10-30): it takes the
+   height left under the title, team cards and filters (~29rem), never under 20rem, with
+   the header row pinned while the rows move under it. */
+.rm-scroll {
+  max-height: max(20rem, calc(100dvh - 29.75rem));
+  overflow-y: auto;
+}
+.rm-scroll table.sheet thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+@media (max-width: 767px) {
+  .rm-strip {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 0.2rem;
+  }
+  .rm-ts { flex: 0 0 82%; scroll-snap-align: start; }
+}
+
 /* ---- Similar Players: a card per neighbour ------------------------------------
    Replaced a ten-column table. The panel answers "who else plays like him", and the answer
    is a name plus how close — the category columns were the working, not the result. */
@@ -5425,8 +5514,8 @@ table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
   align-items: center;
   justify-content: space-between;
   gap: 0.6rem;
-  min-height: 48px;
-  padding: 0.45rem 0.65rem;
+  min-height: 44px;
+  padding: 0.35rem 0.6rem;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -5437,14 +5526,14 @@ table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
 .pd-sim-card:hover { border-color: var(--cobalt); }
 .pd-sim-who { min-width: 0; display: grid; gap: 0.05rem; }
 .pd-sim-name {
-  font-size: 0.9rem;
+  font-size: 0.84rem;
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pd-sim-meta {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5453,7 +5542,7 @@ table.sheet.rm-table td { overflow: hidden; text-overflow: ellipsis; }
 /* The match figure is the headline; it gets the size the name would otherwise have. */
 .pd-sim-pct {
   flex: none;
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 700;
   color: var(--cobalt);
   font-variant-numeric: tabular-nums;
@@ -6904,6 +6993,44 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
 .pd-gl thead th { position: sticky; top: 0; z-index: 1; }
 .pd-gl-res { color: var(--ink-3); }
 
+/* Career tab. 26 columns, so the Season column is frozen while the rest scroll under it
+   (same treatment as .rc-box). Category headers in ink, the other box-score columns in
+   grey — the fifteen league categories read out of the header row on their own. */
+table.sheet.pd-cs { table-layout: fixed; }
+table.sheet.pd-cs th,
+table.sheet.pd-cs td { padding-left: 0.5rem; padding-right: 0.5rem; }
+table.sheet.pd-cs th:first-child,
+table.sheet.pd-cs td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card);
+}
+table.sheet.pd-cs thead th:first-child { background: var(--surface-2); z-index: 3; }
+table.sheet.pd-cs tbody th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: 0;
+  text-transform: none;
+  background: var(--card);
+  border-bottom: 1px solid var(--line-2);
+  padding: 0.42rem 0.5rem;
+}
+table.sheet.pd-cs thead th { color: var(--ink-3); }
+table.sheet.pd-cs thead th.pd-cs-cat { color: var(--ink); }
+table.sheet.pd-cs .pd-cs-part th,
+table.sheet.pd-cs .pd-cs-part td { color: var(--ink-2); }
+.pd-cs-sum tr:first-child th,
+.pd-cs-sum tr:first-child td { border-top: 2px solid var(--line-strong); }
+table.sheet.pd-cs .pd-cs-sum th,
+table.sheet.pd-cs .pd-cs-sum td { background: var(--surface-2); }
+table.sheet.pd-cs .pd-cs-career th,
+table.sheet.pd-cs .pd-cs-career td { font-weight: 700; }
+.pd-cs-note { margin: 0.55rem 0 0; font-size: 0.7rem; color: var(--ink-3); line-height: 1.45; }
+
 @media (max-width: 767px) {
   .pd-sheet { padding: 0.85rem 0.8rem 0.95rem; }
   .pd-sheet-scroll { max-height: 20rem; }
@@ -6927,6 +7054,9 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
    top edge with dead space under it. */
 .pd-sheet-two > .pd-sheet { display: flex; flex-direction: column; }
 .pd-sheet-two .pd-shape { flex: 1; justify-content: center; }
+/* Similar Players fills the card's height: the five rows share it equally, so the list
+   ends level with Category Shape beside it instead of leaving a blank lower half. */
+.pd-sheet-two .pd-sim-list { flex: 1; grid-auto-rows: 1fr; }
 .pd-split-cols {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6983,7 +7113,7 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
   height: auto;
   /* Bounded by the card, never by its own intrinsic size — the viewBox is
      square, so an unbounded width becomes an equally unbounded height. */
-  max-width: min(21rem, 100%);
+  max-width: min(17rem, 100%);
   margin: 0 auto;
 }
 .pd-shape-ax {
@@ -7636,7 +7766,9 @@ table.sheet.sheet-tight th:last-child .th-sort { padding-right: 0.7rem; }
   font-size: 0.82rem;
 }
 .lh-me-week:hover { box-shadow: inset 0 0 0 1px var(--cobalt); }
-.lh-me-week-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-me-week-l { min-width: 0; display: flex; flex-direction: column; gap: 0.05rem; }
+.lh-me-week-k { font-size: 0.68rem; color: var(--ink-2); }
+.lh-me-week-opp { font-weight: 600; overflow-wrap: anywhere; }
 .lh-me-week-r { display: flex; flex-direction: column; align-items: flex-end; flex: 0 0 auto; }
 .lh-me-win { font-size: 0.68rem; color: var(--cobalt); }
 .lh-inj { margin-top: 0.85rem; }
@@ -8195,6 +8327,15 @@ table.sheet.ws-table tfoot tr.pl-foot-base td { border-top: 0; font-weight: 400;
 .gd-top-odds { margin-left: auto; font-size: 0.85rem; color: var(--ink-2); display: flex; gap: 0.5rem; align-items: baseline; }
 .gd-top-odds b { font-size: 1.15rem; color: var(--cobalt); }
 .gd-delta { font-weight: 700; font-size: 0.8rem; }
+/* xCats sits after the win %, set off by a hairline so the two read as two numbers. */
+.gd-top-xcats {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-left: 0.4rem;
+  padding-left: 0.9rem;
+  border-left: 1px solid var(--line);
+}
 
 /* ---- the scoreboard: Current Matchup's, untouched, with its spacing trimmed ---- */
 .gd-board { flex: none; }

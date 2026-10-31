@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { DraftFeedError, fetchDraftFeed } from "@/lib/espnDraft";
+import { loadFrozenDraft } from "@/lib/draftSeason";
 
 /**
  * The live draft feed for the Draft Guide: every pick made so far in the draft league,
@@ -15,7 +16,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return NextResponse.json(await fetchDraftFeed());
+    // After the draft the saved feed is the answer (scripts/freeze_draft_recap.mjs).
+    const frozen = await loadFrozenDraft();
+    return NextResponse.json(frozen?.feed ?? (await fetchDraftFeed()));
   } catch (e) {
     const status = e instanceof DraftFeedError ? e.status : 502;
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status });

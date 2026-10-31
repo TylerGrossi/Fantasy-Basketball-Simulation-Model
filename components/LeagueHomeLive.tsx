@@ -134,7 +134,12 @@ export function LiveMyWeek({
   const side = sideOf(s, meId);
   return (
     <Link href="/scoreboard" className="lh-me-week">
-      <span className="lh-me-week-l">This week vs {teamNames[side.oppId]}</span>
+      {/* Two lines, so the opponent's name is never cut off (owner, 2026-10-30): on one
+          line with an ellipsis, "This week vs Ryan's Rowdy T…" lost the part that matters. */}
+      <span className="lh-me-week-l">
+        <span className="lh-me-week-k">This week vs</span>
+        <span className="lh-me-week-opp">{teamNames[side.oppId]}</span>
+      </span>
       <span className="lh-me-week-r">
         <b className="mono">{side.rec}</b>
         <span className="lh-me-win mono">{pct(side.win)} to win</span>
