@@ -414,7 +414,12 @@ export default function GameDayView(props: Props) {
   const liveIds = new Set(games.filter((g) => g.state === "in").map((g) => g.id));
   const isLive = (gameId: string | undefined) =>
     !liveOnly || (gameId != null && liveIds.has(gameId));
-  const rows = box.filter((r) => inFocus(r.game?.id) && isLive(r.game?.id) && passes(r.owner));
+  // OUT/IR/suspended and no minutes (owner, 2026-10-31): a row of zeros for a player who is
+  // sitting says nothing. Minutes win over the status, so a stale tag never hides a real line.
+  const sitting = (r: BoxRow) => !r.min && playerStatus(r.status)[1] === "out";
+  const rows = box.filter(
+    (r) => inFocus(r.game?.id) && isLive(r.game?.id) && passes(r.owner) && !sitting(r)
+  );
   // Players off tonight are not in a live game, so they drop out with the Live filter.
   const offTonight = (
     liveOnly ? [] : filter === "matchup"
