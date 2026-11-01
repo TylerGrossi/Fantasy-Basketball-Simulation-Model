@@ -118,6 +118,16 @@ def espn_stat_ids():
     return {s: int(by_name[s]) for s in STATS}
 
 
+def espn_stat_ids_raw():
+    """Every stat name -> ESPN's id as the string key raw `stats` dicts use (GP is "42")."""
+    from espn_api.basketball import constant as espn_const
+
+    by_name = {}
+    for sid, name in espn_const.STATS_MAP.items():
+        by_name.setdefault(str(name), str(sid))
+    return by_name
+
+
 def _round(x, n=4):
     """JSON-safe float. NaN/inf would serialise as invalid JSON and break the client."""
     try:
@@ -1287,6 +1297,103 @@ def fetch_transaction_counters(league):
     return out
 
 
+def fetch_daily_counts(league, workers=8):
+    """
+    Two per-team counters built from each completed day's actual roster, summed over the
+    season:
+
+    - `gamesMissed`: NBA games a rostered player's team PLAYED that he did not. Every
+      roster spot counts, IR and bench included: an injured player stashed on the bench
+      is exactly the case worth seeing.
+    - `benchGames`: games a player PLAYED while sitting in a Bench slot, counted only on
+      days the team had no more players playing than it has starting slots (10 in this
+      league). On a day with 11+ players playing someone has to sit, so those benchings
+      aren't a lineup mistake and aren't counted.
+
+    `gamesMissed` is not strictly "games missed to injury", and it can't be. ESPN keeps
+    no history of injury status: a past scoring period's roster carries the player's
+    CURRENT `injuryStatus` (Ivica Zubac read OUT on day 4 of 2026-27, a day he played),
+    and the roster entry's own `injuryStatus` is "NORMAL" on every row. So rest days and
+    coach's decisions are in here too - for players good enough to be rostered in a
+    fantasy league those are a small share next to injuries.
+
+    `benchGames` ignores position eligibility: with 10 or fewer playing, it assumes each
+    benched player could have filled an open spot. The UTIL slots make that true almost
+    always, but a day with, say, three benched centres and one open G slot overcounts.
+
+    One `mRoster` request per completed day (~0.2 s each, run in parallel) for that
+    day's actual roster and slots, plus the pro schedule for which teams played. A day
+    counts only once every game on it is `statsOfficial`, so a game still in progress
+    never reads as a miss. Returns `{team_id: {"gamesMissed": int, "benchGames": int}}`
+    (`benchGames` left out when the roster shape couldn't be read), empty on failure -
+    the columns then read blank rather than zero.
+    """
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    gp_id = espn_stat_ids_raw().get("GP")
+    bench_slot, ir_slot = 12, 13
+    starters = sum(1 for s in fetch_roster_slots(league) if s not in ("Bench", "IR")) or None
+    try:
+        sched = league.espn_request.get_pro_schedule()
+        played = {}  # scoring period -> {pro team ids with an official game}
+        unofficial = set()
+        for pt in (sched.get("settings") or {}).get("proTeams") or []:
+            for sp, games in (pt.get("proGamesByScoringPeriod") or {}).items():
+                for g in games:
+                    if g.get("statsOfficial"):
+                        played.setdefault(int(sp), set()).add(int(pt["id"]))
+                    else:
+                        unofficial.add(int(sp))
+        current = int(getattr(league, "scoringPeriodId", 0) or 0)
+        days = sorted(sp for sp in played if sp not in unofficial and (not current or sp <= current))
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! daily counts: pro schedule failed: {exc}")
+        return {}
+
+    def one(sp):
+        raw = league.espn_request.league_get(params={"view": "mRoster", "scoringPeriodId": sp})
+        out = {}
+        for tm in raw.get("teams", []):
+            missed = playing = benched = 0
+            for e in (tm.get("roster") or {}).get("entries") or []:
+                pl = (e.get("playerPoolEntry") or {}).get("player") or {}
+                line = next((s for s in pl.get("stats") or []
+                             if s.get("scoringPeriodId") == sp and s.get("statSourceId") == 0
+                             and s.get("statSplitTypeId") == 5), None)
+                # The day's own line names the team he played for; fall back to his
+                # current team when there is no line (traded since: rare, and one day).
+                pro = int((line or {}).get("proTeamId") or pl.get("proTeamId") or 0)
+                gp = ((line or {}).get("stats") or {}).get(gp_id)
+                slot = e.get("lineupSlotId")
+                if pro in played[sp] and not gp:
+                    missed += 1
+                if gp and slot != ir_slot:
+                    playing += 1
+                    if slot == bench_slot:
+                        benched += 1
+            row = {"gamesMissed": missed}
+            if starters:
+                row["benchGames"] = benched if playing <= starters else 0
+            out[int(tm["id"])] = row
+        return out
+
+    totals = {}
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for day in ex.map(one, days):
+                for tid, row in day.items():
+                    acc = totals.setdefault(tid, {})
+                    for k, n in row.items():
+                        acc[k] = acc.get(k, 0) + n
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! daily counts failed: {exc}")
+        return {}
+    sums = {k: sum(r.get(k, 0) for r in totals.values()) for k in ("gamesMissed", "benchGames")}
+    print(f"  daily counts: {len(days)} days, {sums['gamesMissed']} missed games, "
+          f"{sums['benchGames']} bench games", flush=True)
+    return totals
+
+
 def acquisition_summary(team_id, app_period, window, totals, limit_per_day, regular_season_weeks):
     """
     `{"used": int, "max": int}` for one team's allowance in one matchup, or `None` when
@@ -1553,12 +1660,14 @@ def build_season(league, injury_data, sims=8000):
         # acquisition count — how many players a manager added all season, which is the
         # difference between a set-and-forget roster and one that was worked every week.
         counters = fetch_transaction_counters(league)
+        daily = fetch_daily_counts(league)
         moves_by_id = {
             int(t.team_id): {
                 "acquisitions": int(getattr(t, "acquisitions", 0) or 0),
                 "drops": int(getattr(t, "drops", 0) or 0),
                 "trades": int(getattr(t, "trades", 0) or 0),
                 **counters.get(int(t.team_id), {}),
+                **daily.get(int(t.team_id), {}),
             }
             for t in league.teams
         }

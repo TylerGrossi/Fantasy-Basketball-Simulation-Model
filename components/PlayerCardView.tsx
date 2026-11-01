@@ -386,11 +386,12 @@ function PlayerDetail({
             )}
             {p.statSource === "proj" && <div className="pd-source">2026-27 projection (no NBA stats yet)</div>}
             {/* Under 10 games the card shows his actual 2026-27 games (thisSeasonOnly),
-                but the site's rankings still blend in last season (engine/data.py
-                BLEND_FULL_GAMES) — say so, or Player Value's number looks like a bug. */}
+                but Value — here and everywhere — still blends in last season
+                (engine/data.py BLEND_FULL_GAMES). Say so, or the stats and the Value
+                look like they disagree. */}
             {p.statSource === "blend" && rp.statSource === "current" && (
               <div className="pd-source">
-                {rp.gp} {rp.gp === 1 ? "game" : "games"} into 2026-27 — rankings blend in
+                {rp.gp} {rp.gp === 1 ? "game" : "games"} into 2026-27 — Value blends in
                 2025-26 until 10 games
               </div>
             )}

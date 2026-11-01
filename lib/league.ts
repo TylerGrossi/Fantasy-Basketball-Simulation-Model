@@ -131,6 +131,19 @@ export interface StandingRow {
    */
   moveToActive?: number;
   moveToIR?: number;
+  /**
+   * NBA games a rostered player's team played that he didn't, summed over every
+   * completed day (`fetch_daily_counts` in build_data.py). Rest days are in it too:
+   * ESPN keeps no history of injury status. Absent when the fetch failed or on an
+   * older export - the column then reads "—", never a 0.
+   */
+  gamesMissed?: number;
+  /**
+   * Games a player played from a Bench slot, counted only on days the team had no more
+   * players playing than starting slots - an 11th player sitting isn't a mistake.
+   * Optional for the same reason as `gamesMissed`.
+   */
+  benchGames?: number;
   catTotals: Record<string, number>;
 }
 
@@ -201,6 +214,12 @@ export interface PoolPlayer {
    * through `gamesFor` (lib/percentiles.ts), never directly.
    */
   sampleGp?: number;
+  /**
+   * The line `value` was scored from, when the row now shows a different one. Set only
+   * by `thisSeasonOnly` (lib/playerPool.ts): it swaps in his actual games but keeps the
+   * site-wide `value`, so the card's Offence/Other bars read this line to add up to it.
+   */
+  valueLine?: Record<string, number>;
   name: string;
   nbaTeam: string;
   position: string;

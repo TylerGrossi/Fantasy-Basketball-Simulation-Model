@@ -1,4 +1,5 @@
-import SortableTable, { type SortCol, type SortRow } from "@/components/SortableTable";
+import SortableTable, { type SortCell, type SortCol, type SortRow } from "@/components/SortableTable";
+import TeamLink from "@/components/TeamLink";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
 
 /**
@@ -87,7 +88,7 @@ export default async function Page() {
     highlight: t.teamId === me.id,
     cells: {
       rank: { sort: t.standing, text: String(t.standing) },
-      team: { sort: t.teamName, text: t.teamName },
+      team: { sort: t.teamName, text: t.teamName, node: <TeamLink id={t.teamId} name={t.teamName} /> },
       // Records sort by the rate behind them, not the string.
       record: { sort: t.winPct, text: rec(t.wins, t.losses, t.ties) },
       pct: { sort: t.winPct, text: pct(t.winPct) },
@@ -106,9 +107,9 @@ export default async function Page() {
 
   const catRows: SortRow[] = standings.map((t) => {
     const gp = gpByTeam.get(t.teamId);
-    const cells: Record<string, { sort: number | string; text: string }> = {
+    const cells: Record<string, SortCell> = {
       rank: { sort: t.standing, text: String(t.standing) },
-      team: { sort: t.teamName, text: t.teamName },
+      team: { sort: t.teamName, text: t.teamName, node: <TeamLink id={t.teamId} name={t.teamName} /> },
       GP: {
         sort: gp ?? -1,
         text: gp === undefined ? "—" : gp.toLocaleString("en-US"),
@@ -138,19 +139,33 @@ export default async function Page() {
     { key: "drop", label: "Drop", num: true },
     { key: "activate", label: "Activate", num: true },
     { key: "ir", label: "IR", num: true },
+    // Games a rostered player's NBA team played without him, injuries mostly. Not one of
+    // ESPN's counter columns: it is built from each day's roster and box score.
+    { key: "missed", label: "Injured Games Missed", shortLabel: "Inj Missed", num: true },
+    // Games played from the bench on days with a starting spot to spare - points a
+    // manager left on the table. Days with more players playing than slots don't count.
+    { key: "bench", label: "Left on Bench", shortLabel: "Bench", num: true },
   ];
 
   const txnRows: SortRow[] = standings.map((t) => ({
     id: t.teamId,
     highlight: t.teamId === me.id,
     cells: {
-      team: { sort: t.teamName, text: t.teamName },
+      team: { sort: t.teamName, text: t.teamName, node: <TeamLink id={t.teamId} name={t.teamName} /> },
       loss: { sort: t.losses, text: String(t.losses) },
       trade: { sort: t.trades ?? 0, text: String(t.trades ?? 0) },
       acq: { sort: t.acquisitions ?? 0, text: String(t.acquisitions ?? 0) },
       drop: { sort: t.drops ?? 0, text: String(t.drops ?? 0) },
       activate: { sort: t.moveToActive ?? 0, text: String(t.moveToActive ?? 0) },
       ir: { sort: t.moveToIR ?? 0, text: String(t.moveToIR ?? 0) },
+      missed: {
+        sort: t.gamesMissed ?? -1,
+        text: t.gamesMissed == null ? "—" : String(t.gamesMissed),
+      },
+      bench: {
+        sort: t.benchGames ?? -1,
+        text: t.benchGames == null ? "—" : String(t.benchGames),
+      },
     },
   }));
 

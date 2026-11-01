@@ -21,8 +21,15 @@ export const seasonLabel = (s: number) => `${s - 1}-${String(s % 100).padStart(2
  * 2026-27: it printed 71 GP and last season's averages under this season's name (owner,
  * 2026-10-21). Player Value's 2026-27 view uses it for the same reason. A blend only
  * lasts ten games, so every game of his season so far sits
- * inside his last-30 window: that window IS his season to date, valued on the same scale
- * (`recent`). Anything else, or a blend with no window, is returned unchanged.
+ * inside his last-30 window: that window IS his season to date. Anything else, or a blend
+ * with no window, is returned unchanged.
+ *
+ * ONLY THE STATS change, never `value` (owner, 2026-10-31): Value is one number site-wide,
+ * so the card and Player Value print the same blended `value` that Team Card, Rankings
+ * and League Rosters do. It used to swap in `recent` here, which showed a different
+ * Value for the same player on different pages until he reached 10 games. The blended
+ * line rides along as `valueLine` so the card's value split is taken from it, not from
+ * the actual games now in the stat fields.
  */
 export function thisSeasonOnly(p: PoolPlayer): PoolPlayer {
   const w = p.last30;
@@ -30,13 +37,17 @@ export function thisSeasonOnly(p: PoolPlayer): PoolPlayer {
   const n = (k: string) => Number(w[k] ?? 0);
   const rate = (made: string, att: string) => (n(att) > 0 ? n(made) / n(att) : 0);
   const line: Record<string, number> = {};
-  for (const k of VALUE_INPUTS) line[k] = n(k);
+  const valueLine: Record<string, number> = {};
+  for (const k of VALUE_INPUTS) {
+    line[k] = n(k);
+    valueLine[k] = Number((p as unknown as Record<string, number>)[k] ?? 0);
+  }
   return {
     ...p,
     ...line,
+    valueLine,
     gp: w.gp,
     sampleGp: undefined,
-    value: p.recent,
     fgPct: rate("FGM", "FGA"),
     ftPct: rate("FTM", "FTA"),
     tpPct: rate("3PM", "3PA"),

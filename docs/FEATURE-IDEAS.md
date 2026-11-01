@@ -95,7 +95,11 @@ and championship odds, streamer sweeps, bench decisions, and 9-cat player values
   shape (`rosterSlots`) so unfilled spots render as "Empty".
 - **Transaction Counter** on League Stats — ESPN's own widget (Loss / Trade / Acq / Drop /
   Activate / IR). `moveToActive` and `moveToIR` are not on espn-api's `Team` object and are
-  read from the raw `mTeam` payload.
+  read from the raw `mTeam` payload. Plus a **Games Missed** column (not ESPN's): games a
+  rostered player's NBA team played without him, from one `mRoster` call per completed
+  day. It includes rest days, because ESPN keeps no history of injury status. And a
+  **Left on Bench** column from the same pass: games played from a Bench slot, counted
+  only on days the team had no more players playing than its 10 starting slots.
 - **Recent Moves** (`/recent-moves`) — the league-wide transaction feed, 838 rows, with
   client-side filters.
 - **Player Card percentile bars** — the card's stat list became Baseball-Savant-style

@@ -584,6 +584,9 @@ function valueSplitter(
     // (`Recent.fillna(Value)`), so the parts have to fall back with it or they would
     // sum to nothing beside a Total that is showing a real number.
     const from: ValueBasis = windowFor(p, basis) ? basis : "Regular";
+    // A thisSeasonOnly row shows his actual games but keeps the blended `value`; its
+    // season split comes from the line that value was scored from.
+    if (from === "Regular" && p.valueLine) return value(p.valueLine);
     const line: StatLine = {};
     for (const k of VALUE_INPUTS) line[k] = rawStat(p, k, from);
     return value(line);

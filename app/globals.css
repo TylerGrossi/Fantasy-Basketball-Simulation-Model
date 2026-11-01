@@ -8686,6 +8686,12 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
 /* The card is stretched to the rankings panel beside it; the lineup takes the height
    that leaves and its rows share it, instead of ending early above an empty block. */
 .tc-card { display: flex; flex-direction: column; }
+/* The card fills a 1080p window almost exactly, and the page's 3rem bottom padding tipped
+   it into a few pixels of scroll. 1rem still keeps the card off the window edge. Desktop
+   only: the phone stacks the two panels and scrolls anyway. */
+@media (min-width: 768px) {
+  .page:has(.tc-card) { padding-bottom: 1rem; }
+}
 .tc-card > .tc-lineup-wrap { flex: 1 1 auto; margin-bottom: 0; }
 .tc-card .tc-lineup { height: 100%; }
 .tc-lineup .tc-slot { color: var(--ink-2); text-align: left; width: 3rem; font-weight: 600; }
