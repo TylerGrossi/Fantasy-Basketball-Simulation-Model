@@ -19,9 +19,15 @@ interface Props {
 const PLOT_H = 190;
 /** Room above the tallest bar for its percentage. */
 const LABEL_H = 18;
+/** Smallest probability that still rounds to 0.1% in the label. */
+const MIN_SHOWN = 0.0005;
 
 export default function ScoreDistribution({ distribution, total, show = 10 }: Props) {
-  const all = distribution.map((p, k) => ({ k, p }));
+  // Drop outcomes that would print as 0.0% (owner, 2026-11-01): a row of empty bars
+  // reads as noise, so only the outcomes still in play are shown.
+  const all = distribution
+    .map((p, k) => ({ k, p }))
+    .filter(({ p }) => p >= MIN_SHOWN);
   // Keep the `show` most likely, then order them left-to-right by score so the shape
   // reads as a distribution rather than a ranking.
   const top = [...all]
