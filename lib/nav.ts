@@ -94,7 +94,7 @@ export const FLAT_NAV: NavEntry[] = [
   // League Home leads in season (owner, 2026-10-20): ESPN's league front page — standings,
   // this week's scores, recent moves, risers. It replaced Season Summary in this slot;
   // Season Summary moved to the end of the League menu.
-  { kind: "link", label: "League Home", href: "/league" },
+  { kind: "link", label: "Home", href: "/league" },
   // One page now (2026-10-20), so a link rather than a menu of its sections.
   { kind: "link", label: "Current Matchup", href: "/scoreboard" },
   // FantasyPros-style live night (2026-10-21): every game, your players' lines, the feed.
@@ -185,7 +185,7 @@ export const FLAT_NAV: NavEntry[] = [
 export const SEASON_PAGES: NavPage[] = [
   // Schedule leads, matching the desktop League menu where it leads for the same reason:
   // "what happened / what's next" is a more common question than any stat table under it.
-  { label: "League Home", href: "/league", blurb: "Standings, scores, moves, risers" },
+  { label: "Home", href: "/league", blurb: "Standings, scores, moves, risers" },
   { label: "Schedule", href: "/schedule", blurb: "Week by week results" },
   { label: "Summary", href: "/season", blurb: "Standings, champion, schedule luck" },
   { label: "Season Stats", href: "/season-stats", blurb: "Category leaders and every player's line" },

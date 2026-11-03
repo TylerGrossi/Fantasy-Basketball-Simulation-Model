@@ -94,10 +94,6 @@ export default async function Page() {
   return (
     <>
       <h1>Playoff &amp; Championship Probabilities</h1>
-      <p className="caption">
-        Projected roster (injury-aware) + category-by-category. Playoff matchups are two
-        weeks each (semis + finals).
-      </p>
 
       {/* These are the MODEL's odds, not the outcome. With the season finished the two
           finalists come out near a coin flip, which would read as "51% to win" for a team

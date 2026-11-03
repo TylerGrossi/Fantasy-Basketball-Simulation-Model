@@ -136,9 +136,13 @@ body {
 }
 
 @media (min-width: 768px) {
+  /* `overscroll-behavior: none` stops iPad Safari's rubber-band. Without it, hitting the
+     end of `.app-scroll` chains the leftover swipe to the document, which bounces even
+     with `overflow: hidden` and drags the header down off the top edge. */
   html,
   body {
     height: 100%;
+    overscroll-behavior: none;
   }
   body {
     display: flex;
@@ -153,6 +157,7 @@ body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+    overscroll-behavior-y: none;
     /* The gutter that keeps the centred column still — on the inner box now, where it
        costs nothing, instead of on the viewport where it cost the full-width header. */
     scrollbar-gutter: stable;
@@ -3183,6 +3188,17 @@ table.sheet.lu-table .lu-pos {
 .pv-cmp-fill { height: 100%; border-radius: 5px; }
 .pv-cmp-bar-a .pv-cmp-fill { background: var(--cobalt); }
 .pv-cmp-bar-b .pv-cmp-fill { background: var(--clay); }
+/* iPad (owner, 2026-11-02): the comparison on one screen. It ran ~70px past an 820px-tall
+   iPad and ~120px past a 768px one; smaller headshots and shorter rows give that back. */
+@media (min-width: 768px) and (hover: none) and (pointer: coarse) {
+  .pv-cmp { padding: 0.8rem 1.1rem 0.9rem; }
+  .pv-cmp-head { margin-bottom: 0.6rem; }
+  .pv-cmp-player .pv-shot { width: 72px; height: 72px; margin-bottom: 0.35rem; }
+  .pv-cmp-name { font-size: 1.25rem; }
+  .pv-cmp-row { padding: 0.36rem 0; }
+  .pv-cmp-a,
+  .pv-cmp-b { font-size: 1.05rem; }
+}
 .pv-cmp-logs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3686,6 +3702,19 @@ table.sheet.lu-table .lu-pos {
   padding: 0 0.4rem;
   background: var(--card);
   border-radius: 3px;
+}
+
+/* iPad (owner, 2026-11-02): the Team Card's and Player Card's whole bar panel on one
+   landscape screen. It ran ~120px past an 820px-tall iPad; shorter rows and less air
+   between the groups give that back. Desktop and phone keep the sizes above. */
+@media (min-width: 768px) and (hover: none) and (pointer: coarse) {
+  .pct-row { padding: 0.12rem 0; }
+  .pct-track { height: 14px; }
+  .pct-bubble { min-width: 19px; height: 19px; border-radius: 10px; font-size: 0.6rem; }
+  .pct-label { font-size: 0.8rem; }
+  .pct-value { font-size: 0.88rem; }
+  .pct-group + .pct-group { margin-top: 0.75rem; }
+  .pct-group-h { margin-bottom: 0.12rem; }
 }
 
 /* -------- Trade Simulator -------- */
@@ -7886,6 +7915,62 @@ table.sheet.lh-stand td { padding-left: 0.35rem; padding-right: 0.35rem; }
 .lh-card > .lh-more { margin-top: auto; }
 .lh-card > :nth-last-child(2) { margin-bottom: 0.75rem; }
 
+/* iPad (owner, 2026-11-02): a touch screen 768px or wider, so desktop browsers and phones
+   keep the layouts above. The mid-width two-column layout put six cards down the left,
+   and the dashboard stretch then grew Rising & Falling to ~1,550px to match them; under
+   900px the phone order also left Best Available and Rising & Falling above the header. */
+@media (min-width: 768px) and (hover: none) and (pointer: coarse) {
+  .lh { gap: 0.85rem; margin-top: 0.85rem; }
+  .lh-col { gap: 0.85rem; }
+  .lh-card { padding: 0.8rem 0.95rem 0.7rem; }
+  .lh-h { margin-bottom: 0.55rem; padding-bottom: 0.45rem; }
+  .lh-more { margin-top: 0.5rem; padding-top: 0.5rem; }
+  .lh-title { font-size: 1.35rem; }
+  .lh-title-row { margin-bottom: 0.5rem; }
+  /* The clock beside the date costs the moves table its fit; the day stays. */
+  .lh-time { display: none; }
+  table.sheet.lh-moves th,
+  table.sheet.lh-moves td { padding-left: 0.4rem; padding-right: 0.4rem; font-size: 0.8rem; }
+  /* Long team names truncate rather than push either table past its card at 1024px. */
+  table.sheet.lh-moves td:nth-child(2),
+  table.sheet.lh-moves td:nth-child(4) { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; }
+  table.sheet.lh-stand .lh-stand-team { max-width: 6.5rem; }
+  .lh-facts { grid-template-columns: repeat(4, auto); justify-content: space-between; }
+}
+/* Landscape: the desktop's three columns, which come out within ~10% of each other's
+   height. Fixed side widths leave the middle too narrow below ~1250px, so all three flex. */
+@media (min-width: 1024px) and (hover: none) and (pointer: coarse) {
+  .lh { grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.5fr) minmax(0, 1fr); }
+  .lh-main { grid-column: auto; grid-row: auto; }
+  .lh-left, .lh-right { grid-column: auto; }
+  /* `.lh` prefix: the base `.lh-edge` rules sit later in this file and would win a tie. */
+  .lh .lh-edge { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.25rem 1rem; }
+  .lh .lh-edge-row { grid-template-columns: 2.3rem minmax(0, 1fr) 2.6rem; gap: 0.45rem; }
+}
+/* The 10.2" iPad's 1024px leaves Recent Activity ~20px short; its names give it back. */
+@media (min-width: 1024px) and (max-width: 1099px) and (hover: none) and (pointer: coarse) {
+  table.sheet.lh-moves td:nth-child(2),
+  table.sheet.lh-moves td:nth-child(4) { max-width: 5.6rem; }
+}
+/* Portrait: two columns, cards paired with one of similar height so no row leaves a gap.
+   Header and Recent Activity (a table that needs the width) span both. */
+@media (min-width: 768px) and (max-width: 1023px) and (hover: none) and (pointer: coarse) {
+  .lh { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+  .lh-col { display: contents; }
+  .lh-head { order: 1; grid-column: 1 / -1; }
+  .lh-left > :nth-child(1) { order: 2; }
+  .lh-main > :nth-child(2) { order: 3; }
+  .lh-left > :nth-child(2) { order: 4; }
+  .lh-right > :nth-child(1) { order: 5; }
+  .lh-main > :nth-child(3) { order: 6; grid-column: 1 / -1; }
+  .lh-main > :nth-child(4) { order: 7; }
+  .lh-right > :nth-child(2) { order: 8; }
+  .lh-left > :nth-child(3) { order: 9; }
+  .lh-right > :nth-child(3) { order: 10; }
+  .lh .lh-edge { grid-template-columns: 1fr; }
+  .lh-trends { grid-template-columns: 1fr; gap: 0.6rem; }
+}
+
 /* Category edge: your share of each track in cobalt, theirs in clay. */
 .lh-edge {
   display: grid;
@@ -8570,6 +8655,44 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
   }
   .gd-strip .gd-game { flex: 1 0 104px; max-width: 170px; }
   .gd-strip .gd-game-all { flex: 0 0 118px; }
+}
+/* iPad (owner, 2026-11-02): the box's columns fit without a sideways swipe. They need
+   ~730px and the three-column layout left them 470-600, so the games lie down into the
+   strip at every iPad width, the box takes most of the row in landscape and all of it
+   in portrait (Play by Play goes under), and the cells give up some padding. */
+@media (min-width: 768px) and (hover: none) and (pointer: coarse) {
+  .gd {
+    grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(300px, 1fr);
+    grid-template-areas:
+      "top    top"
+      "sheet  sheet"
+      "rail   rail"
+      "filter filter"
+      "box    feed";
+  }
+  .gd-strip {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0 0 0.6rem;
+    padding: 0 0 0.25rem;
+  }
+  .gd-strip .gd-game { flex: 1 0 104px; max-width: 170px; }
+  .gd-strip .gd-game-all { flex: 0 0 118px; }
+  table.sheet.gd-ptable td { padding-left: 0.26rem; padding-right: 0.26rem; }
+  table.sheet.gd-ptable .th-sort { padding-left: 0.26rem; padding-right: 0.26rem; }
+}
+@media (min-width: 1024px) and (max-width: 1099px) and (hover: none) and (pointer: coarse) {
+  .gd { grid-template-columns: minmax(0, 2.8fr) minmax(0, 1fr); }
+}
+@media (min-width: 768px) and (max-width: 1023px) and (hover: none) and (pointer: coarse) {
+  .gd {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(300px, 1.6fr) minmax(240px, 1fr);
+    grid-template-areas: "top" "sheet" "rail" "filter" "box" "feed";
+  }
+  .gd-feed { margin-top: 0.8rem; }
 }
 
 /* ---- phone player cards (the box, one card per row) ---- */

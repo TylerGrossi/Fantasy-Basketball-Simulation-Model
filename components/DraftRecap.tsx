@@ -64,6 +64,7 @@ export default function DraftRecap({
   mock,
   myTeamId,
   playoffModel,
+  season: seasonProp,
 }: {
   lines: ProjectedLine[];
   league: DraftLeague;
@@ -77,6 +78,11 @@ export default function DraftRecap({
    * 2026-10-20). The draft simulation still drives the category ranks.
    */
   playoffModel?: Record<number, PlayoffModelRow>;
+  /**
+   * The saved season simulation, read on the server with the picks (`live`) so the page
+   * arrives whole. Without it the recap fetches /api/draft/season after first paint.
+   */
+  season?: SeasonResult[] | null;
 }) {
   // Fetch the feed itself, independent of the board's sync toggle (which the owner may
   // have switched off during the draft, when ESPN's feed was empty).
@@ -94,8 +100,10 @@ export default function DraftRecap({
     }
   }, []);
   useEffect(() => {
+    // Handed the frozen picks by the server: nothing newer to fetch.
+    if (liveProp) return;
     void refresh();
-  }, [refresh]);
+  }, [refresh, liveProp]);
   const live = (own?.picks.length ?? 0) >= (liveProp?.picks.length ?? 0) ? (own ?? liveProp) : liveProp;
 
   const nTeams = league.teams.length || 8;
@@ -173,8 +181,9 @@ export default function DraftRecap({
    * decides place, grade, playoff odds and the category heat map. Run after first paint:
    * about a second of work, so the page shows "Simulating" rather than freezing.
    */
-  const [season, setSeason] = useState<SeasonResult[] | null>(null);
+  const [season, setSeason] = useState<SeasonResult[] | null>(seasonProp ?? null);
   useEffect(() => {
+    if (seasonProp) return;
     if (!teams.length || !league.schedule?.length) {
       setSeason(null);
       return;
@@ -191,7 +200,7 @@ export default function DraftRecap({
     return () => {
       alive = false;
     };
-  }, [teams.length, league.schedule?.length]);
+  }, [teams.length, league.schedule?.length, seasonProp]);
 
   type Standing = { place: number; pct: number; res: SeasonResult; catRank: Record<string, number> };
   const standOf = useMemo(() => {

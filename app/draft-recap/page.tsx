@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import DraftRecapView from "@/components/DraftRecapView";
 import type { DraftData } from "@/lib/draft";
+import { loadFrozenDraft } from "@/lib/draftSeason";
 
 /**
  * Draft Recap: who won the draft in the draft league (engine/config.py DRAFT_LEAGUE_ID).
@@ -20,6 +21,9 @@ async function loadDraft(): Promise<DraftData | null> {
 
 export default async function Page() {
   const data = await loadDraft();
+  // Picks and simulation read here, with the projections, so the recap renders in one
+  // piece instead of filling in over two client fetches (owner, 2026-11-02).
+  const frozen = await loadFrozenDraft();
   // No daily-export playoff odds here any more (owner, 2026-10-30): the recap is what the
   // draft looked like the night it happened, so Proj record, Win % and Playoff % are the
   // draft-night simulation saved in public/data/draft-recap.json, and they never move.
@@ -31,7 +35,9 @@ export default async function Page() {
           ? `${data.league.name} · who won the draft, graded on this league's ${data.league.categories.length} categories.`
           : "No draft data — run `python scripts/build_draft.py`."}
       </p>
-      {data && <DraftRecapView data={data} />}
+      {data && (
+        <DraftRecapView data={data} live={frozen?.feed ?? null} season={frozen?.results ?? null} />
+      )}
     </>
   );
 }

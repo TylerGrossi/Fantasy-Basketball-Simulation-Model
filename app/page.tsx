@@ -51,7 +51,7 @@ import {
 const TILES = [
   // League Home leads in season (2026-10-20), as it does in the desktop header. Season
   // Summary is one tap further, in the Season index.
-  { href: "/league", label: "League Home", Icon: TrophyIcon },
+  { href: "/league", label: "Home", Icon: TrophyIcon },
   { href: "/scoreboard", label: "Current Matchup", Icon: ChartIcon },
   { href: "/schedule", label: "Schedule", Icon: CalendarIcon },
   { href: "/season-stats", label: "Season Stats", Icon: ClipboardDataIcon },
@@ -148,7 +148,7 @@ const DIRECTORY: Array<{
     // League Home, then the one-page Current Matchup's sections in page order.
     section: "This Week",
     items: [
-      { href: "/league", name: "League Home", desc: "Standings, scores, moves and risers at a glance." },
+      { href: "/league", name: "Home", desc: "Standings, scores, moves and risers at a glance." },
       { href: "/scoreboard", name: "Scoreboard", desc: "The matchup category by category, live from ESPN." },
       { href: "/scoreboard#schedule", name: "Week Schedule", desc: "Who plays each day, and days with too many players." },
       { href: "/scoreboard#odds", name: "Win Probability", desc: "Win odds, score distribution and projections." },

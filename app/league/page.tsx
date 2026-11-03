@@ -173,7 +173,7 @@ function HeaderCard({ league }: { league: LeagueData }) {
           corner rather than as a fifth fact — where it also stopped wrapping onto a row
           of its own at narrower widths. */}
       <div className="lh-title-row">
-        <h1 className="lh-title">{league.leagueName ?? "League Home"}</h1>
+        <h1 className="lh-title">{league.leagueName ?? "Home"}</h1>
         <span className="lh-asof">Data as of {asOf}</span>
       </div>
       <dl className="lh-facts">
