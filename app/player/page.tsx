@@ -33,7 +33,6 @@ export default async function Page({
           sentence of instructions — and buys back the vertical space they cost. */}
       <div className="pd-page-head">
         <h1>Player Card</h1>
-        <p className="caption">Search any player and see their full profile.</p>
       </div>
       <PlayerCardView league={slim} archives={archives} initialName={initialName} />
     </>

@@ -7934,13 +7934,18 @@ table.sheet.lh-stand td { padding-left: 0.35rem; padding-right: 0.35rem; }
   /* Long team names truncate rather than push either table past its card at 1024px. */
   table.sheet.lh-moves td:nth-child(2),
   table.sheet.lh-moves td:nth-child(4) { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; }
-  table.sheet.lh-stand .lh-stand-team { max-width: 6.5rem; }
+  /* Team names wrap to a second line rather than being cut off (owner, 2026-11-02):
+     the narrow iPad columns truncated most of the league's names. */
+  table.sheet.lh-stand .lh-stand-team,
+  .lh .lh-pr-team,
+  .lh .lh-game-team { max-width: none; white-space: normal; overflow: visible; line-height: 1.25; }
+  .lh .lh-pr-bar { width: 2.6rem; }
   .lh-facts { grid-template-columns: repeat(4, auto); justify-content: space-between; }
 }
 /* Landscape: the desktop's three columns, which come out within ~10% of each other's
    height. Fixed side widths leave the middle too narrow below ~1250px, so all three flex. */
 @media (min-width: 1024px) and (hover: none) and (pointer: coarse) {
-  .lh { grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.5fr) minmax(0, 1fr); }
+  .lh { grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.4fr) minmax(0, 1.12fr); }
   .lh-main { grid-column: auto; grid-row: auto; }
   .lh-left, .lh-right { grid-column: auto; }
   /* `.lh` prefix: the base `.lh-edge` rules sit later in this file and would win a tie. */
@@ -7951,6 +7956,7 @@ table.sheet.lh-stand td { padding-left: 0.35rem; padding-right: 0.35rem; }
 @media (min-width: 1024px) and (max-width: 1099px) and (hover: none) and (pointer: coarse) {
   table.sheet.lh-moves td:nth-child(2),
   table.sheet.lh-moves td:nth-child(4) { max-width: 5.6rem; }
+  .lh { grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.5fr) minmax(0, 1fr); }
 }
 /* Portrait: two columns, cards paired with one of similar height so no row leaves a gap.
    Header and Recent Activity (a table that needs the width) span both. */
@@ -8836,3 +8842,55 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
 /* IR players sit at their value rank but read as out of the lineup. */
 .tc-lineup tr.tc-ir th,
 .tc-lineup tr.tc-ir td { opacity: 0.55; }
+
+/* iPad (owner, 2026-11-02): the Team Card's and Player Card's two panels, whole, on one
+   screen. The picker leaves its own row for the title's top-right corner. */
+@media (min-width: 768px) and (hover: none) and (pointer: coarse) {
+  .page:has(> .pd-page-head) { position: relative; }
+  .pd-page-head h1 { margin-bottom: 0.7rem; }
+  .pd-page-head ~ .pd-search,
+  .pd-page-head + .pd > .pd-search {
+    position: absolute;
+    /* The h1's top margin collapses through .page, so 0 is the title's own top; this
+       centres the picker on the title line. */
+    top: -0.3rem;
+    right: var(--page-pad);
+    width: min(26rem, 55%);
+    margin: 0;
+    z-index: 5;
+  }
+  .pd-page-head + .pd > .pd-search .tc-pick { width: 100%; }
+  /* The left rail sets the height of both panels (they stretch to match), so that is
+     where the room comes from: a smaller masthead, the facts on fewer lines, tighter
+     table rows, and the rolling chart capped. */
+  .pd-card, .pd-rank { padding: 0.9rem 1.1rem 1rem; }
+  .pd-head { margin-bottom: 0.4rem; }
+  .pd-head .pv-shot { width: 64px; height: 64px; }
+  .pv-shot.tc-mono { font-size: 0.95rem; }
+  .pd-name { font-size: 1.2rem; }
+  .pd-status { margin-bottom: 0.6rem; }
+  .pd-bio {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 1.4rem;
+    padding: 0.5rem 0.1rem;
+    margin-bottom: 0.6rem;
+  }
+  .pd-wt th, .pd-wt td { padding-top: 0.17rem; padding-bottom: 0.17rem; }
+  .rv-svg { max-height: 112px; }
+  .tc-facts { grid-template-columns: repeat(8, minmax(0, 1fr)); margin-top: 0.55rem; padding-top: 0.5rem; }
+  .tc-fv { font-size: 0.92rem; }
+}
+/* Portrait: side by side instead of the one stacked column the base layout uses under
+   900px, which put the bars a screen below the card. The rail narrows, so the facts go
+   back to two lines and the bar labels take less of the row. */
+@media (min-width: 768px) and (max-width: 1023px) and (hover: none) and (pointer: coarse) {
+  .pd-split { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr); gap: 0.85rem; }
+  .tc-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pd-bio { grid-template-columns: 1fr; gap: 0.3rem; }
+  .pct-row { grid-template-columns: 7.6rem 2.8rem minmax(0, 1fr); gap: 0.45rem; }
+  .pct-scale { padding-left: calc(7.6rem + 2.8rem + 0.9rem); }
+  /* The phone's short panel title: the full one wrapped to two lines at half width. */
+  .pd-rank-full { display: none; }
+  .pd-rank-short { display: inline; }
+}
