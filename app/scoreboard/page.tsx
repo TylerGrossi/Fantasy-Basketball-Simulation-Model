@@ -155,7 +155,7 @@ export default async function Page({
    *   2. win probability and category analysis
    *   3. detailed projections
    *   4. streamers
-   *   5. bench (play everyone vs sit everyone)
+   *   5. bench (play everyone vs sit everyone; who to sit on crowded days)
    *
    * The old URLs redirect to the matching section. Every live section shares one live-
    * totals poller (lib/useLiveTotals), so four sections cost one ESPN request, not four.
@@ -171,6 +171,16 @@ export default async function Page({
   ]);
   const you = r.isHome ? r.matchup.home : r.matchup.away;
   const oppSide = r.isHome ? r.matchup.away : r.matchup.home;
+  // Crowded days check positions (owner, 2026-11-03): both rosters' ESPN eligible slots,
+  // from the player pool - Bench reads yours, the Schedule grid both. Just the two
+  // rosters, so the payload stays small.
+  const mine = new Set([...you.players, ...oppSide.players].map((p) => p.name));
+  const eligibility: Record<string, string[]> = {};
+  for (const p of league.seasonData?.playerPool ?? []) {
+    if (!mine.has(p.name)) continue;
+    const e = p.eligibleSlots?.length ? p.eligibleSlots : [p.position].filter(Boolean);
+    if (e.length) eligibility[p.name] = e;
+  }
   const preWeekLog = await loadPredictions();
   const forecast = forecastFor(preWeekLog, league, league.period, me.id);
   // The week so far, for the win-probability chart: pre-week forecast + every refresh.
@@ -244,6 +254,7 @@ export default async function Page({
           schedule={
             <LiveWeekSchedule
               live={!demo}
+              eligibility={eligibility}
               league={deckLeague}
               matchup={r.matchup}
               isHome={r.isHome}
@@ -313,6 +324,7 @@ export default async function Page({
         <h2 className="cm-h">Bench Strategy</h2>
         <BenchView
           live={!demo}
+          eligibility={eligibility}
           league={deckLeague}
           matchup={r.matchup}
           isHome={r.isHome}

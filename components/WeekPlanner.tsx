@@ -19,7 +19,7 @@ import {
 } from "@/lib/planner";
 import { dayLabel } from "@/lib/dates";
 import { byLineup, lineupOrder, type LineupOrder } from "@/lib/lineupOrder";
-import { useLiveSides } from "@/lib/useLiveSides";
+import { useProjectedSides } from "@/lib/useLiveSides";
 import { useMoveWindow } from "@/lib/useMoveWindow";
 import { useSettings } from "@/lib/useSettings";
 import { remotePut, useRemotePull } from "@/lib/remoteSync";
@@ -76,7 +76,9 @@ export default function WeekPlanner({
   live: liveEnabled = true,
   acq,
 }: Props) {
-  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
+  // The win probability's sides and lineup rule (see StreamersView): the plan's "no moves"
+  // is the gauge's number, and every planned day is re-seated by the same rule.
+  const { live, you, opp, rule } = useProjectedSides(league, matchup, isHome, teamId, liveEnabled);
   const [settings, updateSettings] = useSettings();
   const win = useMoveWindow(league, live.gameLeft);
 
@@ -152,8 +154,9 @@ export default function WeekPlanner({
         slots: win.slots,
         openSpots,
         ir,
+        rule,
       }),
-    [league, you.players, pool, youMoments, oppMoments, win.dates, win.teams, win.slots, openSpots, ir]
+    [league, you.players, pool, youMoments, oppMoments, win.dates, win.teams, win.slots, openSpots, ir, rule]
   );
 
   // The one protect list: Streamers' "Protect from dropping" chips (owner, 2026-10-29) —
@@ -391,6 +394,12 @@ export default function WeekPlanner({
 
   return (
     <div className="pl">
+      <p className="caption ctx">
+        Plans the whole week of adds, drops and IR activations at once. Each day, the
+        lineup that can legally start is re-seated with the plan applied, so a pickup only
+        counts on nights he would start, and the plan is scored on this matchup like
+        Streamers. Optimize fills the moves you have left.
+      </p>
 
       <div className="metrics metrics-slim">
         <Tile

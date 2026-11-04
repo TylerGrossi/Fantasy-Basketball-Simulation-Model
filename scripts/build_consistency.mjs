@@ -13,7 +13,7 @@
  *
  * WHY IT REUSES THE APP'S OWN CODE. `parseGameLog` and `consistency` are imported from
  * lib/espnLive.ts, the same functions the card renders from — a Python reimplementation
- * in build_data.py would have to duplicate the 9-cat valuer and would drift from the
+ * in build_data.py would have to duplicate the valuer and would drift from the
  * screen the first time either side changed.
  *
  *   node scripts/build_consistency.mjs

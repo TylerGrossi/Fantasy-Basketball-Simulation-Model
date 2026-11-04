@@ -8325,6 +8325,40 @@ table.sheet.ws-table tfoot tr.pl-foot-base td { border-top: 0; font-weight: 400;
 .bn-better { font-weight: 700; color: var(--ink-3); }
 .bn-better.play { color: var(--cobalt); }
 .bn-better.bench { color: var(--clay); }
+/* No card around a crowded day: its table runs the full width, like the category table. */
+.bn-day { margin: 1.2rem 0; }
+.bn-day-h { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.3rem; }
+.bn-day-why { font-weight: 400; color: var(--ink-2); }
+
+/* RecLine (components/RecLine.tsx): one recommendation per line, app-wide. A cobalt edge
+   for "do something", clay for "hold" - the bench card's convention, at caption weight. */
+.rec-line {
+  margin: 0.5rem 0 0.8rem;
+  padding: 0.45rem 0.75rem;
+  border-left: 3px solid var(--line-strong);
+  background: var(--card);
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.rec-line.rec-go { border-left-color: var(--cobalt); }
+.rec-line.rec-hold { border-left-color: var(--clay); }
+.rec-label { font-weight: 700; }
+.rec-line.rec-go .rec-call { color: var(--cobalt); }
+.rec-line.rec-hold .rec-call { color: var(--clay); }
+.rec-why { color: var(--ink-2); }
+/* Recommendations and their "how it works" captions (`.ctx`) are desktop and iPad only
+   (owner, 2026-11-03): on a phone they cost a screen of scrolling above every table.
+   767px is the app's phone breakpoint; an iPad in portrait is 768px or wider. */
+@media (max-width: 767px) {
+  .rec-line,
+  .ctx { display: none; }
+}
+.bn-day-rec { margin-left: 0.6rem; font-size: 0.85rem; color: var(--ink-2); }
+.bn-day-rec b { color: var(--clay); }
+.bn-sit td { background: var(--surface-2); }
+.bn-neg { color: var(--bad); }
+.bn-cats { font-size: 0.78rem; white-space: nowrap; }
+.bn-swap { font-size: 0.82rem; white-space: nowrap; }
 @media (max-width: 767px) {
   .bn-scen { grid-template-columns: 1fr; }
 }
@@ -8893,4 +8927,51 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
   /* The phone's short panel title: the full one wrapped to two lines at half width. */
   .pd-rank-full { display: none; }
   .pd-rank-short { display: inline; }
+}
+
+/* Will They Play (components/WillTheyPlayView.tsx). The ring, the week cells and the
+   status share three tones: good (75%+), mid, bad (35% or less). */
+.wtp-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.6rem 0 0.8rem; }
+.wtp-scopes { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.wtp-search { min-width: 14rem; flex: 1 1 14rem; max-width: 24rem; }
+.wtp-table td { vertical-align: middle; }
+.wtp-player { white-space: nowrap; }
+.wtp-ring { position: relative; display: inline-grid; place-items: center; width: 54px; height: 54px; }
+.wtp-ring svg { position: absolute; inset: 0; }
+.wtp-ring-bg { fill: none; stroke: var(--line); stroke-width: 3; }
+.wtp-ring-arc { fill: none; stroke-width: 3; stroke-linecap: round; }
+.wtp-good .wtp-ring-arc { stroke: var(--good); }
+.wtp-mid .wtp-ring-arc { stroke: var(--ink-3); }
+.wtp-bad .wtp-ring-arc { stroke: var(--bad); }
+.wtp-ring-v { position: relative; font-size: 0.82rem; font-weight: 700; color: var(--ink); }
+.wtp-good .wtp-ring-v { color: var(--good); }
+.wtp-bad .wtp-ring-v { color: var(--bad); }
+.wtp-status { font-weight: 700; white-space: nowrap; }
+.wtp-st-bad { color: var(--bad); }
+.wtp-st-mid { color: var(--clay); }
+.wtp-st-ok { color: var(--ink-2); font-weight: 400; }
+.wtp-injury, .wtp-why { font-size: 0.82rem; color: var(--ink-2); }
+.wtp-matchup { white-space: nowrap; font-size: 0.82rem; }
+.wtp-b2b { margin-left: 0.4rem; padding: 0 0.3rem; border: 1px solid var(--clay); border-radius: 4px;
+  color: var(--clay); font-size: 0.66rem; font-weight: 700; }
+.wtp-week { display: inline-flex; gap: 0.25rem; }
+.wtp-day { display: inline-flex; flex-direction: column; align-items: center; min-width: 2.1rem;
+  padding: 0.1rem 0.25rem; border: 1px solid var(--line); border-radius: 5px; font-size: 0.72rem; }
+.wtp-day-d { font-size: 0.6rem; color: var(--ink-3); }
+.wtp-day.wtp-good { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.wtp-day.wtp-bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); color: var(--bad); }
+/* No horizontal scroll (owner, 2026-11-03): the shared table never wraps a cell, so here
+   Injury and Why wrap to two lines and the player's team/positions/owner sit under his
+   name. */
+.wtp-table td:nth-child(4), .wtp-table td:nth-child(7) { white-space: normal; line-height: 1.35; }
+.wtp-table td:nth-child(4) { min-width: 8rem; max-width: 12rem; }
+.wtp-table td:nth-child(7) { min-width: 16rem; }
+.wtp-player { display: inline-flex; flex-direction: column; }
+.wtp-player .bn-note { font-size: 0.72rem; }
+/* Phones: player, chance, status, matchup - injury (4), this week (6) and why (7) are a
+   desktop / iPad read. By position: SortableTable has no per-column class. */
+@media (max-width: 767px) {
+  .wtp-table th:nth-child(4), .wtp-table td:nth-child(4),
+  .wtp-table th:nth-child(6), .wtp-table td:nth-child(6),
+  .wtp-table th:nth-child(7), .wtp-table td:nth-child(7) { display: none; }
 }

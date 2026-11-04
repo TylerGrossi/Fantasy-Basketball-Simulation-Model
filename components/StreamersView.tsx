@@ -8,10 +8,11 @@ import { makeOddsSimulator, type Odds, type SeasonContext, type SimPlayer } from
 import { categoryProbabilities } from "@/lib/probability";
 import { dayLabel } from "@/lib/dates";
 import { useMoveWindow } from "@/lib/useMoveWindow";
-import { useLiveSides } from "@/lib/useLiveSides";
+import { useProjectedSides } from "@/lib/useLiveSides";
 import { useSettings } from "@/lib/useSettings";
 import LiveBadge from "./LiveBadge";
 import PlayerLink from "./PlayerLink";
+import RecLine from "./RecLine";
 import FilterBar from "./FilterBar";
 import MultiSelect from "./MultiSelect";
 import SortableTable, { type SortCol, type SortRow } from "./SortableTable";
@@ -115,8 +116,10 @@ export default function StreamersView({
   acq,
   season,
 }: Props) {
-  // Live totals + each side's projection minus the games those totals already count.
-  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
+  // Live totals + each side's projection minus the games those totals already count, with
+  // the win probability's lineups (your Bench recommendation, his ESPN lineup) - and the
+  // same rule re-seats your week for each move below, so "no move" IS the gauge.
+  const { live, you, opp, rule } = useProjectedSides(league, matchup, isHome, teamId, liveEnabled);
   // Persisted in localStorage so protected players and the open-spot flag survive a
   // reload — in the Streamlit version these lived in server session state and were lost
   // whenever the host spun down.
@@ -167,8 +170,8 @@ export default function StreamersView({
    * tomorrow once it is.
    */
   const daily = useMemo(
-    () => (league.weekSchedule ? { dates: moveDates, teams, slots } : undefined),
-    [league.weekSchedule, moveDates, teams, slots]
+    () => (league.weekSchedule ? { dates: moveDates, teams, slots, rule } : undefined),
+    [league.weekSchedule, moveDates, teams, slots, rule]
   );
 
   /*
@@ -337,6 +340,11 @@ export default function StreamersView({
             )}
           </FilterBar>
 
+          <StreamerCall
+            results={results}
+            addsLeft={addsLeft}
+          />
+
           {/* About ten rows tall, scrolling inside itself (owner, 2026-10-20): the full
               candidate list made this section the longest on the one-page matchup. The
               header row stays pinned while the rows scroll under it. Sortable on every
@@ -458,5 +466,63 @@ export default function StreamersView({
         </>
       )}
     </>
+  );
+}
+
+/**
+ * The streaming call on one line (owner, 2026-11-03): the top move by Net, with this
+ * week's gain, the season cost of the drop, and its margin over the next-best move — or
+ * "No move" when nothing nets a gain, which is as useful to know as a pickup.
+ */
+function StreamerCall({
+  results,
+  addsLeft,
+}: {
+  results: ReturnType<typeof analyzeStreamers>["results"];
+  addsLeft: number | null;
+}) {
+  const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
+  const [best, next] = results;
+  if (addsLeft === 0) {
+    return (
+      <RecLine tone="hold" why="every acquisition for this matchup is used">
+        No move
+      </RecLine>
+    );
+  }
+  if (!best || best.net <= 0) {
+    return (
+      <RecLine
+        tone="hold"
+        why={
+          best
+            ? `the best option, ${best.add.name}${best.drop ? ` for ${best.drop.name}` : ""}, nets ${signed(best.net, 2)} cats once the season cost is counted`
+            : "no free agent has a game left"
+        }
+      >
+        No move
+      </RecLine>
+    );
+  }
+  return (
+    <RecLine
+      tone="go"
+      why={
+        <>
+          {signed(best.deltaCats, 2)} cats and {signed(best.deltaWinPct, 1)}% win this week
+          {best.drop ? `; ${signed(-best.seasonCost, 2)} cats over the rest of the season` : ""}
+          {next ? `; ${(best.net - next.net).toFixed(2)} cats better than the next-best move` : ""}
+        </>
+      }
+    >
+      Add <PlayerLink name={best.add.name} />
+      {best.drop ? (
+        <>
+          , drop <PlayerLink name={best.drop.name} />
+        </>
+      ) : (
+        " into your open spot"
+      )}
+    </RecLine>
   );
 }

@@ -25,7 +25,7 @@ import StatusBadge from "./StatusBadge";
  * ("PG/SG") instead, so the detail the extra columns used to carry is still there.
  *
  * NO ranking-source picker. FantasyPros offers one because it aggregates other people's
- * rankings; here there is exactly one ranking — this app's own 9-cat value — so a
+ * rankings; here there is exactly one ranking — this app's own 15-category value — so a
  * control with a single option would be furniture.
  */
 

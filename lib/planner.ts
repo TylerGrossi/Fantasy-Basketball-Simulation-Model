@@ -44,11 +44,12 @@
  */
 
 import type { FreeAgent, LeagueData, PlayerRow } from "./league";
-import { playerMoments } from "./league";
+import { rowMoments } from "./league";
 import type { Moments } from "./probability";
 import { addMoments, categoryProbabilities, subtractMoments } from "./probability";
 import { playerStatus } from "./playerPool";
 import { rosterDays } from "./streamers";
+import { seatDay, type SeatRule } from "./seatRule";
 
 export type PlanObjective = "cats" | "games";
 
@@ -83,6 +84,8 @@ export interface PlanContext {
   openSpots: number;
   /** Roster players in ESPN's IR slot today: inactive until an activate move. */
   ir?: Set<string>;
+  /** How each day's lineup is set (lib/seatRule.ts); absent = top `slots` by value. */
+  rule?: SeatRule;
 }
 
 /** `from` for an IR player not yet activated: after every real date, so never active. */
@@ -177,7 +180,7 @@ export function preparePlan(ctx: PlanContext): PreparedPlan {
     if (ir.has(p.name) && p.gamesLeft > 0) {
       teamMoments = subtractMoments(
         teamMoments,
-        playerMoments(p.avg, p.gamesLeft, ctx.league.variance, ctx.league.projectionError)
+        rowMoments(ctx.league, p, p.gamesLeft)
       );
     }
   }
@@ -201,7 +204,7 @@ export function preparePlan(ctx: PlanContext): PreparedPlan {
       ir: false,
     });
   }
-  const seated = seat(roster, ctx.dates, ctx.slots);
+  const seated = seat(roster, ctx.dates, ctx.slots, ctx.rule);
   const baseCats = categoryProbabilities(ctx.league, teamMoments, ctx.oppMoments).reduce(
     (a, b) => a + b,
     0
@@ -219,14 +222,14 @@ export function preparePlan(ctx: PlanContext): PreparedPlan {
 
 const active = (s: Seat, d: string) => (s.from == null || s.from <= d) && (s.until == null || d < s.until);
 
-/** Each day, the best `slots` by value who are on the roster and have a game start. */
-function seat(seats: Seat[], dates: string[], slots: number) {
+/** Each day, who starts among those on the roster with a game: `rule` (seatRule.ts). */
+function seat(seats: Seat[], dates: string[], slots: number, rule?: SeatRule) {
   const started = new Map<string, number>(seats.map((s) => [s.name, 0]));
   const starts = new Map<string, Set<string>>(seats.map((s) => [s.name, new Set()]));
   const perDay = dates.map((d) => {
     const playing = seats.filter((s) => active(s, d) && s.days.has(d));
-    if (playing.length > slots) playing.sort((a, b) => b.rank - a.rank);
-    const lineup = playing.slice(0, slots);
+    const chosen = seatDay(playing.map((s) => ({ name: s.name, value: s.rank })), d, slots, rule);
+    const lineup = playing.filter((s) => chosen.has(s.name));
     for (const s of lineup) {
       started.set(s.name, (started.get(s.name) ?? 0) + 1);
       starts.get(s.name)!.add(d);
@@ -299,19 +302,17 @@ function applyMoves(prep: PreparedPlan, moves: PlannedMove[]) {
 export function evaluatePlan(prep: PreparedPlan, moves: PlannedMove[]): PlanEvaluation {
   const { ctx } = prep;
   const { seats, invalid, applied } = applyMoves(prep, moves);
-  const { started, starts, perDay } = seat(seats, ctx.dates, ctx.slots);
+  const { started, starts, perDay } = seat(seats, ctx.dates, ctx.slots, ctx.rule);
 
   // Only what CHANGED moves the projection: swap each player's whole moments from his
   // no-move started games to the planned ones (the projection-error term is not additive
   // over games — see playerMoments).
   let mine = prep.teamMoments;
-  const v = ctx.league.variance;
-  const pe = ctx.league.projectionError;
   for (const s of seats) {
     const from = prep.base.get(s.name) ?? 0;
     const to = started.get(s.name) ?? 0;
     if (from === to) continue;
-    mine = addMoments(subtractMoments(mine, playerMoments(s.avg, from, v, pe)), playerMoments(s.avg, to, v, pe));
+    mine = addMoments(subtractMoments(mine, rowMoments(ctx.league, s, from)), rowMoments(ctx.league, s, to));
   }
   const expectedCats = categoryProbabilities(ctx.league, mine, ctx.oppMoments).reduce((a, b) => a + b, 0);
 

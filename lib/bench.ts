@@ -15,7 +15,7 @@
  */
 
 import type { LeagueData, PlayerRow } from "./league";
-import { playerMoments } from "./league";
+import { rowMoments } from "./league";
 import type { Moments } from "./probability";
 import { matchupOutcome, subtractMoments } from "./probability";
 
@@ -57,7 +57,7 @@ export function analyzeBench(
   const perPlayer: BenchPlayerImpact[] = players
     .filter((p) => p.gamesLeft > 0)
     .map((p) => {
-      const pm = playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError);
+      const pm = rowMoments(league, p, p.gamesLeft);
       const out = matchupOutcome(league, subtractMoments(teamMoments, pm), oppMoments);
       const deltaCats = out.expectedCats - play.expectedCats;
       return {

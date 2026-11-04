@@ -12,12 +12,13 @@ import {
 import { matchupOutcome, projectionPercentile } from "@/lib/probability";
 import { gradeForecast, type Forecast, type WinProbPoint } from "@/lib/predictions";
 import { formatGames } from "@/lib/liveAdjust";
-import { useLiveSides } from "@/lib/useLiveSides";
+import { useProjectedSides } from "@/lib/useLiveSides";
 import LiveBadge from "./LiveBadge";
 import WinProbabilityGauge from "./WinProbabilityGauge";
 import WinProbChart from "./WinProbChart";
 import CategoryAnalysis from "./CategoryAnalysis";
 import ScoreDistribution from "./ScoreDistribution";
+import RecLine from "./RecLine";
 
 interface Props {
   league: LeagueData;
@@ -80,7 +81,8 @@ export default function MatchupView({
   history = [],
 }: Props) {
   // Live totals + each side's projection minus the games those totals already count.
-  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, liveEnabled);
+  // The win probability's lineups: your Bench recommendation, his ESPN lineup (crowded days).
+  const { live, you, opp } = useProjectedSides(league, matchup, isHome, teamId, liveEnabled);
 
   const youMoments = useMemo(() => sideMoments(you, live.you), [you, live.you]);
   const oppMoments = useMemo(() => sideMoments(opp, live.opp), [opp, live.opp]);
@@ -168,9 +170,14 @@ export default function MatchupView({
       </div>
 
       <h2>Category analysis</h2>
+      <CategoryFocus categories={league.categories} probs={outcome.categoryProbs} />
       <CategoryAnalysis categories={league.categories} probs={outcome.categoryProbs} />
 
       <h2 id="projections">Detailed projections</h2>
+      <p className="caption ctx">
+        Each side&apos;s projected final total per category, with the range it could land in,
+        and the chance you win it.
+      </p>
       <ProjectionTable
         league={league}
         probs={outcome.categoryProbs}
@@ -542,5 +549,37 @@ function PreGameForecast({
         not a mistake. What is worth reading is the hit rate across a whole season.
       </p>
     </section>
+  );
+}
+
+/**
+ * Where to spend this week's moves (owner, 2026-11-03): the swing categories — within
+ * 30-70%, closest to a coin flip first — then what is safe and what is gone, so a pickup
+ * can be chosen for the categories that can still move.
+ */
+function CategoryFocus({ categories, probs }: { categories: string[]; probs: number[] }) {
+  const rows = categories.map((cat, i) => ({ cat, p: probs[i] ?? 0 }));
+  const pct = (p: number) => `${Math.round(p * 100)}%`;
+  const swing = rows
+    .filter((r) => r.p >= 0.3 && r.p <= 0.7)
+    .sort((a, b) => Math.abs(a.p - 0.5) - Math.abs(b.p - 0.5));
+  const safe = rows.filter((r) => r.p >= 0.85).length;
+  const gone = rows.filter((r) => r.p <= 0.15).length;
+  const tail = `${safe} safe, ${gone} out of reach`;
+  if (swing.length === 0) {
+    return (
+      <RecLine label="Focus" why={tail}>
+        Nothing is close; every category leans one way
+      </RecLine>
+    );
+  }
+  return (
+    <RecLine
+      label="Focus"
+      tone="go"
+      why={`${swing.map((r) => `${r.cat} ${pct(r.p)}`).join(", ")}; ${tail}`}
+    >
+      {swing.map((r) => r.cat).join(", ")}
+    </RecLine>
   );
 }

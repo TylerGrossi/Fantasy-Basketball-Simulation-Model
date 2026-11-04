@@ -175,7 +175,7 @@ def build_roster(roster, team_name, year, injury_data, window, frame=None, rank_
     """
     Per-player averages + games left for one fantasy roster.
 
-    `rank_ref` is every rostered player's line in the league (see main): the 9-cat value
+    `rank_ref` is every rostered player's line in the league (see main): the 15-category value
     that decides who sits on a day with more games than starting spots is scored against
     it, and exported per player as `value` so the schedule grid greys the same games the
     projection leaves out.
@@ -219,7 +219,7 @@ def build_roster(roster, team_name, year, injury_data, window, frame=None, rank_
             "gamesLeft": games,
             "nbaGamesLeft": max(games, sched_games.get(r["Player"], 0)),
             "avg": [_round(v, 3) for v in vals],
-            # 9-cat value, the rank for who sits on a crowded day (see docstring).
+            # Value (all 15 categories), the rank for who sits on a crowded day (see docstring).
             "value": _round(values.get(r["Player"], 0.0), 3),
             "status": str(getattr(p, "injuryStatus", "") or "") if p else "",
             "injured": bool(D.is_player_injured(p)) if p else False,
@@ -257,7 +257,7 @@ def build_free_agents(league, year, injury_data, window, size=150, rank_ref=None
         merged["Games Left"] = 0
 
     by_name = {getattr(p, "name", None): p for p in healthy}
-    # Same 9-cat value, against the same league reference, as the rosters' `value` — the
+    # Same value, against the same league reference, as the rosters' `value` — the
     # Streamers page seats a pickup in your lineup day by day by it (lib/streamers.ts).
     values = D._value_rank_scores_from_df(merged, rank_ref)
     out = []
@@ -305,9 +305,8 @@ def config_blend():
     return 0.7  # matches the app's blend_weight default
 
 
-# `TW` is TEAM WINS — a scored category in this league, but deliberately NOT part of the
-# 9-cat `value`, which stays the nine standard categories the whole app ranks by. It rides
-# along so the Player Card can show it; nothing computes with it.
+# `TW` is TEAM WINS — a scored category in this league, and part of `value`, which counts
+# all 15 league categories (engine/data.py league_value, since 2026-10-21).
 PLAYER_POOL_STATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO",
                      "FGM", "FGA", "FTM", "FTA", "3PA", "DD", "TW"]
 
@@ -618,7 +617,7 @@ def fetch_player_ages():
 
 def build_player_pool(app):
     """
-    Every rostered player + top free agents with their 9-cat Value and trend.
+    Every rostered player + top free agents with their Value (all 15 categories) and trend.
 
     Powers Player Value, Player Card, Compare and the Trade Simulator — all four are
     views over this one list, so it is exported once rather than per page.

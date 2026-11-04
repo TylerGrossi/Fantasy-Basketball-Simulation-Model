@@ -8,7 +8,7 @@ import PlayerLink from "./PlayerLink";
 import StatusBadge from "./StatusBadge";
 
 /**
- * Head-to-head of any two players: 9-cat Value plus the season per-game line, each row a
+ * Head-to-head of any two players: Value (all 15 categories) plus the season per-game line, each row a
  * pair of bars diverging from the centre label with the better side in green.
  *
  * Higher is better everywhere except turnovers. The bars are proportional to the two

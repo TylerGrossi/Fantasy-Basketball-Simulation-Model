@@ -67,6 +67,26 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/build_data.py
 
+      # Will They Play (scripts/injury/score.py): every player's chance of playing each game
+      # left this week, from the official injury report + two trained models in
+      # engine/injury/. The box scores since the models' cutoff live in this cache, not in
+      # git (they change every run), so a run fetches only the days it has not seen; a cold
+      # cache refetches from the cutoff (a few minutes). The key is unique per run so each
+      # run saves its additions; restore-keys picks up the newest earlier one.
+      - name: Restore the Will They Play box-score cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fbbsim-injury
+          key: injury-${{ github.run_id }}
+          restore-keys: injury-
+
+      # Never blocks the league refresh: if scoring fails, the rest of the snapshot still
+      # deploys and availability.json keeps its previous version.
+      - name: Score Will They Play
+        continue-on-error: true
+        timeout-minutes: 10
+        run: python scripts/injury/score.py
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

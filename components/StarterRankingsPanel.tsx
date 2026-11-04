@@ -8,7 +8,7 @@ import StrengthByPosition from "./StrengthByPosition";
 
 /**
  * Starter Rankings, plus a team picker: a small "Total Value" leaderboard (the sum of
- * each team's ten starters' 9-cat value) sits to the left of the bar chart, and clicking
+ * each team's ten starters' value) sits to the left of the bar chart, and clicking
  * a row swaps whose starters the chart shows. A client component because the click has
  * to repaint the chart without a page navigation — `starterRankings()` is cheap enough
  * (a handful of array sorts over ~300 players) to recompute per click rather than

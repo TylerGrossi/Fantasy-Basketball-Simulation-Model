@@ -419,7 +419,7 @@ function StandingsCard({ league, meId }: { league: LeagueData; meId: number }) {
 /* ------------------------------------------------------------- free agents */
 
 /**
- * The best healthy players nobody has, by 9-cat value: the top one at each position, then
+ * The best healthy players nobody has, by value: the top one at each position, then
  * the best of the rest. Before a player has games this season that value is his 2025-26
  * line (statSource "last"), still the honest pre-season ranking.
  */

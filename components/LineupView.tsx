@@ -14,7 +14,7 @@ export interface LineupPlayer {
   position: string;
   /** Every position ESPN considers this player eligible for; falls back to [position]. */
   eligibleSlots: string[];
-  /** 9-cat value over the whole season. */
+  /** Value (all 15 categories) over the whole season. */
   value: number;
   /** Same score over the last 30 / last 15 days. See VALUE_MODES. */
   recent: number;
@@ -45,7 +45,7 @@ const HEADLINE = ["PTS", "REB", "AST", "STL", "BLK"];
 const TRAILING = ["TO", "DD", "TW"];
 
 /**
- * Which 9-cat number the board ranks and totals by.
+ * Which value number the board ranks and totals by.
  *
  * The same three the Streamlit app offered (`VMAP` in streamlit_app.py): season-long
  * value, or the same score recomputed over the last 30 / 15 days. They answer different
@@ -302,6 +302,12 @@ export default function LineupView({
             </span>
           )}
         </div>
+
+        <p className="caption ctx">
+          Your best legal ten by the value basis chosen above: Season for the long view,
+          30D or 15D to start whoever is in form. The board starts filled with it;
+          move players to try a different lineup and compare the totals.
+        </p>
 
         <h2>
           Starters <span className="lu-count">{filled} / {layout.length}</span>

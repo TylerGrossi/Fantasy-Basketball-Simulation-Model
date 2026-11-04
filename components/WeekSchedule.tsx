@@ -5,6 +5,8 @@ import type { LeagueData, PlayerRow } from "@/lib/league";
 import { playerStatus } from "@/lib/playerPool";
 import { dayLabel, dayRange, etDate } from "@/lib/dates";
 import { byLineup, type LineupOrder } from "@/lib/lineupOrder";
+import { legalStarters, type CrowdedDay } from "@/lib/crowdedDays";
+import { rosterDays } from "@/lib/streamers";
 import PlayerLink from "./PlayerLink";
 
 /**
@@ -12,21 +14,34 @@ import PlayerLink from "./PlayerLink";
  * ESPN's grid leaves to you answered underneath: on which days do more of your players
  * have games than you have starting spots?
  *
- * Who loses the start on such a day follows the projection's own rule (engine/data.py
- * `_accumulate_counted_games_by_day`): the top N healthy players by 9-cat VALUE play, the
- * rest sit (points per game until 2026-10-21, and still the fallback on an older export). So the greyed cells here are exactly the games the projections already
- * leave out — the "(1)" beside a GL of 3 on the other tables.
+ * Who sits on such a day (owner, 2026-11-03) is the Bench section's call: a day is
+ * crowded when not everyone with a game fits a LEGAL lineup (positions checked), and on a
+ * day still to play the greyed games are the recommended sits - the lineup that wins the
+ * most expected categories (lib/crowdedDays.ts). A day already played, which no lineup
+ * can change, falls back to the legal by-value lineup.
  */
 
 
 export default function WeekSchedule({
   league,
   sides,
+  layout,
+  eligibility,
 }: {
   league: LeagueData;
   /** Your side first; the toggle switches between them. */
   /** `lineup` = today's ESPN lineup (lib/lineupOrder.ts), the rows' display order. */
-  sides: Array<{ label: string; players: PlayerRow[]; lineup?: LineupOrder }>;
+  /** `crowded` = that side's recommendations for the days still to play. */
+  sides: Array<{
+    label: string;
+    players: PlayerRow[];
+    lineup?: LineupOrder;
+    crowded?: CrowdedDay[] | null;
+  }>;
+  /** Starting slots in order; absent = the count-only cap. */
+  layout?: string[];
+  /** Name -> ESPN eligible slots. */
+  eligibility?: Record<string, string[]>;
 }) {
   const sched = league.weekSchedule;
   const [which, setWhich] = useState(0);
@@ -53,17 +68,45 @@ export default function WeekSchedule({
     const healthy = (p: PlayerRow) => !p.injured && playerStatus(p.status)[1] !== "out";
     const gameOf = (p: PlayerRow, d: string) => sched.teams[p.nbaTeam]?.[d] ?? null;
 
-    // Per day: who has a game, and of the healthy ones, who would start.
+    // Who can play each day (owner, 2026-11-03: no out players unless expected back this
+    // week). Days still to play use the projection's injury-aware schedule (rosterDays: an
+    // out player gets only the games his expected return leaves him, from the END of the
+    // week), and a player in an IR slot plays none. Days already played: healthy today.
+    const future = days.filter((d) => !today || d >= today);
+    const irNames = new Set(
+      [...(side.lineup ?? new Map())].filter(([, v]) => v.label === "IR").map(([n]) => n)
+    );
+    const fit = new Map(
+      players.map((p) => [p.name, rosterDays(p, { dates: future, teams: sched.teams })])
+    );
+    const canPlay = (p: PlayerRow, d: string) =>
+      !!gameOf(p, d) &&
+      !irNames.has(p.name) &&
+      (today && d < today ? healthy(p) : !!fit.get(p.name)?.has(d));
+
+    // Per day, who starts: the Bench recommendation where there is one (its own list of
+    // who plays, so the two sections always agree), else the legal by-value lineup.
+    const rec = new Map((side.crowded ?? []).map((c) => [c.date, c]));
+    const cap = layout?.length ? layout : Array<string>(slots).fill("UTIL");
     const perDay = days.map((d) => {
-      const playing = players.filter((p) => gameOf(p, d) && healthy(p));
-      const starts = new Set(playing.slice(0, slots).map((p) => p.name));
-      return { d, count: playing.length, starts };
+      const r = rec.get(d);
+      const playing = r
+        ? new Set(r.players.map((x) => x.name))
+        : new Set(players.filter((p) => canPlay(p, d)).map((p) => p.name));
+      const starts = r
+        ? new Set(r.players.filter((x) => !x.recSit).map((x) => x.name))
+        : legalStarters(
+            players.filter((p) => playing.has(p.name)).map((p) => ({ name: p.name, value: rank(p) })),
+            cap,
+            eligibility
+          );
+      return { d, count: playing.size, playing, starts, crowded: starts.size < playing.size };
     });
     // Rows read in today's ESPN lineup order, PG first and IR last; who STARTS on a
     // crowded day is still the value rule above. Without live slots: by value, as before.
     const shown = byLineup(side.players, side.lineup ?? new Map(), (a, b) => rank(b) - rank(a));
     return { players, shown, perDay, gameOf, healthy };
-  }, [sched, side, days, slots, ptsIdx]);
+  }, [sched, side, days, slots, ptsIdx, layout, eligibility, today]);
 
   if (!sched || !grid) {
     return (
@@ -74,7 +117,7 @@ export default function WeekSchedule({
     );
   }
 
-  const overDays = grid.perDay.filter((x) => x.count > slots);
+  const overDays = grid.perDay.filter((x) => x.crowded);
   const slotCol = (side?.lineup?.size ?? 0) > 0;
 
   return (
@@ -98,15 +141,15 @@ export default function WeekSchedule({
 
       <p className="ws-sum">
         {overDays.length === 0 ? (
-          <>Every day fits: no more than {slots} healthy players with games on any day.</>
+          <>Every day fits: everyone with a game can start.</>
         ) : (
           <>
             <b>
-              {overDays.length} day{overDays.length > 1 ? "s" : ""} over the {slots} starting
-              spots
+              {overDays.length} crowded day{overDays.length > 1 ? "s" : ""}
             </b>{" "}
-            ({overDays.map((x) => `${dayLabel(x.d)} ${x.count}`).join(", ")}). Greyed games are
-            the ones that would sit — the lowest-value players that day.
+            ({overDays.map((x) => `${dayLabel(x.d)}: ${x.count} playing, ${x.starts.size} start`).join("; ")}).
+            Greyed games sit: the Bench section&apos;s pick on days still to play, positions
+            checked; by value on days already played.
           </>
         )}
       </p>
@@ -143,10 +186,10 @@ export default function WeekSchedule({
                     <PlayerLink name={p.name} />
                     {code && <span className={`ws-st ${sev}`}> {code}</span>}
                   </td>
-                  {grid.perDay.map(({ d, starts }) => {
+                  {grid.perDay.map(({ d, starts, playing }) => {
                     const g = grid.gameOf(p, d);
-                    const sits = !!g && grid.healthy(p) && !starts.has(p.name);
-                    const out = !!g && !grid.healthy(p);
+                    const sits = !!g && playing.has(p.name) && !starts.has(p.name);
+                    const out = !!g && !playing.has(p.name);
                     return (
                       <td
                         key={d}
@@ -155,9 +198,9 @@ export default function WeekSchedule({
                         }${d === today ? " ws-today" : ""}${today && d < today ? " ws-past" : ""}`}
                         title={
                           sits
-                            ? `${p.name} has a game but more players than starting spots — the lowest-value players sit`
+                            ? `${p.name} has a game but sits - see Bench for why`
                             : out
-                              ? `${p.name} is ${code || "out"}`
+                              ? `${p.name} is ${code || "out"} or in an IR slot that day`
                               : undefined
                         }
                       >
@@ -174,10 +217,10 @@ export default function WeekSchedule({
             <tr>
               {slotCol && <td />}
               <td className="ws-foot-l">Players with games</td>
-              {grid.perDay.map(({ d, count }) => (
+              {grid.perDay.map(({ d, count, crowded }) => (
                 <td
                   key={d}
-                  className={`ws-count${count > slots ? " ws-over" : ""}${
+                  className={`ws-count${crowded ? " ws-over" : ""}${
                     d === today ? " ws-today" : ""
                   }`}
                 >

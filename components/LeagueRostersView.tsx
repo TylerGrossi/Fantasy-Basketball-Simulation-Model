@@ -17,7 +17,7 @@ import StatusBadge from "./StatusBadge";
 /**
  * Every team's roster, one card per team, laid out the way ESPN's league-wide roster page
  * is: SLOT / PLAYER / ACQ, one row per roster SPOT — so an unfilled IR shows as "Empty"
- * rather than silently shortening the card. The extra column is VALUE, this app's 9-cat
+ * rather than silently shortening the card. The extra column is VALUE, this app's 15-category
  * z-score, which ESPN has no equivalent of.
  *
  * Two orderings, and they are deliberately different:

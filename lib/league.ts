@@ -4,7 +4,8 @@
  */
 
 import type { LeagueMeta, Moments, StatVector } from "./probability";
-import { matchupOutcome, withCurrentTotals } from "./probability";
+import { addMoments, matchupOutcome, subtractMoments, withCurrentTotals } from "./probability";
+import { etDate } from "./dates";
 
 export interface PlayerRow {
   name: string;
@@ -23,7 +24,7 @@ export interface PlayerRow {
   /** Per-game averages (season blended with last 30). Moments derive from this. */
   avg: StatVector;
   /**
-   * 9-cat value of `avg`, scored against every rostered player in the league — the rank
+   * Value of `avg` over all 15 league categories, scored against every rostered player in the league — the rank
    * for who sits on a crowded day, the same one the export's counted games used. Absent
    * on exports built before 2026-10-21; callers fall back to points per game.
    */
@@ -39,7 +40,7 @@ export interface FreeAgent {
   gamesLeft: number;
   avg: StatVector;
   status: string;
-  /** 9-cat value on the rosters' scale (see PlayerRow.value). Absent on older exports. */
+  /** Value on the rosters' scale (see PlayerRow.value). Absent on older exports. */
   value?: number;
 }
 
@@ -241,7 +242,7 @@ export interface PoolPlayer {
    */
   lineupSlot?: string;
   acquisitionType?: string;
-  /** 9-cat value: standard deviations above/below a replacement-level player. */
+  /** Value (all 15 categories): standard deviations above/below a replacement-level player. */
   value: number;
   recent: number;
   trend: number;
@@ -346,6 +347,18 @@ export interface SeasonData {
 
 export interface LeagueData extends LeagueMeta {
   generatedAt: string;
+  /**
+   * Will They Play (lib/availability.ts), attached by loadLeague: the chance of playing
+   * each remaining game, [ISO date, p], for players WITH DOUBT only - a listed or ESPN
+   * injury status, or any game under 85% (a back-to-back rest habit). Everyone else is
+   * absent and projects exactly as before (owner's option b, 2026-11-03).
+   */
+  availability?: Record<string, Array<[string, number]>>;
+  /**
+   * Every rostered player's ESPN eligible slots, attached by loadLeague from the player
+   * pool, so any page can seat a LEGAL lineup (lib/lineupCount.ts, lib/crowdedDays.ts).
+   */
+  eligibility?: Record<string, string[]>;
   season: number;
   /** The ESPN league's own name. Optional — older exports predate it. */
   leagueName?: string;
@@ -471,6 +484,104 @@ export function playerMoments(
       (a, i) => g * Math.pow(a * variance[i], 2) + Math.pow(g * a * (projectionError?.[i] ?? 0), 2)
     ),
   };
+}
+
+/**
+ * A player's remaining-game moments when each game is only LIKELY (Will They Play, owner
+ * 2026-11-03): `probs[d]` is his chance of playing game d. The number of games he plays,
+ * N, is then random, with mean m = sum(p) and variance v = sum(p(1-p)).
+ *
+ * Per game his line is a(1 + delta) + noise, noise sd a*varianceFactor, delta the shared
+ * projection error. By the law of total variance:
+ *
+ *   mu  = m * a
+ *   var = m*(a*vf)^2 + (m*a*err)^2      <- playerMoments(avg, m): today's formula at m games
+ *       + a^2 * v * (1 + err^2)         <- the new term: not knowing WHETHER he plays
+ *
+ * With every p at 0 or 1, v = 0 and this IS playerMoments(avg, count) — healthy players
+ * are unchanged. A questionable star now widens the projection instead of counting as a
+ * certain full game or none.
+ */
+export function availabilityMoments(
+  avg: StatVector,
+  probs: number[],
+  variance: number[],
+  projectionError?: number[]
+): Moments {
+  const ps = probs.map((p) => Math.min(1, Math.max(0, p)));
+  const m = ps.reduce((s, p) => s + p, 0);
+  const v = ps.reduce((s, p) => s + p * (1 - p), 0);
+  const base = playerMoments(avg, m, variance, projectionError);
+  return {
+    mu: base.mu,
+    var: base.var.map((x, i) => {
+      const err = projectionError?.[i] ?? 0;
+      return x + avg[i] * avg[i] * v * (1 + err * err);
+    }),
+  };
+}
+
+/**
+ * His chance of playing each of his `games` remaining counted games, or null when he has
+ * no doubt (not in `league.availability`). The LAST `games` of his remaining dates: the
+ * projection's injury-aware count already drops the games before an expected return (the
+ * scorer puts 0 on those too), so averaging the whole week would charge him twice.
+ */
+export function availProbs(
+  league: Pick<LeagueData, "availability">,
+  name: string,
+  games: number
+): number[] | null {
+  const rows = league.availability?.[name];
+  if (!rows || games <= 0) return null;
+  const today = etDate();
+  const left = rows.filter(([d]) => d >= today).map(([, p]) => p);
+  if (!left.length) return null;
+  const whole = Math.floor(games);
+  const frac = games - whole;
+  // More counted games than dated rows (a stale export): repeat the last known chance.
+  const pick = (k: number) => left[Math.max(0, left.length - k)] ?? left[left.length - 1];
+  const probs: number[] = [];
+  for (let k = whole; k >= 1; k--) probs.push(pick(k));
+  // Today's partly-played game counts as a fraction: scale its chance the same way.
+  if (frac > 1e-9) probs.unshift(pick(whole + 1) * frac);
+  return probs;
+}
+
+/**
+ * A player's moments over `games` remaining games, availability-aware: availabilityMoments
+ * for a player with doubt, playerMoments for everyone else. EVERY swap that takes a
+ * roster player out or puts one in (Streamers, Bench, the planner, crowded days) uses this,
+ * so it subtracts exactly what applyAvailability put into the side.
+ */
+export function rowMoments(
+  league: Pick<LeagueData, "availability" | "variance" | "projectionError">,
+  p: { name: string; avg: StatVector },
+  games: number
+): Moments {
+  const probs = availProbs(league, p.name, games);
+  return probs
+    ? availabilityMoments(p.avg, probs, league.variance, league.projectionError)
+    : playerMoments(p.avg, games, league.variance, league.projectionError);
+}
+
+/**
+ * A side's projection with each doubtful player's games swapped from certain to likely:
+ * his playerMoments out, his rowMoments in. Run on the LIVE side (after remainingSide),
+ * so `gamesLeft` is what is really left. Players with no doubt are untouched.
+ */
+export function applyAvailability(league: LeagueData, side: TeamSide): TeamSide {
+  if (!league.availability) return side;
+  let mine: Moments = { mu: side.projMu, var: side.projVar };
+  let changed = false;
+  for (const p of side.players) {
+    if (p.gamesLeft <= 0 || !league.availability[p.name]) continue;
+    const certain = playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError);
+    const likely = rowMoments(league, p, p.gamesLeft);
+    mine = addMoments(subtractMoments(mine, certain), likely);
+    changed = true;
+  }
+  return changed ? { ...side, projMu: mine.mu, projVar: mine.var } : side;
 }
 
 const RATIO_PAIRS: Record<string, [string, string]> = {

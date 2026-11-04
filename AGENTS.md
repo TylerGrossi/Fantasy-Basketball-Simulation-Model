@@ -19,7 +19,7 @@ scripts/         build_data.py and friends — export public/data/*.json from en
 engine/          the calculation engine — no UI, importable by any script above:
                    config.py    constants + ESPN credentials
                    data.py      ESPN connection, NBA schedule, games-left counting
-                   simulation.py  the 9-cat simulation, streamers, bench, playoffs
+                   simulation.py  the 15-category simulation, streamers, bench, playoffs
                    season.py    season-level functions (standings, power rankings,
                                 schedules, player pool) the export calls directly
 public/data/     generated JSON (checked in; regenerate with `npm run data`)
@@ -262,7 +262,7 @@ Trade Simulator) were re-matched to their Streamlit originals: Player Value is t
 filters, Player Card has the bio header and value tiles, Compare has the diverging-bar
 head-to-head, and Trade has Buy Low / Sell High plus the all-play record and the
 before/after category table. Shared helpers live in `lib/playerPool.ts` (status mapping,
-headshot, 9-cat aggregates) — port of the legacy `_player_status` / `_team_agg` /
+headshot, category aggregates) — port of the legacy `_player_status` / `_team_agg` /
 `_cat9_record` family; keep the four views reading from it rather than re-deriving.
 
 **The per-player "Last 10 games" log and the Player Card bio are fetched CLIENT-SIDE**
@@ -347,6 +347,23 @@ all-or-nothing form). "Sit" means the player misses ALL remaining games in the w
 the export carries games-left over the whole window, not a per-day schedule, so a literal
 "bench today" is not expressible with this data.
 
+**Crowded days** (`lib/crowdedDays.ts`, bottom of the Bench section, 2026-11-03) DOES work
+per day: on each plannable day (`useMoveWindow`) where more players have a game than there
+are slots, it brute-forces every choice of who sits (C(n,k), a few hundred at most) and
+scores each with the planner's moment swap, other days held at the default by-value
+lineup. Shows the recommended sits on one header line (the by-value default is still computed —
+`defaultCats`/`defaultWin` — but no longer printed, owner 2026-11-03), each player's one-game value
+(cats / win %, can be negative) and the cost of flipping his call. Ties keep the default.
+The Schedule grid (`components/WeekSchedule.tsx`) greys the SAME sits, through the shared
+hook `lib/useCrowdedDays.ts` (both sides, each scored against the other); a played day
+falls back to `legalStarters` (legal by-value). Who can play a future day is `rosterDays`
+(injury-aware: out all week = no games, expected back = his last games), never "healthy
+today". POSITIONS ARE ENFORCED: only lineups that legally fill `rosterSlots` (PG..C, G, F, UTIL x3)
+count, eligibility from the pool's `eligibleSlots` (passed from `app/scoreboard/page.tsx`,
+your roster only); a "crowded" day includes one where positions, not the count, bind. The
+default is the legal by-value lineup, and the projection is re-based on it for every day.
+Days scored independently.
+
 **Caveat that applies to BOTH Streamers and Bench:** the analysis optimises THIS MATCHUP ONLY.
 A player with no games left this week costs nothing to drop, so the engine will happily
 suggest dropping a star who is resting. That is correct for the objective it is given and
@@ -402,7 +419,7 @@ file for how it got this shape.
 | [config.py](engine/config.py) | Constants **and ESPN credentials** (league id, cookies, default team), plus category variance and NBA team maps. |
 | [data.py](engine/data.py) | ESPN connection, roster/matchup/box-score fetch, NBA schedule scraping, and **games-left counting** (injury-aware, IR-aware, 10-per-day cap). |
 | [simulation.py](engine/simulation.py) | Simulation engine: per-team category sim, matchup comparison, streamer analysis, bench strategy, league stats, playoff bracket. |
-| [season.py](engine/season.py) | Season-level functions `scripts/build_data.py` calls directly: player pool + 9-cat value, season stats, power rankings, team schedules, playoff probabilities. Extracted from the old Streamlit app — see its module docstring. |
+| [season.py](engine/season.py) | Season-level functions `scripts/build_data.py` calls directly: player pool + 15-category value, season stats, power rankings, team schedules, playoff probabilities. Extracted from the old Streamlit app — see its module docstring. |
 | `config_secrets.py` | Real ESPN cookies + Gemini key. Gitignored; copy `config_secrets.example.py` to make your own. |
 | `Old Models/` (repo root, not under `engine/`) | The original single-file version. Historical reference; do not edit or import. |
 
@@ -451,6 +468,42 @@ ESPN connection details (`ESPN_LEAGUE_ID`, `ESPN_S2`, `ESPN_SWID`,
 on the **Settings** page and *which week* in the **This Week** left rail — never the
 creds. `DEFAULT_TEAM_NAME` is currently `"VJ Maxx"` (the league champion). Team names
 come from the API and are resolved to an id with `data.resolve_team_id`.
+
+**Will They Play (owner, 2026-11-03)** - `/will-they-play` under Tools: each player's chance of
+playing each game left this week, from two trained models (official NBA injury reports +
+ESPN box scores, 2018-26). Everything - data, training, results, retraining, traps - is in
+[scripts/injury/README.md](scripts/injury/README.md). Scored in CI by `scripts/injury/score.py`
+(a `continue-on-error` step in refresh-data.yml) into `public/data/availability.json`.
+IN THE PROJECTIONS (option b, owner 2026-11-03): only players WITH DOUBT (a status, or a
+game under 85%) change - loadLeague attaches `league.availability` for them, `useLiveSides`
+runs `applyAvailability` (their games become likely: `availabilityMoments`, expected games
++ the variance of not knowing whether he plays), and every swap (Streamers, Bench, planner,
+crowded days) uses `rowMoments`, which subtracts exactly what was added. Healthy players are
+byte-identical to before. NOT in the Python export yet: the logged win-probability readings
+(winprob-log) and pre-week forecast still count every game as certain.
+
+**Who starts, in the win probability (owner, 2026-11-03).** On each crowded day still to set,
+the WIN PROBABILITY counts your team's Bench recommendation and the opponent's ESPN lineup
+(starters with a game; empty starting spots filled from his bench by value), positions
+checked - `lib/lineupCount.ts`, through `useProjectedSides` / `useLiveWin` (gauge, odds,
+projections, League Home, Game Day, Schedule, Bench play-vs-sit, Streamers, the planner).
+Streamers and the planner re-seat your week per move with the SAME rule (`lib/seatRule.ts`
+`seatDay`: positions checked, the recommendation's sits placed last), passed as `rule`
+from `useProjectedSides` - with no move it reproduces the recount, so their 'no move' IS
+the gauge (verified 96.9% = 96.9%, 2026-11-03). The crowded-day ANALYSIS is the one place
+that keeps the export baseline (top 10 by value): it is what produces the recommendation.
+Rostered players' positions ride on `league.eligibility` (loadLeague).
+
+**Recommendations and context (owner, 2026-11-03).** A section that makes a call shows it
+as ONE line through `components/RecLine.tsx`: "Recommend: <call> (<numbers behind it>)",
+optionally led by a date ("Wed 11/4; Recommend: Sit ..."). Live on: Bench (play vs sit,
+crowded days), Streamers (top move by Net, or "No move"),
+Category analysis ("Focus:" the 30-70% categories), Trade (Accept / Decline / Toss-up at
++-0.5 value). A short "how it is computed" caption sits above where it helps,
+class `caption ctx`. Both `.rec-line` and `.ctx` are hidden on phones (<=767px), shown
+on desktop and iPad. The owner removed the captions from the three matchup charts (win
+probability, score distribution, this week) and from Category analysis (the Focus line
+stays) - don't add them back.
 
 ## Design system — "Analyst Sheet" (do not drift from this)
 

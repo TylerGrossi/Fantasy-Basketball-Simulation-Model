@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
+  applyAvailability,
   categoryRecord,
   scoreboardRows,
   winProbability,
   type LeagueData,
+  type Matchup,
   winPctText,
 } from "@/lib/league";
+import { useLiveWin } from "@/lib/useLiveSides";
 import { remainingSide } from "@/lib/liveAdjust";
 import type { MatchupOutcome } from "@/lib/probability";
 import { useLiveTotals } from "@/lib/useLiveTotals";
@@ -46,6 +49,15 @@ function useLiveMatchups(league: LeagueData, meId: number) {
     (meHome ? mine?.away.current : mine?.home.current) ?? [],
     !!mine
   );
+  // YOUR matchup's number is THE win probability (useLiveWin: availability + your Bench
+  // lineup + his ESPN lineup), so League Home and Current Matchup can never disagree.
+  // Hooks cannot be conditional, so with no matchup it runs on an empty placeholder.
+  const placeholder = useMemo<Matchup>(() => {
+    const zero = league.stats.map(() => 0);
+    const side = { players: [], projMu: zero, projVar: zero, current: zero } as unknown as Matchup["home"];
+    return { homeId: -1, awayId: -2, home: side, away: side };
+  }, [league.stats]);
+  const { outcome: projected } = useLiveWin(league, mine ?? placeholder, !!meHome, meId, !!mine);
 
   return useMemo(() => {
     const byPair = new Map((live.games ?? []).map((g) => [`${g.homeId}-${g.awayId}`, g]));
@@ -58,14 +70,17 @@ function useLiveMatchups(league: LeagueData, meId: number) {
       // Without this matchup's live totals the snapshot's stand in, and they count none
       // of the games played since the export — so nothing comes out of the projection.
       const gl = g ? live.gameLeft : null;
-      const home = remainingSide(league, m.home, g?.homePlayedToday ?? null, gl);
-      const away = remainingSide(league, m.away, g?.awayPlayedToday ?? null, gl);
+      // Other matchups: Will They Play's availability too, on the export's lineups.
+      const home = applyAvailability(league, remainingSide(league, m.home, g?.homePlayedToday ?? null, gl));
+      const away = applyAvailability(league, remainingSide(league, m.away, g?.awayPlayedToday ?? null, gl));
       const rec = categoryRecord(scoreboardRows(league, homeVec, awayVec));
-      const p = winProbability(league, home, away, homeVec, awayVec);
+      let p = winProbability(league, home, away, homeVec, awayVec);
       if (m.homeId === meId || m.awayId === meId) {
         const isHome = m.homeId === meId;
         myOppId = isHome ? m.awayId : m.homeId;
-        myOutcome = isHome ? p : winProbability(league, away, home, awayVec, homeVec);
+        myOutcome = projected;
+        // The scores card reads the same number from the home side's point of view.
+        p = isHome ? projected : { ...projected, win: projected.loss, loss: projected.win };
       }
       return {
         homeId: m.homeId,
@@ -76,7 +91,7 @@ function useLiveMatchups(league: LeagueData, meId: number) {
       };
     });
     return { lines, myOutcome: myOutcome as MatchupOutcome | null, myOppId: myOppId as number | null };
-  }, [league, meId, live.games, live.gameLeft]);
+  }, [league, meId, live.games, live.gameLeft, projected]);
 }
 
 type LiveMatchups = ReturnType<typeof useLiveMatchups>;

@@ -37,7 +37,7 @@ export default async function Page() {
   const posOf = new Map(pool.map((p) => [p.name, p.position]));
   const eligOf = new Map(pool.map((p) => [p.name, p.eligibleSlots]));
   const valueOf = new Map(pool.map((p) => [p.name, p.value]));
-  // The same 9-cat score over the last 30 / 15 days, so the board can be ranked by form
+  // The same value score over the last 30 / 15 days, so the board can be ranked by form
   // rather than by the season. Both fall back to the season value when absent, matching
   // what the exporter does for a player with too few recent games.
   const recentOf = new Map(pool.map((p) => [p.name, p.recent]));

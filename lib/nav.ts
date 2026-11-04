@@ -69,7 +69,7 @@ export const WEEK_PAGES: NavPage[] = [
   { label: "Schedule", href: "/scoreboard#schedule", blurb: "Who plays each day, and crowded days" },
   { label: "Win Probability", href: "/scoreboard#odds", blurb: "Win probability and the model behind it" },
   { label: "Streamers", href: "/scoreboard#streamers", blurb: "Every pickup scored against this week" },
-  { label: "Bench", href: "/scoreboard#bench", blurb: "Play everyone, or protect what is banked" },
+  { label: "Bench", href: "/scoreboard#bench", blurb: "Play or protect what is banked; who to sit on crowded days" },
   { label: "Roster", href: "/scoreboard#roster", blurb: "Your players, games left, averages" },
 ];
 
@@ -145,6 +145,7 @@ export const FLAT_NAV: NavEntry[] = [
      */
     items: [
       { label: "Player Value", href: "/player-value" },
+      { label: "Will They Play", href: "/will-they-play" },
       { label: "Trade Simulator", href: "/trade" },
       { label: "Compare", href: "/compare" },
       { label: "Lineup", href: "/lineup" },
@@ -208,6 +209,7 @@ export const SEASON_PAGES: NavPage[] = [
 export const TOOLS_PAGES: NavPage[] = [
   { label: "Player Card", href: "/player", blurb: "Profile, value, form, last ten games" },
   { label: "Player Value", href: "/player-value", blurb: "Rostered and free agents by league value" },
+  { label: "Will They Play", href: "/will-they-play", blurb: "Each player's chance of playing, game by game" },
   { label: "Trade", href: "/trade", blurb: "What a deal does to each category" },
   { label: "Compare", href: "/compare", blurb: "Two players side by side" },
   { label: "Lineup", href: "/lineup", blurb: "Who to start, and what each swap costs" },

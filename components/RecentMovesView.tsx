@@ -43,7 +43,7 @@ function badgeClass(action: string) {
   return "moved";
 }
 
-/** A move plus the player's 9-cat value, joined by the page. Defined in lib/moves.ts,
+/** A move plus the player's value, joined by the page. Defined in lib/moves.ts,
  *  re-exported here because the page imports it from this module. */
 export type { MoveRow } from "@/lib/moves";
 

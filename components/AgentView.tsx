@@ -40,6 +40,7 @@ const TOOL_LABELS: Record<string, string> = {
   power_rankings: "Reading power rankings",
   find_players: "Searching for players",
   league_rosters: "Surveying every roster",
+  will_they_play: "Checking who will play",
   web_search: "Searching the web",
 };
 

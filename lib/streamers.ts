@@ -22,9 +22,10 @@
  */
 
 import type { FreeAgent, LeagueData, PlayerRow } from "./league";
-import { playerMoments } from "./league";
+import { playerMoments, rowMoments } from "./league";
 import type { Moments } from "./probability";
 import { categoryProbabilities, matchupOutcome, subtractMoments, addMoments } from "./probability";
+import { seatDay, type SeatRule } from "./seatRule";
 
 export interface StreamerResult {
   /** The free agent to add. */
@@ -71,6 +72,12 @@ export interface DailyLineup {
   teams: Record<string, Record<string, string>>;
   /** Starting slots per day. */
   slots: number;
+  /**
+   * How the lineup is set (lib/seatRule.ts): positions + the Bench recommendation's sits,
+   * so "no move" here equals the win probability's lineup (owner, 2026-11-03). Absent:
+   * the old count-only rule, top `slots` by value.
+   */
+  rule?: SeatRule;
 }
 
 export interface StreamerOptions {
@@ -115,13 +122,18 @@ type Seatable = Pick<PlayerRow, "name" | "nbaTeam" | "avg" | "value"> & {
   days: Set<string>;
 };
 
-/** Started games per player over `dates`: each day, the best `slots` by value who play. */
-function startedGames(players: Seatable[], dates: string[], slots: number): Map<string, number> {
+/** Started games per player over `dates`: each day's starters under `rule` (seatRule.ts). */
+function startedGames(
+  players: Seatable[],
+  dates: string[],
+  slots: number,
+  rule?: SeatRule
+): Map<string, number> {
   const out = new Map<string, number>(players.map((p) => [p.name, 0]));
   for (const d of dates) {
     const playing = players.filter((p) => p.days.has(d));
-    if (playing.length > slots) playing.sort((a, b) => rankOf(b) - rankOf(a));
-    for (const p of playing.slice(0, slots)) out.set(p.name, (out.get(p.name) ?? 0) + 1);
+    const starts = seatDay(playing.map((p) => ({ name: p.name, value: rankOf(p) })), d, slots, rule);
+    for (const name of starts) out.set(name, (out.get(name) ?? 0) + 1);
   }
   return out;
 }
@@ -176,12 +188,12 @@ export function analyzeStreamers(
   const seated: Seatable[] = daily
     ? roster.map((p) => ({ ...p, days: rosterDays(p, daily) }))
     : [];
-  const before = daily ? startedGames(seated, daily.dates, daily.slots) : null;
+  const before = daily ? startedGames(seated, daily.dates, daily.slots, daily.rule) : null;
   const byName = new Map(roster.map((p) => [p.name, p]));
 
   // WHOLE-GAMES fallback: each roster player's contribution, computed once.
   const dropMoments = new Map<string, Moments>(
-    droppable.map((p) => [p.name, playerMoments(p.avg, p.gamesLeft, league.variance, league.projectionError)])
+    droppable.map((p) => [p.name, rowMoments(league, p, p.gamesLeft)])
   );
 
   // SEASON COST: a typical full week, your whole roster healthy, against its own copy.
@@ -205,7 +217,8 @@ export function analyzeStreamers(
 
   const results: StreamerResult[] = [];
   for (const fa of candidates) {
-    const addM = playerMoments(fa.avg, fa.gamesLeft, league.variance, league.projectionError);
+    // A questionable pickup is worth his likely games, not all of them.
+    const addM = rowMoments(league, fa, fa.gamesLeft);
     const faSeat: Seatable | null = daily
       ? {
           ...fa,
@@ -227,26 +240,25 @@ export function analyzeStreamers(
         const after = startedGames(
           [...seated.filter((p) => p.name !== drop?.name), faSeat],
           daily.dates,
-          daily.slots
+          daily.slots,
+          daily.rule
         );
         netGames = 0;
         // From `from` started games to `to`: swap his whole moments rather than adding the
         // difference, since the projection-error term is not additive over games.
-        const apply = (avg: number[], from: number, to: number) => {
+        const apply = (row: { name: string; avg: number[] }, from: number, to: number) => {
           if (from === to) return;
           netGames += to - from;
-          const v = league.variance;
-          const pe = league.projectionError;
           mine = addMoments(
-            subtractMoments(mine, playerMoments(avg, from, v, pe)),
-            playerMoments(avg, to, v, pe)
+            subtractMoments(mine, rowMoments(league, row, from)),
+            rowMoments(league, row, to)
           );
         };
         for (const [name, g] of before) {
           const p = byName.get(name);
-          if (p) apply(p.avg, g, after.get(name) ?? 0);
+          if (p) apply(p, g, after.get(name) ?? 0);
         }
-        apply(fa.avg, 0, after.get(fa.name) ?? 0);
+        apply(fa, 0, after.get(fa.name) ?? 0);
       } else {
         if (drop) {
           const dm = dropMoments.get(drop.name);

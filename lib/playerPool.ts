@@ -121,7 +121,10 @@ export const STARTER_LAYOUT = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "U
  * either guard, F either forward, UTIL anyone. Read from `eligibleSlots` (every position
  * ESPN lists a player at), never the single default `position`.
  */
-export function eligibleForSlot(p: PoolPlayer, slot: string): boolean {
+/** All the slot rule reads: a pool row, or anything carrying the same two fields. */
+export type Slotted = Pick<PoolPlayer, "eligibleSlots" | "position">;
+
+export function eligibleForSlot(p: Slotted, slot: string): boolean {
   if (slot === "UTIL") return true;
   const raw = p.eligibleSlots?.length ? p.eligibleSlots : p.position ? [p.position] : [];
   const e = new Set(raw.map((s) => s.trim().toUpperCase()));
@@ -134,7 +137,7 @@ export function eligibleForSlot(p: PoolPlayer, slot: string): boolean {
  * Seat as many of `players` into distinct `slots` as possible (Kuhn's algorithm for
  * maximum bipartite matching). Returns `slotIndex -> playerIndex`, null where unfilled.
  */
-function maxMatching(players: PoolPlayer[], slots: string[]): Array<number | null> {
+export function maxMatching(players: Slotted[], slots: string[]): Array<number | null> {
   const slotOf: Array<number | null> = slots.map(() => null);
   const augment = (pi: number, seen: boolean[]): boolean => {
     for (let si = 0; si < slots.length; si++) {
@@ -155,7 +158,7 @@ function maxMatching(players: PoolPlayer[], slots: string[]): Array<number | nul
 }
 
 /** How many of `players` can be seated at once — `players.length` means "all of them fit". */
-function seatable(players: PoolPlayer[], slots: string[]): number {
+export function seatable(players: Slotted[], slots: string[]): number {
   return maxMatching(players, slots).filter((x) => x !== null).length;
 }
 
@@ -211,7 +214,7 @@ export function bestLineup(
 
 /**
  * ESPN's "Starter Rankings" widget: for each starting slot, where this team's player
- * ranks against every other team's player in that same slot, by 9-cat value. Every team
+ * ranks against every other team's player in that same slot, by value. Every team
  * is measured on its BEST possible lineup (see `bestLineup`), not the one last set.
  *
  * UTIL is pooled rather than ranked slot-by-slot. A position-locked slot holds exactly

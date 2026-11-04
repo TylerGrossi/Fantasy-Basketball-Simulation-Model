@@ -99,8 +99,8 @@ function RosterTable({
             <th>Player</th>
             <th>NBA</th>
             <th className="num">GL</th>
-            {/* 9-cat value (the same number that decides who sits on a crowded day). */}
-            <th className="num" title="9-cat value: standard deviations above a replacement-level player">
+            {/* Value, all 15 categories (the same number that decides who sits on a crowded day). */}
+            <th className="num" title="Value over all 15 league categories: standard deviations above a replacement-level player">
               Value
             </th>
             {cols.map((c) => (

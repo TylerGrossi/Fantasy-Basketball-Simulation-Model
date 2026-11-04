@@ -59,7 +59,7 @@ Lineup are desktop-only (`HIDDEN_ON_MOBILE`). All four switches live in `lib/nav
 
 The engine already does: closed-form category probabilities, Poisson-binomial exact
 score distribution, all-play records, luck, power rankings with rank history, playoff
-and championship odds, streamer sweeps, bench decisions, and 9-cat player values with
+and championship odds, streamer sweeps, bench decisions, and 15-category player values with
 30-day and 15-day trends.
 
 **Shipped 2026-08-01:**
@@ -90,7 +90,7 @@ and championship odds, streamer sweeps, bench decisions, and 9-cat player values
 **Shipped 2026-08-04:**
 
 - **League Rosters** (`/league-rosters`) — every team's roster in ESPN's own layout: slot,
-  player, how they were acquired, and 9-cat value, cards ordered by total roster value.
+  player, how they were acquired, and value, cards ordered by total roster value.
   Needed two new export fields (`lineupSlot`, `acquisitionType`) and the league's roster
   shape (`rosterSlots`) so unfilled spots render as "Empty".
 - **Transaction Counter** on League Stats — ESPN's own widget (Loss / Trade / Acq / Drop /

@@ -4,6 +4,7 @@ import type { LeagueData, Matchup, PoolPlayer, Team } from "./league";
 import type { PreWeekLog, WinProbLog } from "./predictions";
 import type { CareerLog } from "./career";
 import type { ConsistencyPool } from "./espnLive";
+import type { AvailabilityData } from "./availability";
 import { resolveTeam } from "./team";
 
 /**
@@ -38,7 +39,10 @@ const dataFile = (name: string) => path.join(process.cwd(), "public", "data", na
  * the HTML — no loading spinner for the first paint, and no client fetch to see anything.
  */
 export async function loadLeague(): Promise<LeagueData> {
-  const raw = await readJson<LeagueData>(dataFile("league.json"));
+  const [raw, avail] = await Promise.all([
+    readJson<LeagueData>(dataFile("league.json")),
+    loadAvailability(),
+  ]);
   // Normalise the optional sections. An older or partially-generated export was enough to
   // crash a production BUILD (`Cannot read properties of undefined`) rather than just
   // render an empty page — defaults make a stale file degrade instead of failing.
@@ -48,7 +52,37 @@ export async function loadLeague(): Promise<LeagueData> {
     matchups: raw.matchups ?? [],
     freeAgents: raw.freeAgents ?? [],
     seasonData: raw.seasonData ?? {},
+    availability: doubtful(avail),
+    eligibility: rosteredEligibility(raw),
   };
+}
+
+/** Rostered players' eligible slots (see LeagueData.eligibility). */
+function rosteredEligibility(raw: LeagueData): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const p of raw.seasonData?.playerPool ?? []) {
+    if (!p.owner || p.owner === "Waivers") continue;
+    const e = p.eligibleSlots?.length ? p.eligibleSlots : [p.position].filter(Boolean);
+    if (e.length) out[p.name] = e;
+  }
+  return out;
+}
+
+/**
+ * Will They Play, reduced to what the projections use (owner's option b, 2026-11-03): only
+ * players WITH DOUBT - a status on the report or ESPN, or any game this week under 85% -
+ * with [date, chance] per remaining game. Healthy players are left out so their
+ * projections do not move. Undefined without availability.json.
+ */
+function doubtful(data: AvailabilityData | null): LeagueData["availability"] {
+  if (!data) return undefined;
+  const out: Record<string, Array<[string, number]>> = {};
+  for (const p of data.players) {
+    if (!p.week.length) continue;
+    if (!p.status && !p.week.some((g) => g.p < 0.85)) continue;
+    out[p.name] = p.week.map((g) => [g.date, g.p]);
+  }
+  return out;
 }
 
 /** One player's line for one scoring period, as ESPN reported it. */
@@ -162,11 +196,23 @@ export async function loadGameSpread(): Promise<GameSpread | null> {
   }
 }
 
+/**
+ * Will They Play (lib/availability.ts). Null when the export has not written it yet —
+ * the page then says so rather than showing anything made up.
+ */
+export async function loadAvailability(): Promise<AvailabilityData | null> {
+  try {
+    return await readJson<AvailabilityData>(dataFile("availability.json"));
+  } catch {
+    return null;
+  }
+}
+
 /** One team's week-0 power ranking (see loadWeek0). */
 export interface Week0Rank {
   teamId: number;
   teamName: string;
-  /** Whole-roster 9-cat value: the Value Power Rankings' "Total Value". */
+  /** Whole-roster value: the Value Power Rankings' "Total Value". */
   value: number;
   place: number;
 }

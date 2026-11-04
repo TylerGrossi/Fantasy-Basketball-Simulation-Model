@@ -5,6 +5,7 @@ import type { LeagueData, PoolPlayer } from "@/lib/league";
 import { teamAgg, type Agg } from "@/lib/playerPool";
 import PlayerSearch from "./PlayerSearch";
 import PlayerLink from "./PlayerLink";
+import RecLine from "./RecLine";
 
 /**
  * A give-and-get trade board, then buy-low / sell-high ideas.
@@ -196,6 +197,11 @@ export default function TradeView({
   return (
     <div className="trade-layout">
       <div className="trade-main">
+      <p className="caption ctx">
+        Build a deal by adding players to each side. Each player carries his season value
+        over all 15 categories; the deal is judged on the value that changes hands and on
+        how your best ten&apos;s per-game category totals move.
+      </p>
       <div className="trade-board">
         <Side
           title="You give"
@@ -299,6 +305,23 @@ export default function TradeView({
           full width. */}
       {active ? (
         <div className="trade-result">
+          {/* The trade call on one line (owner, 2026-11-03). Season value decides it; the
+              category count and roster spots are the context. Within half a point either
+              way is a toss-up, decided by which categories you need. */}
+          <RecLine
+            tone={net >= 0.5 ? "go" : net <= -0.5 ? "hold" : undefined}
+            why={`${net >= 0 ? "+" : ""}${net.toFixed(1)} season value; better in ${catUp} categor${
+              catUp === 1 ? "y" : "ies"
+            }, worse in ${catDown}${
+              rosterDelta > 0
+                ? `; you need ${rosterDelta} open roster spot${rosterDelta > 1 ? "s" : ""}`
+                : rosterDelta < 0
+                  ? `; frees ${-rosterDelta} roster spot${rosterDelta < -1 ? "s" : ""} for a pickup`
+                  : ""
+            }`}
+          >
+            {net >= 0.5 ? "Accept" : net <= -0.5 ? "Decline" : "Toss-up"}
+          </RecLine>
           {/*
             A row of equal tiles rather than one big number with two labels trailing after
             it. Net value keeps the emphasis (it is the headline), and the rest are the

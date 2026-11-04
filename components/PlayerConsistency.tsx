@@ -12,7 +12,7 @@ import { consistency, usePlayerGames, type PlayerGame } from "@/lib/playerGames"
  * posts the same line every night is a floor you can build a roster around. The season
  * average — the only thing the card above shows — is identical for both.
  *
- * Every figure here is the per-game 9-cat value from `usePlayerGames`, scored on the same
+ * Every figure here is the per-game value from `usePlayerGames`, scored on the same
  * scale as everything else on the page, so "his median night was +2.1" is directly
  * comparable to the Total Value bar.
  */

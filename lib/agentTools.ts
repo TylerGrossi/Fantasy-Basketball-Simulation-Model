@@ -38,6 +38,7 @@ import {
 import { playerStatus } from "./playerPool";
 import { dayLabel, etDate } from "./dates";
 import { APP_TOUR } from "./appTour";
+import type { AvailabilityData, AvailabilityGame, AvailabilityPlayer } from "./availability";
 
 export interface ToolDeclaration {
   name: string;
@@ -519,6 +520,25 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
     },
   },
   {
+    name: "will_they_play",
+    description:
+      "WILL HE PLAY - the app's injury-availability models (the Will They Play page). For each player: his chance of playing each game left this matchup week, which model gave it (the official NBA injury report's game-day read, or the look-ahead for games no report covers yet), his injury status and reason, the reasons behind the number (games missed in a row, back-to-back rest habit, availability record) and how often he played before when listed with the same status. Use this for ANY question about whether a player will play, injury odds, who on a team is at risk this week, questionable/doubtful players, load management or back-to-back rest. Prefer it over web_search for the odds; web_search only adds news the report does not have.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "A player to look up (fuzzy). Leave empty to list a team's players." },
+        team: {
+          type: "string",
+          description: "Fantasy team to list: 'mine' for the user's team, 'free agents', or a team name. Ignored when name is given. Default: the user's team.",
+        },
+        at_risk_only: {
+          type: "boolean",
+          description: "List only players with doubt (a status, or under 85% for their next game). Default true.",
+        },
+      },
+    },
+  },
+  {
     name: "web_search",
     description:
       "Search the live web (Google) for real-world basketball information the league data can't answer: current NBA news, injuries, trades, the offseason, standings, awards, schedules, or general basketball facts. Use this whenever the question is about the real NBA rather than this fantasy league's own player pool.",
@@ -570,7 +590,9 @@ export function createToolRunner(
    * been run. Optional on purpose: a missing file costs the percentile sentence and
    * nothing else, so a fresh clone still gets a working agent.
    */
-  consistencyPool: ConsistencyPool | null = null
+  consistencyPool: ConsistencyPool | null = null,
+  /* Will They Play (public/data/availability.json); null before the export writes it. */
+  availability: AvailabilityData | null = null
 ) {
   const pool = league.seasonData.playerPool ?? [];
   const standings = league.seasonData.standings ?? [];
@@ -1195,6 +1217,58 @@ export function createToolRunner(
         return out.join("\n");
       }
 
+      case "will_they_play": {
+        if (!availability) {
+          return "No Will They Play data in this export yet - the availability models have not run. Use web_search for injury news.";
+        }
+        const pct = (p: number) => `${Math.round(p * 100)}%`;
+        const game = (g: AvailabilityGame) =>
+          `${dayLabel(g.date)} ${g.home ? "vs" : "@"} ${g.opp}${g.b2b ? " (2nd night of a back-to-back)" : ""}: ${g.p < 0.01 ? "out" : `${pct(g.p)}${g.source === "report" ? " (injury report)" : " (look-ahead)"}`}`;
+        const line = (p: AvailabilityPlayer) => {
+          const parts = [
+            `${p.name} (${p.nbaTeam}${p.positions.length ? `, ${p.positions.join("/")}` : ""}; ${p.owner || "free agent"})`,
+            p.status ? `status ${p.status}${p.injury ? ` - ${p.injury}` : ""}` : "no injury status",
+            p.week.length ? `games left: ${p.week.map(game).join("; ")}` : "no games left this week",
+          ];
+          if (p.expectedReturn) parts.push(`ESPN expected return ${p.expectedReturn}`);
+          if (p.note) parts.push(`ESPN note: ${p.note}`);
+          if (p.factors.length) parts.push(`why: ${p.factors.join("; ")}`);
+          if (p.record) parts.push(`when listed ${p.status} before he played ${p.record.played} of ${p.record.listed}`);
+          return parts.join(". ");
+        };
+        const header =
+          `Will They Play (models trained on ${availability.model.seasons} of NBA injury reports and box scores, through ${availability.model.trainedThrough}; ` +
+          `latest injury report read: ${availability.reportTime ?? "none yet today"}). Percentages are CALIBRATED rates - 60% means players in that spot played about 60% of the time, not a yes/no call. ` +
+          "Game-day numbers come from the official report; look-ahead numbers (no report yet) come from the schedule and the player's habits, and are less certain several days out.";
+        const wanted = str("name");
+        if (wanted) {
+          const q = wanted.toLowerCase();
+          const hit =
+            availability.players.find((p) => p.name.toLowerCase() === q) ??
+            availability.players.find((p) => p.name.toLowerCase().includes(q)) ??
+            availability.players.find((p) => q.split(" ").every((w) => p.name.toLowerCase().includes(w)));
+          return hit
+            ? `${header}\n${line(hit)}`
+            : `${header}\nNo player matching "${wanted}" is tracked (only rostered players and the free agents the app follows).`;
+        }
+        const teamArg = str("team").toLowerCase();
+        const target =
+          !teamArg || teamArg === "mine"
+            ? myTeamName
+            : teamArg.startsWith("free")
+              ? ""
+              : (matchTeam(teamNames, str("team")) ?? myTeamName);
+        const risky = args.at_risk_only !== false;
+        const rows = availability.players
+          .filter((p) => (target ? p.owner === target : !p.owner))
+          .filter((p) => !risky || !!p.status || (p.next != null && p.next.p < 0.85))
+          .sort((a, b) => (a.next?.p ?? 2) - (b.next?.p ?? 2));
+        const who = target || "free agents";
+        return rows.length
+          ? `${header}\n${who}, ${risky ? "players with doubt" : "all players"} (lowest chance first):\n${rows.map((p) => `- ${line(p)}`).join("\n")}`
+          : `${header}\nNobody on ${who} has any doubt about playing this week.`;
+      }
+
       case "web_search":
         return webSearch(str("query"));
 
@@ -1298,6 +1372,16 @@ export function systemInstruction(
     "recommending fixes for it and stop counting it against a target - rank candidates " +
     "by the categories they actually want. A punt build makes the overall 'value' " +
     "number misleading, so lean on the per-category figures instead.\n" +
+    "   - WILL HE PLAY: will_they_play. The app's own injury models give each player's " +
+    "chance of playing every game left this week (the Will They Play page). For any " +
+    "question about whether someone plays, injury odds, questionable/doubtful players, " +
+    "load management or back-to-back rest, call it FIRST and quote its percentages; then " +
+    "web_search only if the user wants the latest news behind a status. Explain a number " +
+    "with the reasons it returns (listed status, games missed, back-to-back habit, his " +
+    "record when listed). The win probability and Streamers already count a doubtful " +
+    "player's games at these chances, and on a crowded day count your team's Bench " +
+    "recommendation and the opponent's ESPN lineup (positions checked) - so when the user " +
+    "asks why the odds moved, an injury report change is a real reason.\n" +
     "2. web_search (Google) - use this LIBERALLY for anything the league data can't " +
     "answer and anything current or that you're not fully certain of: live news, " +
     "injuries, trades, standings, scores, schedules, awards, rosters, coaching changes, " +

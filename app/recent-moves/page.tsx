@@ -15,7 +15,7 @@ export default async function Page() {
   const moves = league.seasonData?.recentMoves ?? [];
 
   /**
-   * Join each move to the player's 9-cat value, so the feed can be judged and not just
+   * Join each move to the player's value, so the feed can be judged and not just
    * read — dropping a +13 is a different story from dropping a −2.
    *
    * Done HERE rather than in the export: the value already ships in `playerPool`, and

@@ -1,7 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { winProbability, type LeagueData, type Matchup } from "./league";
+import { applyAvailability, sideMoments, winProbability, type LeagueData, type Matchup } from "./league";
+import { lineupOrder } from "./lineupOrder";
+import { recountTheirs, recountYours } from "./lineupCount";
+import { startingLayout, useCrowdedDays } from "./useCrowdedDays";
+import { useMoveWindow } from "./useMoveWindow";
 import { liveRoster, remainingSide } from "./liveAdjust";
 import { useLiveTotals } from "./useLiveTotals";
 
@@ -31,21 +35,29 @@ export function useLiveSides(
   // already played come out of what is left.
   const you = useMemo(
     () =>
-      remainingSide(
+      // Will They Play last: a doubtful player's remaining games become likely, not
+      // certain (lib/league.ts applyAvailability).
+      applyAvailability(
         league,
-        liveRoster(league, youRaw, live.youToday, live.youAdded),
-        live.youPlayed,
-        live.gameLeft
+        remainingSide(
+          league,
+          liveRoster(league, youRaw, live.youToday, live.youAdded),
+          live.youPlayed,
+          live.gameLeft
+        )
       ),
     [league, youRaw, live.youToday, live.youAdded, live.youPlayed, live.gameLeft]
   );
   const opp = useMemo(
     () =>
-      remainingSide(
+      applyAvailability(
         league,
-        liveRoster(league, oppRaw, live.oppToday, live.oppAdded),
-        live.oppPlayed,
-        live.gameLeft
+        remainingSide(
+          league,
+          liveRoster(league, oppRaw, live.oppToday, live.oppAdded),
+          live.oppPlayed,
+          live.gameLeft
+        )
       ),
     [league, oppRaw, live.oppToday, live.oppAdded, live.oppPlayed, live.gameLeft]
   );
@@ -59,6 +71,58 @@ export function useLiveSides(
  * projection minus every game they already count, through `winProbability`; `.win` is a
  * win outright (a tied matchup is not one). Read it from here, never recompute it.
  */
+/**
+ * The live sides as the WIN PROBABILITY counts them (owner, 2026-11-03): on each crowded
+ * day still to set, your team starts the Bench recommendation and the opponent his ESPN
+ * lineup, positions checked (lib/lineupCount.ts). Every win-probability number reads
+ * this; the tools (Streamers, planner, crowded days) keep useLiveSides' export baseline.
+ */
+export function useProjectedSides(
+  league: LeagueData,
+  matchup: Matchup,
+  isHome: boolean,
+  teamId: number,
+  enabled = true
+) {
+  const base = useLiveSides(league, matchup, isHome, teamId, enabled);
+  const { live } = base;
+  const youM = useMemo(() => sideMoments(base.you, live.you), [base.you, live.you]);
+  const oppM = useMemo(() => sideMoments(base.opp, live.opp), [base.opp, live.opp]);
+  const crowded = useCrowdedDays(league, base.you.players, youM, oppM, live.youToday, live.gameLeft, undefined);
+  const win = useMoveWindow(league, live.gameLeft);
+  const youLineup = useMemo(() => lineupOrder(live.youToday), [live.youToday]);
+  const oppLineup = useMemo(() => lineupOrder(live.oppToday), [live.oppToday]);
+  const irOf = (l: ReturnType<typeof lineupOrder>) =>
+    new Set([...l].filter(([, v]) => v.label === "IR").map(([n]) => n));
+  const window = useMemo(
+    () => ({ dates: win.dates, teams: win.teams, slots: win.slots, layout: startingLayout(league) }),
+    [win.dates, win.teams, win.slots, league]
+  );
+  const you = useMemo(
+    () => recountYours(league, base.you, window, irOf(youLineup), crowded),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [league, base.you, window, youLineup, crowded]
+  );
+  const opp = useMemo(
+    () => recountTheirs(league, base.opp, window, irOf(oppLineup), oppLineup),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [league, base.opp, window, oppLineup]
+  );
+  // The same lineup rule for tools that re-seat your week (Streamers, the planner): with
+  // no move it reproduces the recount above, so their "no move" is this win probability.
+  const rule = useMemo(
+    () => ({
+      layout: window.layout,
+      eligibility: league.eligibility,
+      sits: new Map(
+        (crowded ?? []).map((c) => [c.date, new Set(c.players.filter((x) => x.recSit).map((x) => x.name))])
+      ),
+    }),
+    [window.layout, league.eligibility, crowded]
+  );
+  return { live, you, opp, crowded, rule };
+}
+
 export function useLiveWin(
   league: LeagueData,
   matchup: Matchup,
@@ -66,7 +130,7 @@ export function useLiveWin(
   teamId: number,
   enabled = true
 ) {
-  const { live, you, opp } = useLiveSides(league, matchup, isHome, teamId, enabled);
+  const { live, you, opp } = useProjectedSides(league, matchup, isHome, teamId, enabled);
   const outcome = useMemo(
     () => winProbability(league, you, opp, live.you, live.opp),
     [league, you, opp, live.you, live.opp]
