@@ -8381,6 +8381,7 @@ table.sheet.ws-table tfoot tr.pl-foot-base td { border-top: 0; font-weight: 400;
 .wpc { position: relative; margin: 0.4rem 0 1.4rem; }
 .wpc svg { display: block; overflow: visible; }
 .wpc-ax { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); }
+.wpc-label { font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--ink); }
 .wpc-tip {
   position: absolute;
   transform: translate(-50%, calc(-100% - 12px));

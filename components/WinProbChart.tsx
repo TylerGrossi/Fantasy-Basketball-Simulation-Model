@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { WinProbPoint } from "@/lib/predictions";
 import { dayLabel, etDate } from "@/lib/dates";
 
@@ -9,9 +9,11 @@ import { dayLabel, etDate } from "@/lib/dates";
  * forecast, every data refresh's reading (public/data/winprob-log.json), and the live
  * value now. One series, so no legend box — the heading names it.
  *
- * Marks follow the app's chart rules: a 2px cobalt line, 8px markers with a 2px surface
- * ring, a recessive grid, and the 50% line dashed as the reference that matters (above it
- * you are favoured). Hovering anywhere on the plot picks the nearest point.
+ * Drawn as the line against 50% (owner, 2026-11-06): the space between the line and the
+ * dashed 50% reference is filled green where you are favoured and red where you are not,
+ * so "am I winning" reads at a glance. Only the latest reading gets a marker and a value
+ * label; the per-refresh dots were clutter. Hovering anywhere on the plot picks the
+ * nearest point.
  *
  * The live "now" point is added after mount: it depends on the clock, and a server-
  * rendered timestamp would never match the browser's (a hydration mismatch).
@@ -42,6 +44,7 @@ export default function WinProbChart({
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => setNow(Date.now()), [liveWin]);
   const [hover, setHover] = useState<number | null>(null);
+  const clip = useId();
 
   const all = useMemo(() => {
     const out = points.map((p) => ({ t: Date.parse(p.at), win: p.win, kind: p.kind as string }));
@@ -70,7 +73,15 @@ export default function WinProbChart({
 
   const x = (t: number) => r2(PAD.l + ((Math.min(Math.max(t, x0), x1) - x0) / (x1 - x0)) * PW);
   const y = (p: number) => r2(PAD.t + (1 - p) * PH);
-  const line = all.map((p) => `${x(p.t)},${y(p.win)}`).join(" ");
+  const line = "M" + all.map((p) => `${x(p.t)},${y(p.win)}`).join("L");
+  // The same line closed down to 50%; clipped above and below 50% for the two fills.
+  const area = `${line}V${y(0.5)}H${x(all[0].t)}Z`;
+  const last = all[all.length - 1];
+  // The latest value's label sits above its marker, or below when that would leave the
+  // plot, and to the left when the marker is near the right edge.
+  const lx = x(last.t);
+  const ly = y(last.win) < PAD.t + 18 ? y(last.win) + 18 : y(last.win) - 10;
+  const lAnchor = lx > W - PAD.r - 30 ? "end" : lx < PAD.l + 30 ? "start" : "middle";
 
   // One x tick per day of the week, at midnight Eastern.
   const days: string[] = [];
@@ -127,31 +138,38 @@ export default function WinProbChart({
           </g>
         ))}
         {days.map((d) => {
-          const t = Date.parse(`${d}T00:00:00-04:00`);
           const mid = Date.parse(`${d}T12:00:00-04:00`);
           return (
-            <g key={d}>
-              <line x1={x(t)} x2={x(t)} y1={PAD.t} y2={H - PAD.b} stroke="var(--line-2)" strokeWidth={1} />
-              <text x={x(mid)} y={H - PAD.b + 20} textAnchor="middle" className="wpc-ax">
-                {/* Weekday only ("Tue"): six full dates do not fit a third of the row. */}
-                {dayLabel(d).split(" ")[0]}
-              </text>
-            </g>
+            <text key={d} x={x(mid)} y={H - PAD.b + 20} textAnchor="middle" className="wpc-ax">
+              {/* Weekday only ("Tue"): six full dates do not fit a third of the row. */}
+              {dayLabel(d).split(" ")[0]}
+            </text>
           );
         })}
 
-        <polyline points={line} fill="none" stroke="var(--cobalt)" strokeWidth={2} strokeLinejoin="round" />
-        {all.map((p, i) => (
-          <circle
-            key={`${p.t}-${i}`}
-            cx={x(p.t)}
-            cy={y(p.win)}
-            r={p.kind === "now" ? 5 : 4}
-            fill={p.kind === "now" ? "var(--card)" : "var(--cobalt)"}
-            stroke={p.kind === "now" ? "var(--cobalt)" : "var(--card)"}
-            strokeWidth={2}
-          />
-        ))}
+        <defs>
+          <clipPath id={`${clip}-up`}>
+            <rect x={0} y={0} width={W} height={y(0.5)} />
+          </clipPath>
+          <clipPath id={`${clip}-dn`}>
+            <rect x={0} y={y(0.5)} width={W} height={H - y(0.5)} />
+          </clipPath>
+        </defs>
+        <path d={area} fill="var(--good)" fillOpacity={0.16} clipPath={`url(#${clip}-up)`} />
+        <path d={area} fill="var(--bad)" fillOpacity={0.14} clipPath={`url(#${clip}-dn)`} />
+        <path d={line} fill="none" stroke="var(--ink-2)" strokeWidth={1.75} strokeLinejoin="round" />
+        <circle cx={lx} cy={y(last.win)} r={5} fill="var(--card)" stroke="var(--cobalt)" strokeWidth={2} />
+        <text
+          x={lx}
+          y={ly}
+          textAnchor={lAnchor}
+          className="wpc-label"
+          stroke="var(--card)"
+          strokeWidth={3}
+          paintOrder="stroke"
+        >
+          {(last.win * 100).toFixed(1)}%
+        </text>
 
         {h && (
           <line x1={x(h.t)} x2={x(h.t)} y1={PAD.t} y2={H - PAD.b} stroke="var(--ink-3)" strokeWidth={1} />
