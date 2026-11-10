@@ -191,12 +191,12 @@ export function PlayerBoxTable({
         </table>
       </div>
       {heat && (
-        <p className="ws-key-note">
+        <p className="wst-key-note">
           Shaded against each player&rsquo;s own season average:
-          <span className="ws-chip heat-up2">well above</span>
-          <span className="ws-chip heat-up1">above</span>
-          <span className="ws-chip heat-dn1">below</span>
-          <span className="ws-chip heat-dn2">well below</span>
+          <span className="wst-chip heat-up2">well above</span>
+          <span className="wst-chip heat-up1">above</span>
+          <span className="wst-chip heat-dn1">below</span>
+          <span className="wst-chip heat-dn2">well below</span>
           (1 and 2 standard errors of a week&rsquo;s average). TO counts fewer as better.
         </p>
       )}

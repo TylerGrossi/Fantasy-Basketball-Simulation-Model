@@ -43,7 +43,7 @@ export default function RaceGrid({
 }) {
   const n = race[0]?.days.length ?? 0;
   return (
-    <div className="ws-race-grid">
+    <div className="wst-race-grid">
       {race.map((r) => (
         <RaceCell key={r.cat} race={r} focus={focus} opp={opp} n={n} />
       ))}
@@ -104,13 +104,13 @@ function RaceCell({
   const hx = hover != null ? x(hover + 1) : null;
 
   return (
-    <figure className={`ws-race ${hover != null ? "ws-race-on" : ""}`}>
-      <figcaption className="ws-race-h">
-        <span className="ws-race-cat">{cat}</span>
-        <span className="ws-race-v mono">
-          <b className={sign > 0 ? "ws-strong" : ""}>{formatValue(cat, shown.focus)}</b>
-          <span className="ws-dash">–</span>
-          <b className={sign < 0 ? "ws-strong" : ""}>{formatValue(cat, shown.opp)}</b>
+    <figure className={`wst-race ${hover != null ? "wst-race-on" : ""}`}>
+      <figcaption className="wst-race-h">
+        <span className="wst-race-cat">{cat}</span>
+        <span className="wst-race-v mono">
+          <b className={sign > 0 ? "wst-strong" : ""}>{formatValue(cat, shown.focus)}</b>
+          <span className="wst-dash">–</span>
+          <b className={sign < 0 ? "wst-strong" : ""}>{formatValue(cat, shown.opp)}</b>
         </span>
       </figcaption>
       <svg
@@ -149,7 +149,7 @@ function RaceCell({
             x={x(i + 1)}
             y={RH - 3}
             textAnchor="middle"
-            className={`ws-ax ${hover === i ? "ws-ax-on" : ""}`}
+            className={`wst-ax ${hover === i ? "wst-ax-on" : ""}`}
           >
             {day(d.date)[0]}
           </text>
@@ -157,7 +157,7 @@ function RaceCell({
         {/* The whole plot is the hit area: larger than the line, as the pointer needs. */}
         <rect x={0} y={0} width={RW} height={RH} fill="transparent" />
       </svg>
-      <p className="ws-race-n">
+      <p className="wst-race-n">
         {note}
         {hover == null && race.changes > 0 && (
           <span> · {race.changes} lead change{race.changes > 1 ? "s" : ""}</span>

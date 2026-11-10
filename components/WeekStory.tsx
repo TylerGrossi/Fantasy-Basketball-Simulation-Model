@@ -47,25 +47,25 @@ export default function WeekStory({
   const hasDays = data.dates.length > 0;
   return (
     <section className="ws">
-      <div className="ws-head">
-        <h2 className="rc-box-title ws-title">How the week played out</h2>
+      <div className="wst-head">
+        <h2 className="rc-box-title wst-title">How the week played out</h2>
         <Legend focus={focus} opp={opp} />
       </div>
 
-      <div className="ws-two">
-        <div className="ws-stack">
+      <div className="wst-two">
+        <div className="wst-stack">
           {data.forecast && <ForecastStrip f={data.forecast} focus={focus} opp={opp} />}
           {hasDays && (
-            <div className="ws-card">
-              <h3 className="ws-h">Score by day</h3>
-              <p className="ws-sub">The category score at the end of each day.</p>
+            <div className="wst-card">
+              <h3 className="wst-h">Score by day</h3>
+              <p className="wst-sub">The category score at the end of each day.</p>
               <ScoreByDay days={data.byDay} focus={focus} opp={opp} />
             </div>
           )}
         </div>
-        <div className="ws-card">
-          <h3 className="ws-h">Category margins</h3>
-          <p className="ws-sub">
+        <div className="wst-card">
+          <h3 className="wst-h">Category margins</h3>
+          <p className="wst-sub">
             Final margin in typical weekly spreads (1 = one standard deviation of team-weeks
             in that category). Short bars were close.
           </p>
@@ -74,20 +74,20 @@ export default function WeekStory({
       </div>
 
       {hasDays && (
-        <div className="ws-card">
-          <h3 className="ws-h ws-h-solo">Category race</h3>
+        <div className="wst-card">
+          <h3 className="wst-h wst-h-solo">Category race</h3>
           <RaceGrid race={data.race} focus={focus} opp={opp} />
         </div>
       )}
 
       {data.games.focus.length + data.games.opp.length > 0 && (
-        <div className="ws-card">
-          <h3 className="ws-h ws-h-solo">Standout games</h3>
-          <div className="ws-pv">
+        <div className="wst-card">
+          <h3 className="wst-h wst-h-solo">Standout games</h3>
+          <div className="wst-pv">
             {([["focus", focus], ["opp", opp]] as const).map(([k, side]) => (
-              <div className="ws-games" key={k}>
-                <div className="ws-pv-team">
-                  <i className={`ws-key ${k === "focus" ? "ws-key-f" : "ws-key-o"}`} />
+              <div className="wst-games" key={k}>
+                <div className="wst-pv-team">
+                  <i className={`wst-key ${k === "focus" ? "wst-key-f" : "wst-key-o"}`} />
                   {side.name}
                 </div>
                 {data.games[k].map((g, i) => (
@@ -105,13 +105,13 @@ export default function WeekStory({
 
 function Legend({ focus, opp }: { focus: Side; opp: Side }) {
   return (
-    <div className="ws-legend">
+    <div className="wst-legend">
       <span>
-        <i className="ws-key ws-key-f" />
+        <i className="wst-key wst-key-f" />
         {focus.name}
       </span>
       <span>
-        <i className="ws-key ws-key-o" />
+        <i className="wst-key wst-key-o" />
         {opp.name}
       </span>
     </div>
@@ -130,37 +130,37 @@ const signed = (v: number, dp = 1) => {
 function ForecastStrip({ f, focus, opp }: { f: WeekForecast; focus: Side; opp: Side }) {
   const oppExp = f.cats - f.expected;
   return (
-    <div className="ws-card ws-fc">
-      <div className="ws-fc-block ws-fc-odds">
-        <span className="ws-fc-k">Pre-week win chance</span>
-        <div className="ws-fc-split" title={`${focus.abbrev} ${pct(f.focusWin)}, ${opp.abbrev} ${pct(f.oppWin)}`}>
+    <div className="wst-card wst-fc">
+      <div className="wst-fc-block wst-fc-odds">
+        <span className="wst-fc-k">Pre-week win chance</span>
+        <div className="wst-fc-split" title={`${focus.abbrev} ${pct(f.focusWin)}, ${opp.abbrev} ${pct(f.oppWin)}`}>
           <span className="mono">{focus.abbrev} {pct(f.focusWin)}</span>
-          <div className="ws-fc-bar">
-            <span className="ws-f" style={{ flexGrow: f.focusWin }} />
-            <span className="ws-o" style={{ flexGrow: f.oppWin }} />
+          <div className="wst-fc-bar">
+            <span className="wst-f" style={{ flexGrow: f.focusWin }} />
+            <span className="wst-o" style={{ flexGrow: f.oppWin }} />
           </div>
           <span className="mono">{pct(f.oppWin)} {opp.abbrev}</span>
         </div>
       </div>
-      <div className="ws-fc-block">
-        <span className="ws-fc-k">Expected score</span>
-        <span className="ws-fc-v mono">
+      <div className="wst-fc-block">
+        <span className="wst-fc-k">Expected score</span>
+        <span className="wst-fc-v mono">
           {f.expected.toFixed(1)}–{oppExp.toFixed(1)}
         </span>
       </div>
-      <div className="ws-fc-block">
-        <span className="ws-fc-k">Verdict</span>
-        <span className="ws-fc-v">
+      <div className="wst-fc-block">
+        <span className="wst-fc-k">Verdict</span>
+        <span className="wst-fc-v">
           {f.upset ? (
-            <span className="ws-fc-tag">Upset</span>
+            <span className="wst-fc-tag">Upset</span>
           ) : (
             <>As forecast</>
           )}
         </span>
       </div>
-      <div className="ws-fc-block ws-fc-against">
-        <span className="ws-fc-k">Went against the forecast</span>
-        <span className="ws-fc-v ws-fc-cats">
+      <div className="wst-fc-block wst-fc-against">
+        <span className="wst-fc-k">Went against the forecast</span>
+        <span className="wst-fc-v wst-fc-cats">
           {f.against.length ? f.against.join(", ") : "None"}
         </span>
       </div>
@@ -175,21 +175,21 @@ function ScoreByDay({ days, focus, opp }: { days: DayScore[]; focus: Side; opp: 
 
   return (
     <>
-      <div className="ws-days">
+      <div className="wst-days">
         {days.map((d) => {
           const t = total(d);
           return (
-            <div className="ws-day" key={d.date}>
-              <span className="ws-day-l mono">{dayLabel(d.date)}</span>
+            <div className="wst-day" key={d.date}>
+              <span className="wst-day-l mono">{dayLabel(d.date)}</span>
               <div
-                className="ws-day-bar"
+                className="wst-day-bar"
                 title={`${dayLabel(d.date)}: ${focus.abbrev} ${d.win}, ${opp.abbrev} ${d.loss}, tied ${d.tie}`}
               >
-                {d.win > 0 && <span className="ws-seg ws-f" style={{ flexGrow: d.win / t }} />}
-                {d.tie > 0 && <span className="ws-seg ws-t" style={{ flexGrow: d.tie / t }} />}
-                {d.loss > 0 && <span className="ws-seg ws-o" style={{ flexGrow: d.loss / t }} />}
+                {d.win > 0 && <span className="wst-seg wst-f" style={{ flexGrow: d.win / t }} />}
+                {d.tie > 0 && <span className="wst-seg wst-t" style={{ flexGrow: d.tie / t }} />}
+                {d.loss > 0 && <span className="wst-seg wst-o" style={{ flexGrow: d.loss / t }} />}
               </div>
-              <span className="ws-day-s mono">
+              <span className="wst-day-s mono">
                 {d.win}-{d.loss}-{d.tie}
               </span>
             </div>
@@ -223,15 +223,15 @@ function Margins({
   showPre: boolean;
 }) {
   return (
-    <div className={`ws-mg ${showPre ? "ws-mg-pre" : ""}`}>
-      <div className="ws-mg-row ws-mg-axis">
+    <div className={`wst-mg ${showPre ? "wst-mg-pre" : ""}`}>
+      <div className="wst-mg-row wst-mg-axis">
         <span />
-        <div className="ws-mg-ends">
+        <div className="wst-mg-ends">
           <span>{opp.abbrev} better</span>
           <span>{focus.abbrev} better</span>
         </div>
         <span />
-        {showPre && <span className="ws-mg-oddsh">Odds</span>}
+        {showPre && <span className="wst-mg-oddsh">Odds</span>}
       </div>
       {margins.map((m) => {
         const w = (Math.min(Math.abs(m.z), Z_CAP) / Z_CAP) * 50;
@@ -241,26 +241,26 @@ function Margins({
         const winPre = m.pre == null || tie ? null : m.raw > 0 ? m.pre : 1 - m.pre;
         return (
           <div
-            className="ws-mg-row"
+            className="wst-mg-row"
             key={m.cat}
             title={`${m.cat}: ${focus.abbrev} ${formatValue(m.cat, m.focus)}, ${opp.abbrev} ${formatValue(m.cat, m.opp)} (${signed(m.z, 2)} spreads)${m.pre != null ? `. Pre-week: ${focus.abbrev} ${pct(m.pre)}` : ""}`}
           >
-            <span className="ws-mg-cat">{m.cat}</span>
-            <div className="ws-mg-track">
-              <span className="ws-mg-mid" />
+            <span className="wst-mg-cat">{m.cat}</span>
+            <div className="wst-mg-track">
+              <span className="wst-mg-mid" />
               {!tie && (
                 <span
-                  className={`ws-mg-bar ${m.z > 0 ? "ws-f ws-mg-r" : "ws-o ws-mg-l"}`}
+                  className={`wst-mg-bar ${m.z > 0 ? "wst-f wst-mg-r" : "wst-o wst-mg-l"}`}
                   style={{ width: `max(${w.toFixed(2)}%, 3px)` }}
                 />
               )}
             </div>
-            <span className="ws-mg-v mono">
+            <span className="wst-mg-v mono">
               {tie ? "tied" : marginLabel(m)}
-              {close && !tie && <em className="ws-close">close</em>}
+              {close && !tie && <em className="wst-close">close</em>}
             </span>
             {showPre && (
-              <span className={`ws-mg-odds mono ${winPre != null && winPre < 0.5 ? "ws-mg-against" : ""}`}>
+              <span className={`wst-mg-odds mono ${winPre != null && winPre < 0.5 ? "wst-mg-against" : ""}`}>
                 {winPre == null ? "—" : pct(winPre)}
               </span>
             )}
@@ -288,21 +288,21 @@ export function lineSummary(l: StatLine): string {
 function GameCard({ g, rank }: { g: StandoutGame; rank: number }) {
   const shot = headshotUrl(g.playerId);
   return (
-    <div className="ws-game">
-      <span className="ws-game-rank mono">{rank}</span>
+    <div className="wst-game">
+      <span className="wst-game-rank mono">{rank}</span>
       {shot ? (
-        <span className="ws-game-shot" style={{ backgroundImage: `url('${shot}')` }} />
+        <span className="wst-game-shot" style={{ backgroundImage: `url('${shot}')` }} />
       ) : (
-        <span className="ws-game-shot ws-game-shot-blank" />
+        <span className="wst-game-shot wst-game-shot-blank" />
       )}
-      <div className="ws-game-body">
-        <div className="ws-game-top">
-          <span className="ws-game-name">{g.name}</span>
-          <span className="ws-game-meta">{dayLabel(g.date)}</span>
+      <div className="wst-game-body">
+        <div className="wst-game-top">
+          <span className="wst-game-name">{g.name}</span>
+          <span className="wst-game-meta">{dayLabel(g.date)}</span>
         </div>
-        <div className="ws-game-line mono">{lineSummary(g.line)}</div>
+        <div className="wst-game-line mono">{lineSummary(g.line)}</div>
       </div>
-      <span className="ws-game-gs mono" title="Game Score">
+      <span className="wst-game-gs mono" title="Game Score">
         {signed(g.gs)}
       </span>
     </div>
@@ -313,7 +313,7 @@ function GameCard({ g, rank }: { g: StandoutGame; rank: number }) {
 
 /** Game Score bands for a day cell: a strong night, a good one, a poor one, a bad one. */
 const gsBand = (gs: number) =>
-  gs >= 12 ? "ws-gs-up2" : gs >= 5 ? "ws-gs-up1" : gs <= -8 ? "ws-gs-dn2" : gs <= -3 ? "ws-gs-dn1" : "";
+  gs >= 12 ? "wst-gs-up2" : gs >= 5 ? "wst-gs-up1" : gs <= -8 ? "wst-gs-dn2" : gs <= -3 ? "wst-gs-dn1" : "";
 
 export function DayGrid({
   title,
@@ -335,7 +335,7 @@ export function DayGrid({
     <>
       <h2 className="rc-box-title">{title}</h2>
       <div className="table-scroll">
-        <table className="sheet ws-dg">
+        <table className="sheet wst-dg">
           <thead>
             <tr>
               <th>Player</th>
@@ -346,7 +346,7 @@ export function DayGrid({
               ))}
               <th className="num">GP</th>
               <th className="num">Total</th>
-              <th className="ws-dg-vs-h" title="Per-game value this week minus season value (Player Value scale), 2+ games">
+              <th className="wst-dg-vs-h" title="Per-game value this week minus season value (Player Value scale), 2+ games">
                 Vs season
               </th>
             </tr>
@@ -361,7 +361,7 @@ export function DayGrid({
                     const c = row[d];
                     if (!c) {
                       return (
-                        <td className="num ws-dg-none" key={d}>
+                        <td className="num wst-dg-none" key={d}>
                           ·
                         </td>
                       );
@@ -376,25 +376,25 @@ export function DayGrid({
                       </td>
                     );
                   })}
-                  <td className="num ws-dg-gp">{Object.keys(row).length}</td>
-                  <td className="num ws-dg-tot">
+                  <td className="num wst-dg-gp">{Object.keys(row).length}</td>
+                  <td className="num wst-dg-tot">
                     {signed(Object.values(row).reduce((a, c) => a + c.gs, 0))}
                   </td>
-                  <VsCell w={detail.vsSeason[name]} cap={vsCap} cls={side === "focus" ? "ws-f" : "ws-o"} />
+                  <VsCell w={detail.vsSeason[name]} cap={vsCap} cls={side === "focus" ? "wst-f" : "wst-o"} />
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      <p className="ws-key-note">
+      <p className="wst-key-note">
         Each counted game&rsquo;s value (Game Score, as on Game Day; 0 is the player
         pool&rsquo;s average game):
-        <span className="ws-chip ws-gs-up2">+12 or more</span>
-        <span className="ws-chip ws-gs-up1">+5 or more</span>
-        <span className="ws-chip ws-gs-dn1">−3 or less</span>
-        <span className="ws-chip ws-gs-dn2">−8 or less</span>
-        <span className="ws-dg-dot">·</span> no counted game. Hover a cell for the line.
+        <span className="wst-chip wst-gs-up2">+12 or more</span>
+        <span className="wst-chip wst-gs-up1">+5 or more</span>
+        <span className="wst-chip wst-gs-dn1">−3 or less</span>
+        <span className="wst-chip wst-gs-dn2">−8 or less</span>
+        <span className="wst-dg-dot">·</span> no counted game. Hover a cell for the line.
         Vs season: per-game value this week minus season value (Player Value scale),
         players with 2+ games.
       </p>
@@ -404,19 +404,19 @@ export function DayGrid({
 
 /** The vs-season data bar: a diverging bar about zero, then the number. */
 function VsCell({ w, cap, cls }: { w?: { week: number; season: number; gp: number; name: string }; cap: number; cls: string }) {
-  if (!w) return <td className="ws-dg-vs ws-dg-none">—</td>;
+  if (!w) return <td className="wst-dg-vs wst-dg-none">—</td>;
   const d = w.week - w.season;
   const width = (Math.min(Math.abs(d), cap) / cap) * 50;
   return (
     <td
-      className="ws-dg-vs"
+      className="wst-dg-vs"
       title={`${w.name}: ${w.week.toFixed(1)} this week vs ${w.season.toFixed(1)} season, ${w.gp} games`}
     >
-      <div className="ws-dg-vs-in">
-        <div className="ws-mg-track">
-          <span className="ws-mg-mid" />
+      <div className="wst-dg-vs-in">
+        <div className="wst-mg-track">
+          <span className="wst-mg-mid" />
           <span
-            className={`ws-mg-bar ${cls} ${d >= 0 ? "ws-mg-r" : "ws-mg-l"}`}
+            className={`wst-mg-bar ${cls} ${d >= 0 ? "wst-mg-r" : "wst-mg-l"}`}
             style={{ width: `max(${width.toFixed(2)}%, 3px)` }}
           />
         </div>
