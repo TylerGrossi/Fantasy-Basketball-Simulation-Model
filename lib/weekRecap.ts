@@ -18,6 +18,7 @@ import { categoryValue, type LeagueData, type PoolPlayer } from "./league";
 import { weeklyAllPlay, type WeekRow } from "./history";
 import { forecastFor, type PreWeekLog } from "./predictions";
 import { makeGameValuer, makeValuer } from "./percentiles";
+import { bestLineup, STARTER_LAYOUT } from "./playerPool";
 import type { BoxScores, GameLogs } from "./loadLeague";
 
 /** A player needs this many games before his week ranks among the top or the movers. */
@@ -170,4 +171,41 @@ export function buildWeekRecap(
   }
 
   return { period, matchups, teams, leaders, players, games };
+}
+
+/** One seat in the Fantasy Team of the Week. */
+export interface TeamOfWeekSeat {
+  slot: string;
+  player: RecapPlayer | null;
+  /** ESPN id for the headshot, from the player pool. */
+  playerId: number | null;
+  /** The week's TOTAL value: per-game value x games played (Top players' ranking). */
+  total: number | null;
+}
+
+/**
+ * Fantasy Team of the Week (owner, 2026-11-10): the best legal starting lineup from every
+ * rostered player's week, by TOTAL value - the league's starting slots (PG SG SF PF C G F
+ * + UTILs) filled by `bestLineup`, the same seating Starter Rankings uses, with positions
+ * from the player pool's eligible slots.
+ */
+export function teamOfTheWeek(league: LeagueData, players: RecapPlayer[]): TeamOfWeekSeat[] {
+  const layout = (league.rosterSlots ?? []).filter((s) => s !== "Bench" && s !== "IR");
+  const slots = layout.length ? layout : STARTER_LAYOUT;
+  const pool = new Map((league.seasonData.playerPool ?? []).map((p) => [p.name, p]));
+  const byRow = new Map<PoolPlayer, RecapPlayer>();
+  const rows: PoolPlayer[] = [];
+  for (const r of players) {
+    const p = pool.get(r.name);
+    if (!p || r.gp <= 0) continue;
+    const row = { ...p, value: r.week * r.gp };
+    byRow.set(row, r);
+    rows.push(row);
+  }
+  return bestLineup(rows, slots).map((p, i) => ({
+    slot: slots[i] === "UTIL" ? "UTIL" : slots[i],
+    player: p ? byRow.get(p)! : null,
+    playerId: p?.playerId ?? null,
+    total: p ? p.value : null,
+  }));
 }

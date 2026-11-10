@@ -51,7 +51,7 @@ export const APP_TOUR = [
   "- Volume vs Efficiency: shooting possessions against points per possession with the",
   "  whole pool plotted, which is how you tell a real rate from low usage. Desktop only.",
   "- Splits (by month, home/away, and rest including back-to-backs), By Opponent Defense",
-  "  (top-10 / middle / bottom-10 defences), Consistency (median night, spread, share of",
+  "  (top-10 / middle / bottom-10 defenses), Consistency (median night, spread, share of",
   "  startable games, best and worst games), the full Game Log, and Availability (missed",
   "  games grouped into stints).",
   "",

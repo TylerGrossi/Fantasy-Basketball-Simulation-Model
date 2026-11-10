@@ -42,7 +42,7 @@ export default function SettingsView({
   return (
     <>
       <h2>Team</h2>
-      <p className="caption">Which team in your league the app analyses.</p>
+      <p className="caption">Which team in your league the app analyzes.</p>
       <select
         className="field field-select"
         value={settings.teamName}

@@ -17,6 +17,8 @@ import { periodLabel } from "@/lib/league";
 import { buildSeasonPack } from "@/lib/seasonOdds";
 import {
   loadBoxScores,
+  loadGameLogs,
+  loadGameSpread,
   loadPredictions,
   loadWinProbLog,
   loadLeague,
@@ -76,6 +78,9 @@ export default async function Page({
     const recap = buildWeekRecap({
       league, period: asked, teamId: focusId, myTeamId: me.id,
       box: await loadBoxScores(),
+      logs: await loadGameLogs(),
+      preLog: await loadPredictions(),
+      gameSpread: (await loadGameSpread())?.spread ?? {},
     });
 
     if (!recap) {

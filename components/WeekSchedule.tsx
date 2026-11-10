@@ -148,7 +148,7 @@ export default function WeekSchedule({
               {overDays.length} crowded day{overDays.length > 1 ? "s" : ""}
             </b>{" "}
             ({overDays.map((x) => `${dayLabel(x.d)}: ${x.count} playing, ${x.starts.size} start`).join("; ")}).
-            Greyed games sit: the Bench section&apos;s pick on days still to play, positions
+            Grayed games sit: the Bench section&apos;s pick on days still to play, positions
             checked; by value on days already played.
           </>
         )}

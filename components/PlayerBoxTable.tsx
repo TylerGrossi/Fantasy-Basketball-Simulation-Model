@@ -42,10 +42,17 @@ export function PlayerBoxTable({
   title,
   stats,
   lines,
+  heat,
 }: {
   title: string;
   stats: string[];
   lines: BoxLine[];
+  /**
+   * Optional shading (finished weeks, lib/weekStory.ts): player -> column -> how far his
+   * week sat from his season level, in standard errors, + = better. Cells at 1+ and 2+
+   * either way are tinted; a column missing from the map is left plain.
+   */
+  heat?: Record<string, Record<string, number>>;
 }) {
   // Biggest scorer first — the order the table had before it was sortable.
   const [sort, setSort] = useState<{ key: SortKey; dir: Dir }>({ key: "PTS", dir: "desc" });
@@ -166,7 +173,7 @@ export function PlayerBoxTable({
               <tr key={l.name} className={l.gp ? undefined : "row-muted"}>
                 <td className="rc-player"><PlayerLink name={l.name} /></td>
                 {BOX_COLS.map((c) => (
-                  <td className="num" key={c}>
+                  <td className={`num ${heatClass(heat?.[l.name]?.[c])}`} key={c}>
                     {cell(l, c)}
                   </td>
                 ))}
@@ -183,8 +190,21 @@ export function PlayerBoxTable({
           </tbody>
         </table>
       </div>
+      {heat && (
+        <p className="ws-key-note">
+          Shaded against each player&rsquo;s own season average:
+          <span className="ws-chip heat-up2">well above</span>
+          <span className="ws-chip heat-up1">above</span>
+          <span className="ws-chip heat-dn1">below</span>
+          <span className="ws-chip heat-dn2">well below</span>
+          (1 and 2 standard errors of a week&rsquo;s average). TO counts fewer as better.
+        </p>
+      )}
     </>
   );
 }
+
+const heatClass = (z: number | undefined) =>
+  z == null ? "" : z >= 2 ? "heat-up2" : z >= 1 ? "heat-up1" : z <= -2 ? "heat-dn2" : z <= -1 ? "heat-dn1" : "";
 
 export default PlayerBoxTable;

@@ -1,4 +1,5 @@
-import Link from "next/link";
+import WeekSelect from "@/components/WeekSelect";
+import { headshotUrl } from "@/lib/playerPool";
 import PlayerLink from "@/components/PlayerLink";
 import { categoryValue, formatValue, winPctText, type LeagueData } from "@/lib/league";
 import {
@@ -13,6 +14,8 @@ import {
   buildWeekRecap,
   finishedPeriods,
   RECAP_MIN_GP,
+  teamOfTheWeek,
+  type TeamOfWeekSeat,
   type RecapMatchup,
   type RecapPlayer,
 } from "@/lib/weekRecap";
@@ -62,14 +65,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ w
 
   const name = new Map(league.teams.map((t) => [t.id, t.name]));
   const teamName = (id: number) => name.get(id) ?? "—";
-  const dates =
-    /\(([^)]+)\)/.exec(
-      Object.values(league.seasonData.schedules ?? {})[0]?.find((x) => x.period === period)?.matchup ?? ""
-    )?.[1] ?? "";
+  // "Week 3 · Nov 02 - Nov 08": the dates from the schedule's matchup label.
+  const sched = Object.values(league.seasonData.schedules ?? {})[0];
+  const weekLabel = (w: number) => {
+    const d = /\(([^)]+)\)/.exec(sched?.find((x) => x.period === w)?.matchup ?? "")?.[1];
+    return d ? `Week ${w} · ${d}` : `Week ${w}`;
+  };
 
   // Headline tiles.
   const mineRow = r.teams.find((t) => t.teamId === me.id)?.row;
-  const upsets = r.matchups.filter((m) => m.upset);
   // TOTAL value for the week (owner, 2026-11-09): per-game value x games played, so a
   // 4-game week outranks the same level over 2. No games minimum - the total handles it.
   const ranked = [...r.players].sort((a, b) => b.week * b.gp - a.week * a.gp);
@@ -85,18 +89,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ w
       <div className="wr-top">
         <div>
           <h1>Weekly Recap</h1>
-          <p className="caption wr-sub">
-            Week {period}
-            {dates && ` · ${dates}`}
-          </p>
+          <WeekSelect
+            weeks={weeks.map((w) => ({ period: w, label: weekLabel(w) }))}
+            selected={period}
+            current={weeks[0]}
+            path="/recap"
+            param="week"
+            small
+          />
         </div>
-        <nav className="chips" aria-label="Week">
-          {[...weeks].reverse().map((w) => (
-            <Link key={w} href={`/recap?week=${w}`} className={`chip${w === period ? " chip-on" : ""}`} aria-current={w === period ? "page" : undefined}>
-              Wk {w}
-            </Link>
-          ))}
-        </nav>
       </div>
 
       <div className="metrics">
@@ -107,14 +108,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ w
           tone={mineRow?.result === "W" ? "good" : mineRow?.result === "L" ? "bad" : undefined}
         />
         <Tile
-          label="Upsets"
-          value={r.matchups.some((m) => m.pre) ? String(upsets.length) : "—"}
+          label="Your all-play"
+          value={mineRow ? `${(mineRow.allPlayPct * 100).toFixed(1)}%` : "—"}
           sub={
-            upsets.length
-              ? upsets.map((m) => `${teamName(m.winnerId!)} (${winPctText(m.winnerId === m.homeId ? m.pre!.home : m.pre!.away)})`).join(", ")
-              : r.matchups.some((m) => m.pre)
-                ? "Every favourite won"
-                : "No pre-week forecast logged"
+            mineRow
+              ? `${mineRow.allPlay.win}-${mineRow.allPlay.loss}-${mineRow.allPlay.tie} · #${allPlay.findIndex((t) => t.teamId === me.id) + 1} of ${allPlay.length}`
+              : undefined
           }
         />
         <Tile label="Top performer" value={ranked[0] ? signed(ranked[0].week * ranked[0].gp) : "—"} sub={ranked[0] ? `${ranked[0].name} · ${teamName(ranked[0].teamId)}` : undefined} />
@@ -122,23 +121,18 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ w
       </div>
 
       <h2>Matchups</h2>
-      <p className="caption ctx">
-        Final category score, the pre-week win probability each side was given, and an
-        upset tag when the side under 50% won.
-      </p>
       <div className="wr-matchups">
         {r.matchups.map((m) => (
-          <MatchupCard key={m.homeId} league={league} period={period} m={m} teamName={teamName} me={me.id} />
+          <MatchupCard key={m.homeId} league={league} m={m} teamName={teamName} me={me.id} />
         ))}
       </div>
 
-      <div className="wr-grid">
+      <h2>Fantasy Team of the Week</h2>
+      <TeamOfWeek seats={teamOfTheWeek(league, r.players)} teamName={teamName} me={me.id} />
+
+      <div className="wr-grid wr-even">
         <section>
           <h2>All-play and luck</h2>
-          <p className="caption ctx">
-            Each team against every other team that week. Lucky: won while beating less
-            than half the league. Unlucky: lost while beating most of it.
-          </p>
           <div className="table-scroll">
             <table className="sheet">
               <thead>
@@ -177,7 +171,6 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ w
 
         <section>
           <h2>Category leaders</h2>
-          <p className="caption ctx">Best and worst team total in each category this week.</p>
           <div className="table-scroll">
             <table className="sheet">
               <thead>
@@ -206,27 +199,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ w
       </div>
 
       <h2>Top players</h2>
-      <p className="caption ctx">
-        Ranked by total value for the week: per-game value (the Player Value scale) times games
-        played. Per game and season are both per-game, so the two compare directly.
-      </p>
       <PlayerTable rows={ranked.slice(0, TOP)} teamName={teamName} me={me.id} />
 
       <div className="wr-grid">
         <section>
           <h2>Rising</h2>
-          <p className="caption ctx">Week value furthest above season value.</p>
           <MoverList rows={rising} teamName={teamName} me={me.id} />
         </section>
         <section>
           <h2>Falling</h2>
-          <p className="caption ctx">Week value furthest below season value.</p>
           <MoverList rows={falling} teamName={teamName} me={me.id} />
         </section>
       </div>
 
       <h2>Best games</h2>
-      <p className="caption ctx">Single nights by Game Score (GS), scored exactly as Game Day scores a final.</p>
       {best.length === 0 ? (
         <p className="caption">No game-by-game lines for this week in the export yet.</p>
       ) : (
@@ -279,6 +265,95 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ w
 const one = (x: number) => (Math.abs(x) < 0.05 ? "0.0" : x.toFixed(1));
 
 /** "Tue 11/3" from an ISO date, read as that calendar day. */
+/**
+ * The best lineup of the week as a bar chart (Starter Rankings' look): headshot, a bar
+ * sized by the week's total value with the value on it, then slot, player and team.
+ */
+function TeamOfWeek({ seats, teamName, me }: { seats: TeamOfWeekSeat[]; teamName: (id: number) => string; me: number }) {
+  if (!seats.some((s) => s.player)) return <p className="caption">No player lines for this week in the export.</p>;
+  const top = Math.max(...seats.map((s) => s.total ?? 0), 1);
+  let util = 0;
+  const label = (slot: string) => (slot === "UTIL" ? `Util${++util}` : slot);
+  const labels = seats.map((s) => label(s.slot));
+  return (
+    <>
+    <section className="sr-card wr-totw wr-hide-sm">
+      <div className="sr-bars">
+        {seats.map((s, i) => (
+          <div className="sr-bar-col" key={i}>
+            <div className="sr-bar-track">
+              <div
+                className={`sr-bar-fill${s.player ? "" : " sr-bar-empty"}`}
+                style={{ height: `${Math.max(((s.total ?? 0) / top) * 100, 6)}%` }}
+              >
+                <span className="sr-bar-rank">{s.total == null ? "—" : `+${s.total.toFixed(1)}`}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="sr-shots">
+        {seats.map((s, i) => {
+          const url = headshotUrl(s.playerId);
+          return (
+            <div className="sr-shot-col" key={i}>
+              <span
+                className={`sr-shot${url ? "" : " sr-shot-blank"}`}
+                style={url ? { backgroundImage: `url('${url}')` } : undefined}
+                title={s.player?.name ?? "Empty"}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="wr-totw-names">
+        {seats.map((s, i) => (
+          <div className="wr-totw-who" key={i}>
+            <span className="sr-bar-label">{labels[i]}</span>
+            {s.player ? (
+              <>
+                <span className="wr-totw-name">
+                  <PlayerLink name={s.player.name} />
+                </span>
+                <span className={`wr-totw-team${s.player.teamId === me ? " wr-me-cell" : ""}`}>
+                  {teamName(s.player.teamId)}
+                </span>
+                <span className="wr-totw-gp">{s.player.gp} GP</span>
+              </>
+            ) : (
+              <span className="wr-totw-team">—</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+    {/* Phones: ten bars do not fit, so the same lineup as a list. */}
+    <div className="table-scroll wr-show-sm">
+      <table className="sheet">
+        <thead>
+          <tr>
+            <th>Slot</th>
+            <th>Player</th>
+            <th>Team</th>
+            <th className="num">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {seats.map((s, i) => (
+            <tr key={i} className={s.player?.teamId === me ? "wr-me" : undefined}>
+              <td>{labels[i]}</td>
+              <td>{s.player ? <PlayerLink name={s.player.name} /> : "—"}</td>
+              <td>{s.player ? teamName(s.player.teamId) : ""}</td>
+              <td className="num mono">{s.total == null ? "" : `+${s.total.toFixed(1)}`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    </>
+  );
+}
+
 function dayLabel(iso: string) {
   const d = new Date(`${iso}T12:00:00Z`);
   if (Number.isNaN(d.getTime())) return iso;
@@ -299,13 +374,11 @@ function Tile({ label, value, sub, tone }: { label: string; value: string; sub?:
 
 function MatchupCard({
   league,
-  period,
   m,
   teamName,
   me,
 }: {
   league: LeagueData;
-  period: number;
   m: RecapMatchup;
   teamName: (id: number) => string;
   me: number;
@@ -319,14 +392,17 @@ function MatchupCard({
   ];
   return (
     <div className={`wr-card${m.homeId === me || m.awayId === me ? " wr-card-me" : ""}`}>
-      <div className="wr-card-head">
-        {m.upset && <span className="wr-upset">Upset</span>}
-        <Link href={`/scoreboard?period=${period}&game=${m.homeId}`} className="wr-box-link">
-          Box score
-        </Link>
-      </div>
-      <div className="table-scroll">
+      <div className="wr-scroll">
         <table className="wr-board">
+          {/* Fixed widths, so every matchup card's columns line up with the next one's. */}
+          <colgroup>
+            <col className="wr-col-team" />
+            <col className="wr-col-score" />
+            <col className="wr-col-pre" />
+            {cats.map((c) => (
+              <col key={c} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               <th aria-label="Team" />
@@ -342,7 +418,10 @@ function MatchupCard({
           <tbody>
             {sides.map((s) => (
               <tr key={s.id} className={s.id === m.winnerId ? "wr-win" : undefined}>
-                <td className={`wr-team${s.id === me ? " wr-me-cell" : ""}`}>{teamName(s.id)}</td>
+                <td className={`wr-team${s.id === me ? " wr-me-cell" : ""}`}>
+                  {teamName(s.id)}
+                  {m.upset && s.id === m.winnerId && <span className="wr-upset">Upset</span>}
+                </td>
                 <td className="num mono wr-strong">
                   {s.won}-{s.lost}-{m.score.tie}
                 </td>

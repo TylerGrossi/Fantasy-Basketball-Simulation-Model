@@ -2,8 +2,12 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { AcquisitionLine, CategorySheet, PlayerBoxTable, tally } from "./BoxScoreSheet";
 import Board from "./Board";
+import WeekStory, { DayGrid } from "./WeekStory";
+import BoxDayToggle from "./BoxDayToggle";
 import { type LeagueData } from "@/lib/league";
-import type { BoxScores } from "@/lib/loadLeague";
+import type { BoxScores, GameLogs } from "@/lib/loadLeague";
+import { buildWeekStory } from "@/lib/weekStory";
+import type { PreWeekLog } from "@/lib/predictions";
 
 /**
  * A completed week, laid out the way ESPN's box-score page lays it out: the head-to-head
@@ -30,6 +34,9 @@ export function buildWeekRecap({
   teamId,
   myTeamId,
   box,
+  logs = null,
+  preLog = null,
+  gameSpread = {},
 }: {
   league: LeagueData;
   period: number;
@@ -47,6 +54,13 @@ export function buildWeekRecap({
   myTeamId: number;
   /** Per-player lines, or null when the export predates them. */
   box: BoxScores | null;
+  /** Each counted player-day of finished weeks (gamelogs.json), for the day-by-day
+   *  charts; null leaves those charts out. */
+  logs?: GameLogs | null;
+  /** The pre-week forecast log, for forecast vs result; null leaves it out. */
+  preLog?: PreWeekLog | null;
+  /** Single-game spreads (game-spread.json) for Game Score. */
+  gameSpread?: Record<string, number>;
 }): {
   oppId: number;
   /** The scoreline on its own, for the mobile slot above the tabs — see Board.tsx. */
@@ -61,6 +75,7 @@ export function buildWeekRecap({
 
   const byId = new Map(league.teams.map((t) => [t.id, t]));
   const name = (id: number) => byId.get(id)?.name ?? "Unknown";
+  const abbrev = (id: number) => byId.get(id)?.abbrev || name(id).slice(0, 4);
   const record = (id: number) => {
     const t = byId.get(id);
     return t ? `${t.wins}-${t.losses}-${t.ties}` : "";
@@ -77,6 +92,20 @@ export function buildWeekRecap({
 
   const linesFor = (id: number) => box?.periods[String(period)]?.[String(id)] ?? [];
   const gp = (id: number) => linesFor(id).reduce((a, l) => a + (l.gp || 0), 0);
+
+  // The analysis (charts, day grids, box-score heat) — lib/weekStory.ts.
+  const story = buildWeekStory({
+    league,
+    period,
+    focusId: teamId,
+    oppId,
+    focusVec: you,
+    oppVec: opp,
+    logs,
+    box: box ? { stats: box.stats, focus: linesFor(teamId), opp: linesFor(oppId) } : null,
+    preLog,
+    gameSpread,
+  });
 
   const board = (
     <Board
@@ -155,6 +184,13 @@ export function buildWeekRecap({
         oppGp={gp(oppId)}
       />
       </div>
+
+      {/* How the week played out (components/WeekStory.tsx). */}
+      <WeekStory
+        data={story}
+        focus={{ name: name(teamId), abbrev: abbrev(teamId) }}
+        opp={{ name: name(oppId), abbrev: abbrev(oppId) }}
+      />
     </>
   );
 
@@ -164,18 +200,49 @@ export function buildWeekRecap({
     oppId,
     board,
     matchup,
+    // Each team panel: the box score, or the same players day by day (owner, 2026-11-10).
     mine: (
-      <PlayerBoxTable
-        title={`${name(teamId)} box score`}
-        stats={box?.stats ?? league.stats}
-        lines={lines(teamId)}
+      <BoxDayToggle
+        box={
+          <PlayerBoxTable
+            title={`${name(teamId)} box score`}
+            stats={box?.stats ?? league.stats}
+            lines={lines(teamId)}
+            heat={story.focus.heat}
+          />
+        }
+        days={
+          <DayGrid
+            title={`${name(teamId)} day by day`}
+            detail={story.focus}
+            dates={story.gameDates}
+            vsCap={story.vsCap}
+            side="focus"
+          />
+        }
+        hasDays={story.gameDates.length > 0 && story.focus.players.length > 0}
       />
     ),
     opp: (
-      <PlayerBoxTable
-        title={`${name(oppId)} box score`}
-        stats={box?.stats ?? league.stats}
-        lines={lines(oppId)}
+      <BoxDayToggle
+        box={
+          <PlayerBoxTable
+            title={`${name(oppId)} box score`}
+            stats={box?.stats ?? league.stats}
+            lines={lines(oppId)}
+            heat={story.opp.heat}
+          />
+        }
+        days={
+          <DayGrid
+            title={`${name(oppId)} day by day`}
+            detail={story.opp}
+            dates={story.gameDates}
+            vsCap={story.vsCap}
+            side="opp"
+          />
+        }
+        hasDays={story.gameDates.length > 0 && story.opp.players.length > 0}
       />
     ),
   };

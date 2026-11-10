@@ -4507,6 +4507,8 @@ table.sheet.lu-table .lu-pos {
   cursor: pointer;
 }
 .week-title-btn:hover { background: var(--surface-2); }
+/* Weekly Recap: the chooser at subtitle size under the page title. */
+.week-title-btn.week-sub-btn { font-size: 0.95rem; font-weight: 500; color: var(--ink-2); margin-left: -0.45rem; }
 .week-title-btn:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
 .week-title-caret {
   width: 0; height: 0;
@@ -8987,18 +8989,41 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
 .wr h2 { margin-top: 1.8rem; }
 .wr-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.4rem; }
 .wr-grid > section { min-width: 0; }
+/* Side-by-side sections end level: each card fills the row's height and its rows grow. */
+.wr-even > section { display: flex; flex-direction: column; }
+.wr-even > section > .table-scroll { flex: 1 1 auto; }
+.wr-even > section > .table-scroll > table { height: 100%; }
+/* Fantasy Team of the Week: Starter Rankings' chart, with who under each bar. */
+.wr-totw { margin: 0 0 0.4rem; }
+.wr-totw .sr-bars { height: 8rem; flex: none; }
+.wr-totw .sr-shot { max-width: none; }
+/* Headshots sit under the bars, on the baseline; slot label then name below. */
+.wr-totw .sr-shots { margin: 0; }
+.wr-totw .sr-shot { border-radius: 0 0 8px 8px; }
+.wr-totw-who .sr-bar-label { margin-top: 0; }
+.wr .wr-show-sm { display: none; }
+.wr-totw-names { display: flex; gap: 0.4rem; margin-top: 0.35rem; }
+.wr-totw-who { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.25; }
+.wr-totw-name { font-size: 0.78rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wr-totw-team { font-size: 0.68rem; color: var(--ink-3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wr-totw-gp { font-size: 0.64rem; color: var(--ink-3); }
 .wr-matchups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.7rem; }
 .wr-matchups > * { min-width: 0; }
 .wr-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.55rem 0.7rem 0.4rem; }
-.wr-card-me { border-color: var(--cobalt); }
-.wr-card-head { display: flex; align-items: center; gap: 0.6rem; min-height: 1.1rem; }
-.wr-box-link { margin-left: auto; font-size: 0.72rem; color: var(--ink-2); text-decoration: none; }
-.wr-box-link:hover { color: var(--cobalt); text-decoration: underline; }
+.wr-card-me { border-color: var(--cobalt); box-shadow: 0 0 0 1px var(--cobalt); }
+.wr-card-head { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.2rem; }
+/* The card is the only box: the board scrolls inside it with no border of its own. */
+.wr-scroll { overflow-x: auto; }
 .wr-upset { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--clay); border: 1px solid var(--clay); border-radius: 4px; padding: 0 0.35rem; }
 .wr-board { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
 .wr-board th { font-size: 0.62rem; font-weight: 600; color: var(--ink-3); padding: 0.2rem 0.4rem; text-align: right; }
 .wr-board td { padding: 0.28rem 0.4rem; border-top: 1px solid var(--line-2, var(--line)); text-align: right; }
-.wr-board td.wr-team { text-align: left; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.wr-board { table-layout: fixed; min-width: 58rem; }
+.wr-board col.wr-col-team { width: 15rem; }
+.wr-board col.wr-col-score { width: 4.6rem; }
+.wr-board col.wr-col-pre { width: 5rem; }
+.wr-board td.wr-team { text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.wr-board td.wr-team .wr-upset { margin-left: 0.45rem; vertical-align: 0.1em; }
 .wr-board tr.wr-win td.wr-team { font-weight: 700; }
 .wr-lead { background: var(--surface-2); font-weight: 700; }
 .wr-strong { font-weight: 700; }
@@ -9014,4 +9039,168 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
 /* Phones keep each recap table to the player and the number it exists to show. */
 @media (max-width: 767px) {
   .wr .wr-hide-sm { display: none; }
+  .wr .wr-show-sm { display: block; }
 }
+
+/* ---- How the week played out (components/WeekStory.tsx, 2026-11-10) ----------
+   Four charts under a finished week's category sheet. The left team is cobalt and the
+   right team clay, as on the board; text stays in ink. */
+.ws { margin: 0.4rem 0 0.6rem; }
+.ws-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem 1.2rem; flex-wrap: wrap; margin: 1.4rem 0 0.5rem; }
+.ws-head .ws-title { margin: 0; }
+.ws-legend { display: flex; gap: 1rem; font-size: 0.78rem; color: var(--ink-2); flex-wrap: wrap; }
+.ws-legend span { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.ws-key { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.ws-key-f { background: var(--cobalt); }
+.ws-key-o { background: var(--clay); }
+.ws-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 0.9rem 1rem 0.8rem; margin-bottom: 0.9rem; min-width: 0; }
+.ws-h { font-size: 0.92rem; margin: 0 0 0.15rem; }
+.ws-sub { font-size: 0.76rem; color: var(--ink-2); margin: 0 0 0.75rem; line-height: 1.4; }
+.ws-note { font-size: 0.78rem; color: var(--ink-2); margin: 0.6rem 0 0; }
+/* Both columns end at the same line (owner, 2026-11-10): the grid stretches them, the
+   left column's last card grows, and Score by day spreads its rows over the extra height. */
+.ws-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 0.9rem; align-items: stretch; }
+.ws-two > .ws-card { margin-bottom: 0.9rem; }
+.ws-stack > .ws-card:last-child { flex: 1; display: flex; flex-direction: column; }
+.ws-stack > .ws-card:last-child .ws-days { flex: 1; justify-content: space-evenly; }
+.ws-f { background: var(--cobalt); }
+.ws-o { background: var(--clay); }
+.ws-t { background: var(--line); }
+
+/* score by day */
+.ws-days { display: flex; flex-direction: column; gap: 6px; }
+.ws-day { display: grid; grid-template-columns: 5.2rem minmax(0, 1fr) 3.6rem; align-items: center; gap: 0.6rem; }
+.ws-day-l, .ws-day-s { font-size: 0.74rem; color: var(--ink-2); white-space: nowrap; }
+.ws-day-s { text-align: right; color: var(--ink); }
+.ws-day-bar { display: flex; gap: 2px; height: 16px; }
+.ws-seg { display: block; min-width: 2px; }
+.ws-day-bar .ws-seg:first-child { border-radius: 4px 0 0 4px; }
+.ws-day-bar .ws-seg:last-child { border-radius: 0 4px 4px 0; }
+.ws-day-bar .ws-seg:only-child { border-radius: 4px; }
+
+/* margins */
+.ws-mg { display: flex; flex-direction: column; gap: 4px; }
+.ws-mg-row { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr) 6.4rem; align-items: center; gap: 0.6rem; min-height: 16px; }
+.ws-mg-axis { font-size: 0.7rem; color: var(--ink-3); }
+.ws-mg-ends { display: flex; justify-content: space-between; white-space: nowrap; }
+.ws-mg-cat { font-size: 0.74rem; font-weight: 600; }
+.ws-mg-track { position: relative; height: 12px; }
+.ws-mg-mid { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--line-strong); }
+.ws-mg-bar { position: absolute; top: 0; bottom: 0; }
+.ws-mg-r { left: calc(50% + 1px); border-radius: 0 4px 4px 0; }
+.ws-mg-l { right: calc(50% + 1px); border-radius: 4px 0 0 4px; }
+.ws-mg-v { font-size: 0.74rem; white-space: nowrap; }
+.ws-close { font-style: normal; font-family: var(--sans); font-size: 0.68rem; color: var(--ink-3); margin-left: 0.4rem; }
+
+/* category race */
+.ws-race-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1rem 1.4rem; }
+@media (min-width: 768px) and (max-width: 1100px) { .ws-race-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.ws-race { margin: 0; min-width: 0; }
+.ws-race svg { display: block; overflow: visible; }
+.ws-race-h { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; margin-bottom: 0.15rem; }
+.ws-race-cat { font-size: 0.78rem; font-weight: 700; }
+.ws-race-v { font-size: 0.72rem; color: var(--ink-2); white-space: nowrap; }
+.ws-race-v b { font-weight: 400; }
+.ws-race-v b.ws-strong { font-weight: 700; color: var(--ink); }
+.ws-dash { margin: 0 0.2rem; color: var(--ink-3); }
+.ws-race-n { font-size: 0.7rem; color: var(--ink-2); margin: 0.1rem 0 0; line-height: 1.35; }
+.ws-ax { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); }
+.ws-ax-on { fill: var(--ink); font-weight: 700; }
+.ws-race svg { cursor: crosshair; }
+.ws-race-status { font-size: 0.74rem; color: var(--ink-2); margin: -0.35rem 0 0.7rem; min-height: 1.1em; }
+.ws-race-status b { color: var(--ink); }
+
+/* forecast strip */
+.ws-fc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem 1.4rem; align-items: start; }
+/* The win-chance bar sits under the three facts (owner, 2026-11-10). */
+.ws-fc .ws-fc-odds { grid-column: 1 / -1; order: 1; padding-top: 0.75rem; border-top: 1px solid var(--line-2); }
+.ws-fc-block { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.ws-fc-k { font-size: 0.72rem; color: var(--ink-2); }
+.ws-fc-v { font-size: 1.05rem; font-weight: 700; }
+.ws-fc-cats { font-size: 0.92rem; }
+.ws-fc-split { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.6rem; font-size: 0.8rem; font-weight: 600; margin-top: 0.15rem; }
+.ws-fc-bar { display: flex; gap: 2px; height: 12px; }
+.ws-fc-bar span:first-child { border-radius: 4px 0 0 4px; }
+.ws-fc-bar span:last-child { border-radius: 0 4px 4px 0; }
+.ws-fc-tag { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface-2); }
+
+/* margins: odds column */
+.ws-mg-pre .ws-mg-row { grid-template-columns: 2.6rem minmax(0, 1fr) 6.4rem 2.6rem; }
+.ws-mg-oddsh { text-align: right; }
+.ws-mg-odds { font-size: 0.72rem; color: var(--ink-2); text-align: right; }
+.ws-mg-odds.ws-mg-against { color: var(--ink); font-weight: 700; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+
+/* standout games: compact rows under Score by day */
+.ws-stack { display: flex; flex-direction: column; min-width: 0; }
+.ws-games { display: flex; flex-direction: column; gap: 0.5rem; }
+.ws-game { display: grid; grid-template-columns: 0.8rem 44px minmax(0, 1fr) auto; align-items: center; gap: 0.6rem; border: 1px solid var(--line-2); border-radius: 10px; padding: 0.45rem 0.7rem; background: var(--paper); }
+.ws-game-shot { width: 44px; height: 44px; border-radius: 50%; background: var(--surface-2) center 20% / 150% no-repeat; border: 1px solid var(--line); }
+.ws-game-shot-blank { background-image: none; }
+.ws-games .ws-pv-team { margin-bottom: 0.1rem; }
+.ws-game-rank { font-size: 0.72rem; color: var(--ink-3); }
+.ws-game-body { min-width: 0; }
+.ws-game-top { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.ws-game-name { font-weight: 700; font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-game-meta { font-size: 0.72rem; color: var(--ink-3); white-space: nowrap; }
+.ws-game-line { font-size: 0.72rem; color: var(--ink); margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-game-gs { font-size: 0.95rem; font-weight: 700; }
+
+/* two columns, one per team (standout games) */
+.ws-pv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem 2rem; }
+.ws-pv-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ws-pv-team { font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Box score / Day by day toggle in each team panel */
+.bdt-bar { display: flex; justify-content: flex-end; margin: 1.1rem 0 -2.1rem; position: relative; z-index: 1; pointer-events: none; }
+.bdt-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); pointer-events: auto; }
+.bdt-seg button { font: inherit; font-size: 0.76rem; padding: 0.22rem 0.7rem; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; }
+.bdt-seg button + button { border-left: 1px solid var(--line); }
+.bdt-seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); font-weight: 700; }
+.sbx-panel .bdt-bar { margin-top: 0.9rem; }
+/* Room between the toggle (beside the title) and the table under it. */
+@media (min-width: 768px) {
+  .bdt-bar ~ .rc-box-title { margin-bottom: 1.35rem; }
+}
+
+/* shading shared by the box-score heat and the day grid: green above, red below */
+.heat-up2, .ws-gs-up2 { background: rgba(46, 125, 70, 0.26); }
+.heat-up1, .ws-gs-up1 { background: rgba(46, 125, 70, 0.11); }
+.heat-dn1, .ws-gs-dn1 { background: rgba(192, 57, 43, 0.09); }
+.heat-dn2, .ws-gs-dn2 { background: rgba(192, 57, 43, 0.22); }
+.ws-key-note { font-size: 0.72rem; color: var(--ink-2); margin: 0.45rem 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.4rem; }
+.ws-chip { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 4px; color: var(--ink); border: 1px solid var(--line-2); }
+.ws-dg-dot { color: var(--ink-3); font-weight: 700; }
+
+/* day grid */
+table.sheet.ws-dg { width: 100%; font-size: 0.74rem; table-layout: fixed; min-width: 820px; }
+table.sheet.ws-dg th.ws-dg-vs-h, table.sheet.ws-dg td.ws-dg-vs { width: 12rem; }
+table.sheet.ws-dg th.ws-dg-vs-h { text-align: right; }
+table.sheet.ws-dg td.ws-dg-vs { padding-left: 1rem; }
+table.sheet.ws-dg td.ws-dg-vs.ws-dg-none { text-align: right; }
+.ws-dg-vs-in { display: grid; grid-template-columns: minmax(0, 1fr) 3rem; align-items: center; gap: 0.5rem; text-align: right; }
+table.sheet.ws-dg th:first-child, table.sheet.ws-dg td:first-child { width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.sheet.ws-dg td, table.sheet.ws-dg th { padding: 0.35rem 0.5rem; }
+table.sheet.ws-dg .ws-dg-none { color: var(--ink-3); }
+table.sheet.ws-dg .ws-dg-gp { color: var(--ink-2); }
+table.sheet.ws-dg .ws-dg-tot { font-weight: 700; }
+
+@media (max-width: 767px) {
+  .ws-two { grid-template-columns: minmax(0, 1fr); }
+  .ws-card { padding: 0.8rem 0.75rem 0.7rem; }
+  .ws-race-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem 0.8rem; }
+  .ws-mg-row { grid-template-columns: 2.4rem minmax(0, 1fr) 5.6rem; }
+  .ws-mg-pre .ws-mg-row { grid-template-columns: 2.4rem minmax(0, 1fr) 5.6rem 2.4rem; }
+  .ws-fc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ws-fc .ws-fc-against { grid-column: 1 / -1; }
+  .ws-pv { grid-template-columns: minmax(0, 1fr); gap: 1.1rem; }
+  .ws-game-line { white-space: normal; }
+  /* No room for the toggle beside the title on a phone: it gets its own row. */
+  .bdt-bar { margin: 0.6rem 0 0; }
+  .bdt-seg { width: 100%; }
+  .bdt-seg button { flex: 1; padding: 0.5rem 0.75rem; }
+}
+@media (min-width: 768px) and (max-width: 1100px) {
+  .ws-pv { grid-template-columns: minmax(0, 1fr); gap: 1.1rem; }
+}
+
+.ws-h.ws-h-solo { margin-bottom: 0.7rem; }

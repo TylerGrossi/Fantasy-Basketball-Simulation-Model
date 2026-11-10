@@ -485,7 +485,7 @@ export const TOOL_DECLARATIONS: ToolDeclaration[] = [
   {
     name: "player_game_detail",
     description:
-      "One player's GAME-BY-GAME detail, live from ESPN: his last games, monthly splits, home/away and rest splits, how he did against strong versus weak defences, and his CONSISTENCY — median night, game-to-game spread, how often he beat his own average, and where that spread ranks in the league. Use for 'how consistent is he', 'can I rely on him', 'is he trending up', 'does he show up against good teams', 'how is he on back-to-backs', 'what has he done lately', or any question the season averages cannot answer. Slower than the other tools because it fetches live — call it only when the question is actually about form, splits, consistency or recent games.",
+      "One player's GAME-BY-GAME detail, live from ESPN: his last games, monthly splits, home/away and rest splits, how he did against strong versus weak defenses, and his CONSISTENCY — median night, game-to-game spread, how often he beat his own average, and where that spread ranks in the league. Use for 'how consistent is he', 'can I rely on him', 'is he trending up', 'does he show up against good teams', 'how is he on back-to-backs', 'what has he done lately', or any question the season averages cannot answer. Slower than the other tools because it fetches live — call it only when the question is actually about form, splits, consistency or recent games.",
     parameters: {
       type: "object",
       properties: {
@@ -891,9 +891,9 @@ export function createToolRunner(
               return d ? d.rank >= lo && d.rank <= hi : false;
             });
           out.push(
-            "By opponent defence (points allowed, thirds) — " +
+            "By opponent defense (points allowed, thirds) — " +
               [
-                bucket("vs top 10 defences", tier(1, 10)),
+                bucket("vs top 10 defenses", tier(1, 10)),
                 bucket("vs middle 10", tier(11, 20)),
                 bucket("vs bottom 10", tier(21, 30)),
               ]
@@ -1352,7 +1352,7 @@ export function systemInstruction(
     "and their team is marked as the user's in the results.\n" +
     "player_game_detail is the ONLY tool that sees a player's individual GAMES - his last " +
     "ten lines, his month-by-month splits, home/away, rest and back-to-backs, how he does " +
-    "against good, average and bad defences, and his consistency (median night, " +
+    "against good, average and bad defenses, and his consistency (median night, " +
     "game-to-game spread, and where that spread ranks league-wide and among players of " +
     "similar value). Use it whenever the question is about form, consistency, reliability, " +
     "a hot or cold streak, rest, matchups, or what he has done lately; the other tools " +

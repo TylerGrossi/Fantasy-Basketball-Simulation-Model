@@ -14,10 +14,18 @@ export default function WeekSelect({
   weeks,
   selected,
   current,
+  path = "/scoreboard",
+  param = "period",
+  small = false,
 }: {
   weeks: { period: number; label: string }[];
   selected: number;
   current: number;
+  /** Where a pick goes: `${path}?${param}=N`, or bare `path` for `current`. */
+  path?: string;
+  param?: string;
+  /** A subtitle-sized chooser under a page title (Weekly Recap) instead of the title. */
+  small?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -50,27 +58,30 @@ export default function WeekSelect({
       ?.scrollIntoView({ block: "center" });
   }, [open]);
 
-  if (weeks.length < 2) return <h1>{label}</h1>;
+  if (weeks.length < 2) return small ? <p className="caption wr-sub">{label}</p> : <h1>{label}</h1>;
 
   const go = (p: number) => {
     setOpen(false);
-    router.push(p === current ? "/scoreboard" : `/scoreboard?period=${p}`);
+    router.push(p === current ? path : `${path}?${param}=${p}`);
   };
 
   return (
     <div className="week-title-wrap" ref={ref}>
-      <h1 className="week-title">
-        <button
-          type="button"
-          className="week-title-btn"
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          {label}
-          <span className="week-title-caret" aria-hidden="true" />
-        </button>
-      </h1>
+      {(() => {
+        const btn = (
+          <button
+            type="button"
+            className={small ? "week-title-btn week-sub-btn" : "week-title-btn"}
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {label}
+            <span className="week-title-caret" aria-hidden="true" />
+          </button>
+        );
+        return small ? btn : <h1 className="week-title">{btn}</h1>;
+      })()}
       {open && (
         <div className="week-menu" role="listbox" ref={listRef}>
           {weeks.map((w) => (
