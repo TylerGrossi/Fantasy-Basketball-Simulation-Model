@@ -106,7 +106,13 @@ jobs:
       # The pre-week forecast and the win-prob reading record the gauge sides the step above
       # wrote, so a logged number IS the gauge's number at that moment (the plain export
       # projection, recorded before injury scoring, once read 49% against a live 85%).
+      # Same credentials as the export: build_data.py imports engine/config.py, which
+      # refuses to load without all three.
       - name: Record the forecast and win-prob logs
+        env:
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/build_data.py --record-logs
 
       # The Agent's spread baseline. It is derived from ~290 ESPN game logs and from the
