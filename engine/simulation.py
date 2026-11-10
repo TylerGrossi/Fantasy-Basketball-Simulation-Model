@@ -15,9 +15,11 @@ from config import (
     NUMERIC_COLS,
     PLAYOFF_MONTE_CARLO_CAP,
     PLAYOFF_VARIANCE_MULTIPLIER,
+    PROJECTION_ERROR,
     REGULAR_SEASON_VARIANCE_EARLY_WEEK,
     REGULAR_SEASON_VARIANCE_MID_WEEK,
     REGULAR_SEASON_VARIANCE_LATE_WEEK,
+    SHOT_CORRELATION,
     STATUS_DISPLAY,
     STREAMER_PICKUP_MONTE_CARLO_SIMS,
 )
@@ -690,11 +692,23 @@ def _build_projected_weekly_for_team(team, week, year, injury_data, blend_weight
         return {cat: 0.0 for cat in CATEGORIES}
     stats_to_sim = list(CATEGORY_VARIANCE.keys())
     proj = {}
+    g = merged["Games This Week"]
     for stat in stats_to_sim:
         if stat in merged.columns:
-            proj[stat] = float((merged[stat] * merged["Games This Week"]).sum())
+            a = merged[stat]
+            proj[stat] = float((a * g).sum())
+            # The team-week VARIANCE, per player as the web model does it (lib/league.ts
+            # playerMoments): g*(avg*cv)^2 per-game noise + (g*avg*err)^2 for the average
+            # itself being wrong. Before 2026-11-09 the sim applied the per-GAME cv to the
+            # whole team-week total (sd = 0.38 x 900 points, against a real ~57), which
+            # put every future week on Schedule near 50%.
+            proj[f"var:{stat}"] = float(
+                (g * (a * CATEGORY_VARIANCE[stat]) ** 2
+                 + (g * a * PROJECTION_ERROR.get(stat, 0.0)) ** 2).sum()
+            )
         else:
             proj[stat] = 0.0
+            proj[f"var:{stat}"] = 0.0
     fgm, fga = proj.get("FGM", 0), proj.get("FGA", 0)
     ftm, fta = proj.get("FTM", 0), proj.get("FTA", 0)
     tpm, tpa = proj.get("3PM", 0), proj.get("3PA", 0)
@@ -727,6 +741,10 @@ def _combine_projected_stats(proj1, proj2):
     combined = {}
     for s in raw_stats:
         combined[s] = proj1.get(s, 0) + proj2.get(s, 0)
+        # Variances add across the two weeks (an approximation for the projection-error
+        # part, which is shared by both weeks of the same player).
+        if f"var:{s}" in proj1 or f"var:{s}" in proj2:
+            combined[f"var:{s}"] = proj1.get(f"var:{s}", 0) + proj2.get(f"var:{s}", 0)
     fgm, fga = combined.get("FGM", 0), combined.get("FGA", 0)
     ftm, fta = combined.get("FTM", 0), combined.get("FTA", 0)
     tpm, tpa = combined.get("3PM", 0), combined.get("3PA", 0)
@@ -766,6 +784,48 @@ def _simulate_matchup_winner(home_id, away_id, proj_home, proj_away, variance_mu
 _RATIO_CATS = (("FG%", "FGM", "FGA"), ("FT%", "FTM", "FTA"), ("3P%", "3PM", "3PA"))
 
 
+# Made stat -> (attempted stat, ratio category), for the correlated draw below.
+_MADE_OF = {"FGM": ("FGA", "FG%"), "FTM": ("FTA", "FT%"), "3PM": ("3PA", "3P%")}
+
+
+def _draw_week(proj, variance_multiplier, gauss):
+    """
+    One simulated team-week of raw stats.
+
+    With a projected variance (`var:<stat>`, from _build_projected_weekly_for_team): a
+    normal with that variance times `variance_multiplier`, and each MADE stat drawn
+    correlated with its attempts by the measured SHOT_CORRELATION (otherwise FT% swings
+    far too much). Without one (an older caller's dict): the legacy per-game-cv spread.
+    A total cannot go negative; an unclamped draw could, and a negative attempt count
+    would make a percentage meaningless.
+    """
+    out = {}
+    z = {}
+    for i, stat in enumerate(_SIM_STATS):
+        if stat in _MADE_OF:
+            continue  # drawn after its attempts
+        m = proj.get(stat, 0)
+        var = proj.get(f"var:{stat}")
+        if var is None:
+            out[stat] = max(0.0, gauss(m, max(0.01, abs(m) * _VARIANCE_LIST[i] * variance_multiplier)))
+            continue
+        sd = (max(var, 0.0) * variance_multiplier) ** 0.5
+        z[stat] = gauss(0.0, 1.0)
+        out[stat] = max(0.0, m + sd * z[stat])
+    for made, (att, cat) in _MADE_OF.items():
+        m = proj.get(made, 0)
+        var = proj.get(f"var:{made}")
+        if var is None or att not in z:
+            i = _SIM_STATS.index(made)
+            out[made] = max(0.0, gauss(m, max(0.01, abs(m) * _VARIANCE_LIST[i] * variance_multiplier)))
+            continue
+        rho = SHOT_CORRELATION.get(cat, 0.0)
+        sd = (max(var, 0.0) * variance_multiplier) ** 0.5
+        zz = rho * z[att] + (1 - rho * rho) ** 0.5 * gauss(0.0, 1.0)
+        out[made] = max(0.0, m + sd * zz)
+    return out
+
+
 def _simulate_matchup_cats(proj_home, proj_away, variance_multiplier=1.0):
     """
     One simulated week, scored on the LEAGUE'S categories: (home_cat_wins, away_cat_wins,
@@ -777,16 +837,8 @@ def _simulate_matchup_cats(proj_home, proj_away, variance_multiplier=1.0):
     scoring FG%, FT% or 3P%, which it does (fixed 2026-10-20).
     """
     gauss = random.gauss
-    dh = {}
-    da = {}
-    for i, stat in enumerate(_SIM_STATS):
-        m_h = proj_home.get(stat, 0)
-        m_a = proj_away.get(stat, 0)
-        v = _VARIANCE_LIST[i] * variance_multiplier
-        # A week's total cannot go negative; an unclamped draw could, and a negative
-        # attempt count would turn a percentage meaningless.
-        dh[stat] = max(0.0, gauss(m_h, max(0.01, abs(m_h) * v)))
-        da[stat] = max(0.0, gauss(m_a, max(0.01, abs(m_a) * v)))
+    dh = _draw_week(proj_home, variance_multiplier, gauss)
+    da = _draw_week(proj_away, variance_multiplier, gauss)
     for pct, made, att in _RATIO_CATS:
         dh[pct] = min(dh[made], dh[att]) / dh[att] if dh[att] > 0 else 0.0
         da[pct] = min(da[made], da[att]) / da[att] if da[att] > 0 else 0.0
@@ -1508,7 +1560,8 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                                    current_week_matchup_outcomes=None,
                                    period_end_date=None,
                                    precomputed_projected=None,
-                                   return_projected=False):
+                                   return_projected=False,
+                                   current_week_projected=None):
     """
     Monte Carlo simulation for playoff and championship probabilities.
     Uses: current standings + current week matchup probabilities (if provided) + rest of season simulation.
@@ -1522,6 +1575,11 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
         When provided, samples from this distribution for the current week instead of simulating.
     precomputed_projected: if set, skips rebuilding weekly projections (reuse from a prior run).
     return_projected: if True, return (results, projected) for follow-up sims.
+    current_week_projected: optional {team_id: {stat: banked + rest-of-week mean,
+        "var:<stat>": rest-of-week variance}} for THIS week (the export's matchups). Every
+        current-week matchup with both sides in it is drawn from these, so a week that is
+        already half played counts what is banked (fixed 2026-11-09 — the week used to be
+        simulated as if nothing had been played, a 12-3 Saturday lead included).
     Iteration count is min(sims, PLAYOFF_MONTE_CARLO_CAP).
 
     Returns:
@@ -1784,11 +1842,16 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
         losses = {tid: team_id_to_record[tid][1] for tid in team_ids}
         ties = {tid: team_id_to_record[tid][2] for tid in team_ids}
 
-        def _play_week(home_id, away_id, week):
+        def _play_week(home_id, away_id, week, source=None):
             """One simulated week of one matchup, added to the running records."""
-            proj_home = projected.get(home_id, {}).get(week, {})
-            proj_away = projected.get(away_id, {}).get(week, {})
-            hw, aw, ct = _simulate_matchup_cats(proj_home, proj_away, matchup_variance)
+            if source is not None and home_id in source and away_id in source:
+                proj_home, proj_away = source[home_id], source[away_id]
+            else:
+                proj_home = projected.get(home_id, {}).get(week, {})
+                proj_away = projected.get(away_id, {}).get(week, {})
+            # 1.0, not today's day-of-week multiplier: these are whole weeks still to
+            # come, and the projected variance already is a full week's.
+            hw, aw, ct = _simulate_matchup_cats(proj_home, proj_away, 1.0)
             _note_week(week, home_id, hw, aw, ct)
             _note_week(week, away_id, aw, hw, ct)
             if each_category:
@@ -1852,7 +1915,7 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
                         losses[home_id] += uw
                         ties[home_id] += ut
                 else:
-                    _play_week(home_id, away_id, current_week)
+                    _play_week(home_id, away_id, current_week, current_week_projected)
 
         # Future weeks: simulate all matchups
         for week in future_weeks:
@@ -1885,7 +1948,12 @@ def simulate_playoff_probabilities(league, league_stats, year, sims=5000,
             playoff_bracket = actual_playoff_bracket
             bracket_starting_round = current_playoff_round_idx if current_playoff_round_idx is not None else 0
         else:
-            playoff_bracket = sorted_ids[:playoff_teams]
+            # Seeded 1v4 / 2v3. The bracket sim pairs NEIGHBOURS (current[i], current[i+1]),
+            # so the plain standings order played 1v2 and 3v4 in the semis (fixed
+            # 2026-11-09), which held the top seed's title odds down.
+            seeds = sorted_ids[:playoff_teams]
+            pairs = _infer_semifinal_pairs_standard(seeds) if len(seeds) == 4 else []
+            playoff_bracket = [t for pr in pairs for t in pr] if pairs else seeds
             bracket_starting_round = 0
         if finals_skip_bracket_championship:
             championship_count[user_champ_tid] += p_user_championship
@@ -1975,7 +2043,10 @@ def _simulate_playoff_bracket_projected(bracket, projected, playoff_week_pairs,
         playoff_week_pairs = [(20, 21), (22, 23)]
     semis_w1, semis_w2 = playoff_week_pairs[0]
     finals_w1, finals_w2 = playoff_week_pairs[1]
-    bracket_variance = PLAYOFF_VARIANCE_MULTIPLIER * day_variance_multiplier
+    # Not x day_variance_multiplier: playoff rounds are whole weeks, usually months away,
+    # and today's weekday says nothing about them (fixed 2026-11-09 - title odds came out
+    # flatter on a Monday than on a Saturday). The parameter stays for its callers.
+    bracket_variance = PLAYOFF_VARIANCE_MULTIPLIER
     current = list(bracket)
     round_idx = starting_round
     round_advancers = []
@@ -2690,4 +2761,189 @@ def plan_waiver_adds_by_date(
         "counted_starts": counted_starts,
         "window_days": window_days,
         "max_starts_per_day": cap,
+    }
+
+
+# =============================================================================
+# SEASON INPUTS for the one season engine (lib/seasonOdds.ts), 2026-11-09.
+#
+# The Playoffs page, Schedule's future weeks and Streamers' playoff/title change all come
+# from ONE TypeScript engine now (it runs in the export's Node step and in the browser).
+# Python only supplies what needs ESPN: who plays how many games each week (real NBA
+# schedules, injury-aware, the daily starting cap), each player's projected per-game line,
+# the schedule, records and the bracket. The engine turns those into each week's spread
+# with the same playerMoments the live gauge uses, so no maths lives here.
+# =============================================================================
+
+def _schedule_by_week(league, regular_season_weeks):
+    """week -> [(home_id, away_id)] for the regular season, from ESPN's scoreboard."""
+    out = {}
+    for week in range(1, regular_season_weeks + 1):
+        try:
+            for m in league.scoreboard(matchupPeriod=week):
+                h = m.home_team if isinstance(m.home_team, int) else getattr(m.home_team, "team_id", None)
+                a = m.away_team if isinstance(m.away_team, int) else getattr(m.away_team, "team_id", None)
+                if h is not None and a is not None:
+                    out.setdefault(week, []).append((int(h), int(a)))
+        except Exception:
+            continue
+    return out
+
+
+def _bracket_state(league, league_stats, current_week, regular_season_weeks,
+                   playoff_teams=4, weeks_per_round=2):
+    """
+    Where the bracket stands, once the regular season is over: the playoff teams (record,
+    then all-play strength), ESPN's actual pairings this round, the round index (0 =
+    semis, 1 = final) and the finalists once known. None during the regular season.
+    """
+    if current_week <= regular_season_weeks:
+        return None
+    rnd = playoff_matchup_round_one_based(current_week, regular_season_weeks, weeks_per_round)
+    record = {t["team_id"]: (t["actual_wins"], t["actual_losses"], t["actual_ties"]) for t in league_stats}
+    strength = {t["team_id"]: max(0.01, t["all_play_pct"]) for t in league_stats}
+
+    def key(tid):
+        w, l, t = record[tid]
+        n = w + l + t
+        return ((w + 0.5 * t) / n if n else 0, strength.get(tid, 0))
+
+    seeds = sorted(record, key=key, reverse=True)[:playoff_teams]
+    playoff_set = set(seeds)
+    pairs = []
+    try:
+        for m in _box_scores(league, current_week):
+            h = getattr(m.home_team, "team_id", None)
+            a = getattr(m.away_team, "team_id", None)
+            if h in playoff_set and a in playoff_set:
+                pairs.append((int(h), int(a)))
+    except Exception:
+        pairs = []
+    finalists = _resolve_championship_finalist_ids(
+        league, pairs, league_stats, playoff_set, rnd,
+        regular_season_weeks, weeks_per_round, current_week,
+    )
+    return {
+        "roundIdx": max(0, rnd - 1),
+        "seeds": [int(t) for t in seeds],
+        "pairs": [list(p) for p in pairs],
+        "finalists": sorted(int(t) for t in finalists) if finalists else None,
+    }
+
+
+def season_inputs(league, league_stats, year, injury_data, blend_weight,
+                  regular_season_weeks=19, playoff_teams=4, weeks_per_round=2,
+                  extra_abbrevs=()):
+    """
+    Everything lib/seasonOdds.ts needs, as plain JSON:
+
+      currentWeek, regularSeasonWeeks, playoffTeams, playoffWeeks [[w1, w2], [w1, w2]]
+      rosterCap, dailyCap        the 13 active spots and 10 starting slots
+      teams: [{id, record [W, L, T], strength (all-play %), players: [{name, nbaTeam,
+              avg [STATS order], value, days {week: [day offsets in that week]}}]}]
+      schedule: [{period, pairs [[a, b], ...]}]   remaining regular weeks, current included
+      nbaWeekDays: {week: {NBA abbrev: [day offsets]}}   for a pickup's weeks
+      bracket: _bracket_state(...) or None
+
+    `days` are each player's injury-aware game days (data._get_games_by_day_for_week) and
+    `value` his league value (data._value_rank_scores_from_df against every rostered line):
+    the two things the caps rank by. The CAPS THEMSELVES are applied in the engine, not
+    here, so a pickup competes for a spot exactly as a rostered player does - baked-in
+    counts let a streamer play as a 14th man in weeks his drop had already been capped out
+    of (2026-11-09). Every rostered player is listed, idle ones too: they count toward the
+    13 even though they go last.
+    """
+    from data import (  # noqa: PLC0415
+        get_week_date_range, _get_games_by_day_for_week, _value_rank_scores_from_df,
+    )
+    from config import MAX_ROSTER_SIZE  # noqa: PLC0415
+
+    current_week = current_matchup_period_effective(league)
+    rs = regular_season_weeks
+    sched = _schedule_by_week(league, rs)
+    remaining = [w for w in range(current_week, rs + 1) if sched.get(w)]
+    playoff_weeks = [[rs + 1 + r * weeks_per_round + i for i in range(weeks_per_round)]
+                     for r in range(2)]
+    weeks = remaining + [w for pw in playoff_weeks for w in pw]
+    stats = list(CATEGORY_VARIANCE.keys())
+    injury_data = injury_data or {}
+    starts = {w: get_week_date_range(w, year)[0] for w in weeks}
+
+    # Every roster's blended lines first, so value is scored against the whole league.
+    frames = {}
+    for team in league.teams:
+        roster = getattr(team, "roster", []) or []
+        if not roster:
+            continue
+        name = getattr(team, "team_name", "Unknown")
+        season_df = build_stat_df(roster, f"{year}_total", "Season", name, year)
+        last30_df = build_stat_df(roster, f"{year}_last_30", "Last30", name, year)
+        if not season_df.empty:
+            frames[int(team.team_id)] = blend_season_last30(season_df, last30_df, blend_weight)
+    ref = pd.concat(list(frames.values()), ignore_index=True) if frames else None
+
+    teams = []
+    by_id = {t["team_id"]: t for t in league_stats}
+    for team in league.teams:
+        tid = int(team.team_id)
+        roster = getattr(team, "roster", []) or []
+        merged = frames.get(tid)
+        values = _value_rank_scores_from_df(merged, ref) if merged is not None else {}
+        rows = {}
+        if merged is not None:
+            for _, row in merged.iterrows():
+                rows[row["Player"]] = row
+        days = {p.name: {} for p in roster}
+        for w in weeks:
+            start = starts.get(w)
+            if start is None:
+                continue
+            for d, players in _get_games_by_day_for_week(roster, w, year, injury_data).items():
+                for nm, _ab in players:
+                    days.setdefault(nm, {}).setdefault(str(w), []).append((d - start).days)
+        players = []
+        for p in roster:
+            row = rows.get(p.name)
+            players.append({
+                "name": p.name,
+                "nbaTeam": str(getattr(p, "proTeam", "") or ""),
+                "avg": [round(float(row.get(s, 0) or 0), 4) for s in stats] if row is not None else [0.0] * len(stats),
+                "value": round(float(values.get(p.name, 0.0)), 4),
+                "days": {w: sorted(v) for w, v in days.get(p.name, {}).items()},
+            })
+        st = by_id.get(tid, {})
+        teams.append({
+            "id": tid,
+            "record": [int(st.get("actual_wins", 0)), int(st.get("actual_losses", 0)),
+                       int(st.get("actual_ties", 0))],
+            "strength": round(float(st.get("all_play_pct", 0) or 0), 5),
+            "players": players,
+        })
+
+    nba_week_days = {}
+    abbrevs = sorted({p["nbaTeam"] for t in teams for p in t["players"] if p["nbaTeam"]}
+                     | {a for a in extra_abbrevs if a})
+    for w in weeks:
+        start, end = get_week_date_range(w, year)
+        if start is None:
+            continue
+        nba_week_days[str(w)] = {}
+        for ab in abbrevs:
+            try:
+                offs = sorted((g - start).days for g in get_team_schedule(ab) if start <= g <= end)
+            except Exception:
+                offs = []
+            nba_week_days[str(w)][ab] = offs
+
+    return {
+        "currentWeek": int(current_week),
+        "regularSeasonWeeks": int(rs),
+        "playoffTeams": int(playoff_teams),
+        "playoffWeeks": playoff_weeks,
+        "rosterCap": int(MAX_ROSTER_SIZE),
+        "dailyCap": int(MAX_PLAYERS_PER_DAY),
+        "teams": teams,
+        "schedule": [{"period": int(w), "pairs": [list(p) for p in sched[w]]} for w in remaining],
+        "nbaWeekDays": nba_week_days,
+        "bracket": _bracket_state(league, league_stats, current_week, rs, playoff_teams, weeks_per_round),
     }

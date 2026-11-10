@@ -8747,6 +8747,10 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
 .gd-pc.gd-own-you .gd-pc-name a { color: var(--cobalt); }
 .gd-pc.gd-own-opp .gd-pc-name a { color: var(--clay); }
 .gd-pc-gs { margin-left: auto; font-weight: 700; font-size: 0.88rem; }
+/* WPA beside GS on the phone card; takes GS's right-alignment when GS is absent. */
+.gd-pc-wpa { font-weight: 700; font-size: 0.88rem; white-space: nowrap; }
+.gd-pc-wpa.solo { margin-left: auto; }
+.gd-pc-wpa-k { font-size: 0.58rem; font-weight: 600; color: var(--ink-3); }
 .gd-pc-sub { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; margin-top: 0.1rem; font-size: 0.7rem; color: var(--ink-2); }
 .gd-pc-sub .mono { color: var(--ink); }
 .gd-pc-stats { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center; border-top: 1px solid var(--line-2); margin-top: 0.4rem; padding-top: 0.3rem; }
@@ -8975,4 +8979,43 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
   .wtp-table th:nth-child(4), .wtp-table td:nth-child(4),
   .wtp-table th:nth-child(6), .wtp-table td:nth-child(6),
   .wtp-table th:nth-child(7), .wtp-table td:nth-child(7) { display: none; }
+}
+
+/* -------- Weekly Recap (app/recap, owner 2026-11-09) --------
+   A finished week across the league. Two-column grids collapse to one on phones; every
+   wide table scrolls inside .table-scroll. Your team: cobalt; results: good/bad; the
+   upset tag: clay, like every other warning-ish tag in the app. */
+.wr-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.wr-top h1 { margin-bottom: 0.15rem; }
+.wr-sub { margin: 0; }
+.wr h2 { margin-top: 1.8rem; }
+.wr-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.4rem; }
+.wr-grid > section { min-width: 0; }
+.wr-matchups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.7rem; }
+.wr-matchups > * { min-width: 0; }
+.wr-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.55rem 0.7rem 0.4rem; }
+.wr-card-me { border-color: var(--cobalt); }
+.wr-card-head { display: flex; align-items: center; gap: 0.6rem; min-height: 1.1rem; }
+.wr-box-link { margin-left: auto; font-size: 0.72rem; color: var(--ink-2); text-decoration: none; }
+.wr-box-link:hover { color: var(--cobalt); text-decoration: underline; }
+.wr-upset { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--clay); border: 1px solid var(--clay); border-radius: 4px; padding: 0 0.35rem; }
+.wr-board { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
+.wr-board th { font-size: 0.62rem; font-weight: 600; color: var(--ink-3); padding: 0.2rem 0.4rem; text-align: right; }
+.wr-board td { padding: 0.28rem 0.4rem; border-top: 1px solid var(--line-2, var(--line)); text-align: right; }
+.wr-board td.wr-team { text-align: left; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.wr-board tr.wr-win td.wr-team { font-weight: 700; }
+.wr-lead { background: var(--surface-2); font-weight: 700; }
+.wr-strong { font-weight: 700; }
+.wr-me td { background: color-mix(in srgb, var(--cobalt) 7%, transparent); }
+.wr-me-cell { color: var(--cobalt); font-weight: 600; }
+.wr-res { font-weight: 700; }
+.wr-res.w { color: var(--good); }
+.wr-res.l { color: var(--bad); }
+@media (max-width: 767px) {
+  .wr-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .wr-top { flex-direction: column; align-items: flex-start; gap: 0.4rem; }
+}
+/* Phones keep each recap table to the player and the number it exists to show. */
+@media (max-width: 767px) {
+  .wr .wr-hide-sm { display: none; }
 }

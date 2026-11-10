@@ -16,7 +16,8 @@
  * trade) instant; the correlated draw keeps that (~0.3ms per matchup).
  *
  * Remaining modelling assumption: ratio categories (FG%/FT%/3P%) are ratios of normals,
- * approximated by the delta method with made and attempted treated as independent.
+ * approximated by the delta method with made and attempted CORRELATED by the measured
+ * `shotCorrelation` (independent before 2026-11-09).
  */
 
 /** Canonical stat order. Must match `stats` in the generated league.json. */
@@ -27,6 +28,13 @@ export interface Moments {
   mu: StatVector;
   /** Variance of that projection per stat. Variances add across players. */
   var: StatVector;
+  /**
+   * The part of `var` that is the WEEK term (lib/league.ts withWeekTerm): games nobody can
+   * know before the week - injuries, rest, moves. Already included in `var`; kept apart
+   * because it scales made and attempted TOGETHER, so a ratio category (FG%) leaves it
+   * out. It belongs to the side, not to any player, so swapping a player carries it over.
+   */
+  wk?: StatVector;
 }
 
 export interface LeagueMeta {
@@ -42,6 +50,11 @@ export interface LeagueMeta {
    * older exports predate it and fall back to independent categories.
    */
   categoryCorrelation?: number[][];
+  /**
+   * Correlation of made and attempted, per ratio category ("FT%" -> 0.93), for the ratio
+   * variance (ratioMoments). Older exports lack it; DEFAULT_SHOT_CORRELATION stands in.
+   */
+  shotCorrelation?: Record<string, number>;
 }
 
 export interface MatchupOutcome {
@@ -57,8 +70,12 @@ export interface MatchupOutcome {
   distribution: number[];
 }
 
-/** Ratio categories and the made/attempted pair each is derived from. */
-const RATIO_PAIRS: Record<string, [string, string]> = {
+/**
+ * Ratio categories and the made/attempted pair each is derived from. THE one copy:
+ * league.ts, seasonSim.ts and the projection table import it, so a category can never be
+ * scored one way on the scoreboard and another in the win probability.
+ */
+export const RATIO_PAIRS: Record<string, [string, string]> = {
   "FG%": ["FGM", "FGA"],
   "FT%": ["FTM", "FTA"],
   "3P%": ["3PM", "3PA"],
@@ -147,20 +164,44 @@ function indexOf(meta: LeagueMeta): Record<string, number> {
 }
 
 /**
- * Mean and standard deviation of a ratio category, via the delta method:
- *   Var(A/B) ~= (muA/muB)^2 * (varA/muA^2 + varB/muB^2)
+ * Made-vs-attempted correlation per ratio category, for an export that predates
+ * `shotCorrelation` (2026-11-09). The export's own value always wins; this mirrors
+ * engine/config.py SHOT_CORRELATION so an older snapshot does not fall back to the
+ * independent maths that made FT% ranges run 60%-100%.
  */
-function ratioMoments(
+const DEFAULT_SHOT_CORRELATION: Record<string, number> = { "FG%": 0.78, "FT%": 0.93, "3P%": 0.77 };
+
+/** The made/attempted correlation for one ratio category. */
+export function shotCorrelation(meta: Pick<LeagueMeta, "shotCorrelation">, cat: string): number {
+  return meta.shotCorrelation?.[cat] ?? DEFAULT_SHOT_CORRELATION[cat] ?? 0;
+}
+
+/**
+ * Mean and standard deviation of a ratio category, via the delta method with made and
+ * attempted CORRELATED (rho, measured per category):
+ *   Var(A/B) ~= (muA/muB)^2 * (varA/muA^2 + varB/muB^2 - 2 rho sdA sdB / (muA muB))
+ * Treating them as independent (rho = 0, before 2026-11-09) overstated the spread several
+ * times over for FT% and pulled every shooting category toward 50/50.
+ */
+export function ratioMoments(
   m: Moments,
   madeIdx: number,
-  attIdx: number
+  attIdx: number,
+  rho = 0
 ): [number, number] {
   const a = m.mu[madeIdx];
   const b = m.mu[attIdx];
   if (b <= 0) return [0, 1e-9];
   const r = a / b;
+  // The week term moves made and attempted by the same factor: it cancels in the ratio.
+  const va = Math.max(0, m.var[madeIdx] - (m.wk?.[madeIdx] ?? 0));
+  const vb = Math.max(0, m.var[attIdx] - (m.wk?.[attIdx] ?? 0));
   const v =
-    r * r * (m.var[madeIdx] / Math.max(a * a, 1e-12) + m.var[attIdx] / Math.max(b * b, 1e-12));
+    r *
+    r *
+    (va / Math.max(a * a, 1e-12) +
+      vb / Math.max(b * b, 1e-12) -
+      (2 * rho * Math.sqrt(Math.max(va * vb, 0))) / Math.max(a * b, 1e-12));
   return [r, Math.sqrt(Math.max(v, 1e-18))];
 }
 
@@ -177,8 +218,9 @@ export function categoryProbabilities(
     const pair = RATIO_PAIRS[cat];
     if (pair) {
       const [made, att] = pair;
-      [muY, sdY] = ratioMoments(you, idx[made], idx[att]);
-      [muO, sdO] = ratioMoments(opp, idx[made], idx[att]);
+      const rho = shotCorrelation(meta, cat);
+      [muY, sdY] = ratioMoments(you, idx[made], idx[att], rho);
+      [muO, sdO] = ratioMoments(opp, idx[made], idx[att], rho);
     } else {
       const i = idx[cat];
       muY = you.mu[i];
@@ -236,16 +278,12 @@ const COPULA_DRAWS = 10000; // ~0.3pp standard error
 const drawCache = new WeakMap<number[][], Float32Array[]>();
 
 /**
- * Fixed correlated standard-normal draws, one column per category: `cols[c][d]`.
- * Column-major so the per-matchup scan is one tight loop per category — the streamers
- * page runs ~1,800 matchups per render, and row-major was 6x slower.
+ * Lower-triangular Cholesky factor of a correlation matrix, with a small ridge in case the
+ * rounded matrix is not quite positive definite. Shared by the gauge's copula draws and
+ * the season engine's (lib/seasonOdds.ts), so both link the categories identically.
  */
-function correlatedDraws(corr: number[][]): Float32Array[] {
-  const cached = drawCache.get(corr);
-  if (cached) return cached;
+export function choleskyFactor(corr: number[][]): number[][] {
   const n = corr.length;
-
-  // Cholesky, with a small ridge in case the rounded matrix is not quite positive definite.
   const L = corr.map(() => new Array(n).fill(0));
   for (let i = 0; i < n; i++) {
     for (let j = 0; j <= i; j++) {
@@ -254,6 +292,19 @@ function correlatedDraws(corr: number[][]): Float32Array[] {
       L[i][j] = i === j ? Math.sqrt(Math.max(s, 1e-9)) : s / L[j][j];
     }
   }
+  return L;
+}
+
+/**
+ * Fixed correlated standard-normal draws, one column per category: `cols[c][d]`.
+ * Column-major so the per-matchup scan is one tight loop per category — the streamers
+ * page runs ~1,800 matchups per render, and row-major was 6x slower.
+ */
+function correlatedDraws(corr: number[][]): Float32Array[] {
+  const cached = drawCache.get(corr);
+  if (cached) return cached;
+  const n = corr.length;
+  const L = choleskyFactor(corr);
 
   // mulberry32: small, seeded, and identical in every browser.
   let seed = 0x5eed;
@@ -364,9 +415,11 @@ export function emptyMoments(n: number): Moments {
 }
 
 export function addMoments(base: Moments, add: Moments): Moments {
+  const wk = base.wk || add.wk ? base.mu.map((_, i) => (base.wk?.[i] ?? 0) + (add.wk?.[i] ?? 0)) : undefined;
   return {
     mu: base.mu.map((v, i) => v + add.mu[i]),
     var: base.var.map((v, i) => v + add.var[i]),
+    ...(wk ? { wk } : {}),
   };
 }
 
@@ -376,6 +429,8 @@ export function subtractMoments(base: Moments, remove: Moments): Moments {
     // Clamp at zero: floating-point subtraction of a player's own contribution can land
     // fractionally below it, and a negative variance would produce NaN in the sqrt.
     var: base.var.map((v, i) => Math.max(0, v - remove.var[i])),
+    // The side's week term stays: it is not any one player's.
+    ...(base.wk ? { wk: base.wk } : {}),
   };
 }
 
@@ -389,5 +444,6 @@ export function withCurrentTotals(projection: Moments, current: StatVector): Mom
   return {
     mu: projection.mu.map((v, i) => v + (current[i] ?? 0)),
     var: projection.var.slice(),
+    ...(projection.wk ? { wk: projection.wk.slice() } : {}),
   };
 }

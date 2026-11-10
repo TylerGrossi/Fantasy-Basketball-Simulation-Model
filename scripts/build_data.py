@@ -1004,6 +1004,37 @@ def fetch_roster_slots(league):
     return out
 
 
+def _gauge_sides(payload):
+    """
+    This week's sides per team as the GAUGE counts them (injury odds, today's rosters, who
+    starts), written by the export's Node step (scripts/node/season.ts, lib/gaugeSides.ts)
+    into seasonData.currentWeekSides. The logs record these so a forecast or reading IS the
+    gauge's number at that moment. None when the step has not run (then nothing is logged:
+    a reading from different sides than the gauge's is the bug this replaced).
+    """
+    sides = (payload.get("seasonData") or {}).get("currentWeekSides")
+    if not sides:
+        return None
+    out = {}
+    for k, v in sides.items():
+        wk = v.get("projWk") or [0.0] * len(v["projVar"])
+        # The logged variance INCLUDES the week term (as the gauge's sideMoments does);
+        # `projWk` is kept beside it so the ratio categories can leave it out.
+        out[int(k)] = {**v, "projVar": [a + b for a, b in zip(v["projVar"], wk)], "projWk": wk}
+    return out
+
+
+def _scoring_constants(payload):
+    """The maths a log entry was scored with, kept WITH it (lib/predictions.ts reads
+    them back), so re-measuring a constant later never regrades history."""
+    return {
+        "variance": payload.get("variance"),
+        "projectionError": payload.get("projectionError"),
+        "shotCorrelation": payload.get("shotCorrelation"),
+        "categoryCorrelation": payload.get("categoryCorrelation"),
+    }
+
+
 def record_preweek_predictions(payload, check_only=False):
     """
     Log this week's PRE-WEEK forecast, once, before any of it has been played.
@@ -1068,14 +1099,23 @@ def record_preweek_predictions(payload, check_only=False):
         print(f"  pre-week forecast: skipped — period {period} has no games left")
         return existing
 
+    # The GAUGE's sides (2026-11-09): injury odds, rosters and who starts, exactly as the
+    # live number counts them. The forecast used to be the plain export projection, written
+    # before the injury model ran, and week 4's read 49.1% against a first live 84.6%.
+    sides = _gauge_sides(payload)
+    if sides is None:
+        print("  pre-week forecast: skipped - no gauge sides (the Node season step did not run)")
+        return existing
     periods[period] = {
         "recordedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+        **_scoring_constants(payload),
         "games": [
             {
                 "homeId": m["homeId"],
                 "awayId": m["awayId"],
-                "homeMu": m["home"]["projMu"], "homeVar": m["home"]["projVar"],
-                "awayMu": m["away"]["projMu"], "awayVar": m["away"]["projVar"],
+                "homeMu": sides[m["homeId"]]["projMu"], "homeVar": sides[m["homeId"]]["projVar"],
+                "awayMu": sides[m["awayId"]]["projMu"], "awayVar": sides[m["awayId"]]["projVar"],
+                "homeWk": sides[m["homeId"]]["projWk"], "awayWk": sides[m["awayId"]]["projWk"],
             }
             for m in matchups
         ],
@@ -1168,12 +1208,18 @@ def record_winprob_reading(payload, check_only=False):
         print(f"  win-prob log: skipped — {why}")
         return log
 
+    # The gauge's sides, as in the pre-week forecast (see record_preweek_predictions).
+    sides = _gauge_sides(payload)
+    if sides is None:
+        print("  win-prob log: skipped - no gauge sides (the Node season step did not run)")
+        return log
     games = [
         {
             "homeId": m["homeId"], "awayId": m["awayId"],
-            "homeCur": m["home"].get("current") or [], "awayCur": m["away"].get("current") or [],
-            "homeMu": m["home"]["projMu"], "homeVar": m["home"]["projVar"],
-            "awayMu": m["away"]["projMu"], "awayVar": m["away"]["projVar"],
+            "homeCur": sides[m["homeId"]]["current"], "awayCur": sides[m["awayId"]]["current"],
+            "homeMu": sides[m["homeId"]]["projMu"], "homeVar": sides[m["homeId"]]["projVar"],
+            "awayMu": sides[m["awayId"]]["projMu"], "awayVar": sides[m["awayId"]]["projVar"],
+            "homeWk": sides[m["homeId"]]["projWk"], "awayWk": sides[m["awayId"]]["projWk"],
         }
         for m in matchups
     ]
@@ -1181,7 +1227,7 @@ def record_winprob_reading(payload, check_only=False):
     if readings and readings[-1].get("games") == games:
         print("  win-prob log: unchanged since the last reading — not appended")
         return log
-    readings.append({"at": payload.get("generatedAt"), "games": games})
+    readings.append({"at": payload.get("generatedAt"), **_scoring_constants(payload), "games": games})
     log["stats"] = payload.get("stats")
     log["categories"] = payload.get("categories")
     log["lowerIsBetter"] = payload.get("lowerIsBetter")
@@ -1296,7 +1342,7 @@ def fetch_transaction_counters(league):
     return out
 
 
-def fetch_daily_counts(league, workers=8):
+def fetch_daily_counts(league, workers=8, logs_out=None):
     """
     Two per-team counters built from each completed day's actual roster, summed over the
     season:
@@ -1345,13 +1391,47 @@ def fetch_daily_counts(league, workers=8):
                         unofficial.add(int(sp))
         current = int(getattr(league, "scoringPeriodId", 0) or 0)
         days = sorted(sp for sp in played if sp not in unofficial and (not current or sp <= current))
+        # The calendar date of each scoring period, from any game on it (Eastern).
+        sp_date = {}
+        for pt in (sched.get("settings") or {}).get("proTeams") or []:
+            for sp, games in (pt.get("proGamesByScoringPeriod") or {}).items():
+                for g in games:
+                    if g.get("date") and int(sp) not in sp_date:
+                        sp_date[int(sp)] = datetime.fromtimestamp(
+                            int(g["date"]) / 1000, ZoneInfo("America/New_York")).date().isoformat()
     except Exception as exc:  # noqa: BLE001
         print(f"  ! daily counts: pro schedule failed: {exc}")
         return {}
 
+    # GAME LOGS (Weekly Recap, 2026-11-09): each counted player's line on each day of a
+    # FINISHED matchup week, read off the same mRoster responses (no extra requests).
+    # Only finished weeks, so gamelogs.json changes once a week, not every refresh.
+    period_of_sp = {}
+    if logs_out is not None:
+        # By DATE, against the league calendar (data.get_week_date_range, config.py): ESPN's
+        # `matchupPeriods` lists matchup ids, not scoring days. A week counts once its last
+        # day is over (Eastern).
+        try:
+            rs = int(getattr(league.settings, "reg_season_count", 0) or 19)
+            today = datetime.now(ZoneInfo("America/New_York")).date()
+            windows = []
+            for ap in range(1, rs + 5):
+                start, end = D.get_week_date_range(ap, config.ESPN_SEASON_YEAR)
+                if start is not None and end is not None and end < today:
+                    windows.append((ap, start.isoformat(), end.isoformat()))
+            for sp, d in sp_date.items():
+                for ap, start, end in windows:
+                    if start <= d <= end:
+                        period_of_sp[sp] = ap
+                        break
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! game logs: week calendar failed: {exc}")
+    stat_ids = {k: str(v) for k, v in espn_stat_ids().items()}
+
     def one(sp):
         raw = league.espn_request.league_get(params={"view": "mRoster", "scoringPeriodId": sp})
         out = {}
+        logs = []
         for tm in raw.get("teams", []):
             missed = playing = benched = 0
             for e in (tm.get("roster") or {}).get("entries") or []:
@@ -1370,16 +1450,26 @@ def fetch_daily_counts(league, workers=8):
                     playing += 1
                     if slot == bench_slot:
                         benched += 1
+                    elif sp in period_of_sp:
+                        st = (line or {}).get("stats") or {}
+                        logs.append((int(tm["id"]), {
+                            "name": pl.get("fullName", ""),
+                            "v": [_round(st.get(stat_ids[x], 0) or 0, 2) for x in STATS],
+                        }))
             row = {"gamesMissed": missed}
             if starters:
                 row["benchGames"] = benched if playing <= starters else 0
             out[int(tm["id"])] = row
-        return out
+        return sp, out, logs
 
     totals = {}
     try:
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            for day in ex.map(one, days):
+            for sp, day, logs in ex.map(one, days):
+                if logs_out is not None and logs:
+                    per = logs_out.setdefault(str(period_of_sp[sp]), {})
+                    for tid, ln in logs:
+                        per.setdefault(str(tid), []).append({**ln, "date": sp_date.get(sp, "")})
                 for tid, row in day.items():
                     acc = totals.setdefault(tid, {})
                     for k, n in row.items():
@@ -1615,7 +1705,7 @@ def _season_shape():
         return {}
 
 
-def build_season(league, injury_data, sims=8000):
+def build_season(league, injury_data, sims=8000, current_week=None, extra_abbrevs=(), game_logs=None):
     """
     Season-wide data: standings, power rankings, schedules, playoff odds.
 
@@ -1659,7 +1749,7 @@ def build_season(league, injury_data, sims=8000):
         # acquisition count — how many players a manager added all season, which is the
         # difference between a set-and-forget roster and one that was worked every week.
         counters = fetch_transaction_counters(league)
-        daily = fetch_daily_counts(league)
+        daily = fetch_daily_counts(league, logs_out=game_logs)
         moves_by_id = {
             int(t.team_id): {
                 "acquisitions": int(getattr(t, "acquisitions", 0) or 0),
@@ -1724,37 +1814,16 @@ def build_season(league, injury_data, sims=8000):
         out["schedules"] = schedules
 
     if stats:
-        odds = step("playoff odds",
-                    lambda: app.get_playoff_probabilities(yr, int(sims), stats,
-                                                          config_blend(), injury_data))
-        rows = odds[0] if isinstance(odds, tuple) else odds
-        if rows:
-            out["playoffOdds"] = [{
-                "teamId": int(r["team_id"]), "teamName": r["team_name"],
-                "playoffProb": _round(r.get("playoff_prob", 0), 3),
-                "advanceProb": _round(r.get("advance_prob", 0), 3),
-                "championshipProb": _round(r.get("championship_prob", 0), 3),
-                "inPlayoffs": bool(r.get("in_playoffs", False)),
-                "record": list(r.get("record", [])),
-                # Mean final regular-season record [W, L, T] across the simulated seasons
-                # — the record behind playoffProb, so the two always agree (Draft Recap).
-                "projRecord": [_round(x, 1) for x in (r.get("proj_record") or [])],
-                # Seed distribution (keys are seed numbers plus "no_playoffs"). Only
-                # meaningful before the bracket starts, but the page renders those
-                # columns then, so it has to ship.
-                "seedProbs": {str(k): _round(v, 3)
-                              for k, v in (r.get("seed_probs") or {}).items()},
-                # Matchup period -> most likely category score [W, L] and win / tie
-                # probability for each unplayed week, from the same simulated seasons
-                # (Schedule page). ~19 small entries per team.
-                "projWeeks": {str(int(w)): {"score": [int(x) for x in v["score"]],
-                                            "win": _round(v["win"], 4),
-                                            "tie": _round(v["tie"], 4)}
-                              for w, v in (r.get("proj_weeks") or {}).items()},
-            } for r in rows]
-            fin = rows[0].get("championship_finalist_team_ids")
-            if fin:
-                out["championshipFinalists"] = [int(x) for x in fin]
+        # The ONE season engine's inputs (lib/seasonOdds.ts). The playoff odds, seeds,
+        # projected records and Schedule's future weeks are computed from them in the
+        # export's Node step (scripts/node/season.ts), which writes `playoffOdds` and
+        # `championshipFinalists` back into this file - the same code the Streamers page
+        # runs, so the Playoffs page and Streamers can never disagree (2026-11-09).
+        inputs = step("season inputs",
+                      lambda: app.get_season_inputs(yr, stats, config_blend(), injury_data,
+                                                    extra_abbrevs=extra_abbrevs))
+        if inputs:
+            out["seasonInputs"] = inputs
     return out
 
 
@@ -1775,7 +1844,20 @@ def main():
     ap.add_argument("--check", action="store_true", help="validate only, write nothing")
     ap.add_argument("--period", type=int, default=None,
                     help="matchup period to export (default: the league's current one)")
+    ap.add_argument("--record-logs", action="store_true",
+                    help="only record the pre-week forecast and win-prob reading from the "
+                         "league.json on disk - run AFTER the Node season step (npm run "
+                         "season), which writes the gauge sides they record; no ESPN export")
     args = ap.parse_args()
+
+    if args.record_logs:
+        # A separate step so the logs see Will They Play: the export runs first, then the
+        # injury scoring, then this (refresh-data.yml). Recorded inside the export, the
+        # forecast was written 13 seconds before availability.json existed (2026-11-09).
+        payload = json.loads((OUT_DIR / "league.json").read_text(encoding="utf-8"))
+        record_preweek_predictions(payload, check_only=args.check)
+        record_winprob_reading(payload, check_only=args.check)
+        return 0
 
     t0 = time.perf_counter()
     lid, yr = config.ESPN_LEAGUE_ID, config.ESPN_SEASON_YEAR
@@ -1860,7 +1942,15 @@ def main():
             print(f"  ! week schedule failed: {exc}", flush=True)
 
     print("season-wide data:", flush=True)
-    season = build_season(league, injury)
+    # This week's banked totals + rest-of-week moments seed the season sim's current week
+    # (only for a live week; a finished or past period has nothing left to simulate).
+    # Every NBA team in the player pool, so a free-agent pickup has a schedule in the
+    # season engine's inputs.
+    pool_abbrevs = sorted({str(f.get("nbaTeam", "")) for f in free_agents}
+                          | {str(p.get("nbaTeam", "")) for m in matchups
+                             for side in ("home", "away") for p in m[side]["players"]})
+    game_logs = {}
+    season = build_season(league, injury, extra_abbrevs=pool_abbrevs, game_logs=game_logs)
     season_shape = _season_shape()
 
     # Per-player weekly lines go in their OWN file. They are several times the size of
@@ -1898,6 +1988,13 @@ def main():
         # draws the categories jointly from it (lib/probability.ts matchupOutcome).
         "categoryCorrelation": [[_round(v, 3) for v in row]
                                 for row in config.CATEGORY_CORRELATION],
+        # Made-vs-attempted correlation per ratio category, for the ratio variance
+        # (lib/probability.ts ratioMoments).
+        "shotCorrelation": dict(config.SHOT_CORRELATION),
+        # Season-long team-strength spread for the season engine (lib/seasonOdds.ts).
+        "teamSigma": float(config.SEASON_TEAM_SIGMA),
+        # What a pre-week projection cannot know, per stat (lib/league.ts withWeekTerm).
+        "weekUncertainty": [float(config.WEEK_UNCERTAINTY[s]) for s in STATS],
         "lowerIsBetter": ["TO"],
         # The roster's slot shape, so the League Rosters board can draw empty spots.
         "rosterSlots": fetch_roster_slots(league),
@@ -1923,10 +2020,9 @@ def main():
     blob = json.dumps(payload, separators=(",", ":"))
     print(f"\nvalidated OK in {dt:.1f}s  ({len(blob) / 1024:.0f} KB)")
 
-    # The forecast log, BEFORE the --check early return: under --check it reports what it
-    # would do without writing, which is the only way to see the decision on a dry run.
-    record_preweek_predictions(payload, check_only=args.check)
-    record_winprob_reading(payload, check_only=args.check)
+    # The forecast and win-prob logs are NOT recorded here any more: they need Will They
+    # Play, which is scored after this export. `--record-logs` does it (refresh-data.yml
+    # runs it after scripts/injury/score.py).
 
     if args.check:
         print("--check: nothing written")
@@ -1947,6 +2043,20 @@ def main():
             separators=(",", ":"),
         )
         (OUT_DIR / "boxscores.json").write_text(box_blob, encoding="utf-8")
+        # Day-by-day counted lines of every FINISHED week (Weekly Recap's best games).
+        # Only written when the fetch produced something, so a failed run never empties it.
+        if game_logs:
+            for per in game_logs.values():
+                for lines in per.values():
+                    lines.sort(key=lambda x: (x["date"], x["name"]))
+            gl_blob = json.dumps(
+                {"generatedAt": payload["generatedAt"], "stats": STATS,
+                 "periods": dict(sorted(game_logs.items(), key=lambda kv: int(kv[0])))},
+                separators=(",", ":"),
+            )
+            (OUT_DIR / "gamelogs.json").write_text(gl_blob, encoding="utf-8")
+            print(f"wrote {OUT_DIR / 'gamelogs.json'}  ({len(gl_blob) / 1024:.0f} KB, "
+                  f"{len(game_logs)} finished periods)")
         lines = sum(len(v) for teams in box_scores.values() for v in teams.values())
         print(
             f"wrote {OUT_DIR / 'boxscores.json'}  "

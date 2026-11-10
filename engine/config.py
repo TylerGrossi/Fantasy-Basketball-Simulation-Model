@@ -155,8 +155,9 @@ CATEGORY_VARIANCE = {
 
 # How wrong the projected AVERAGE itself is, as a CV. A wrong average is wrong in every
 # game, so it adds (g * avg * err)^2 — growing with games^2, not games. The web model
-# (build_data.py player_moments, lib/league.ts playerMoments) uses it; the Python Monte
-# Carlo in simulation.py does not.
+# (build_data.py player_moments, lib/league.ts playerMoments) uses it, and since
+# 2026-11-09 so does the season sim's weekly variance (simulation.py
+# _build_projected_weekly_for_team).
 PROJECTION_ERROR = {
     "FGM": 0.10, "FGA": 0.07,
     "FTM": 0.13, "FTA": 0.13,
@@ -165,6 +166,38 @@ PROJECTION_ERROR = {
     "STL": 0.17, "BLK": 0.21,
     "TO": 0.14, "PTS": 0.09,
     "DD": 0.26, "TW": 0.18
+}
+
+# Correlation of a team-week's made and attempted forecast miss, per ratio category
+# (scripts/measure_variance.mjs, 2025-26 box scores, 2026-11-09). A ratio category's
+# variance needs it: makes and attempts rise and fall together, and treating them as
+# independent (the old delta method) made an FT% range run 60%-100% when ~76-84% was
+# right, and pulled every FG%/FT%/3P% matchup toward 50/50.
+SHOT_CORRELATION = {"FG%": 0.78, "FT%": 0.93, "3P%": 0.77}
+
+# Season-long team-strength spread, probit per category (scripts/measure_variance.mjs,
+# 2025-26, split-half fit over 12 start weeks, 2026-11-09). The season engine
+# (lib/seasonOdds.ts) shifts each team ONCE per simulated season by N(0, this): a team's
+# true level for the rest of the year is not known in November. It runs ~0.5-0.6 from
+# early-season starts and under 0.3 late (less season left to drift); one average for now.
+SEASON_TEAM_SIGMA = 0.320
+
+# What a PRE-WEEK projection cannot know (scripts/measure_variance.mjs, 2025-26, 170
+# team-weeks, 2026-11-09): injuries, rest, pickups, drops and returns during the week, as a
+# CV of the rest-of-week total. The per-player terms above are measured GIVEN the games
+# actually played, so none of this was in them - a Monday forecast read 96% on a team that
+# then lost three players' games and faced a LeBron projected at zero. The app adds
+# (cv x rest-of-week projection)^2 to a side's variance: largest on Monday, gone by Sunday.
+# It moves made and attempted together, so the ratio categories leave it out.
+# (SEASON_TEAM_SIGMA above was re-measured on top of it: 0.456 -> 0.320.)
+WEEK_UNCERTAINTY = {
+    "FGM": 0.13, "FGA": 0.13,
+    "FTM": 0.17, "FTA": 0.17,
+    "3PM": 0.13, "3PA": 0.14,
+    "REB": 0.13, "AST": 0.13,
+    "STL": 0.15, "BLK": 0.21,
+    "TO": 0.13, "PTS": 0.14,
+    "DD": 0.12, "TW": 0.14
 }
 
 CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",

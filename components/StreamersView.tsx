@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { AcquisitionSummary, LeagueData, Matchup } from "@/lib/league";
 import { sideMoments } from "@/lib/league";
 import { analyzeStreamers } from "@/lib/streamers";
-import { makeOddsSimulator, type Odds, type SeasonContext, type SimPlayer } from "@/lib/playoffOdds";
+import { gamesPerWeek, makeSeasonEngine, packCurrent, pickupPlayer, type SeasonPack } from "@/lib/seasonOdds";
 import { categoryProbabilities } from "@/lib/probability";
 import { dayLabel } from "@/lib/dates";
 import { useMoveWindow } from "@/lib/useMoveWindow";
@@ -30,8 +30,8 @@ interface Props {
    * export could not work it out.
    */
   acq?: AcquisitionSummary;
-  /** Rosters, schedule and records for the playoff / title odds (lib/playoffOdds.ts). */
-  season?: SeasonContext | null;
+  /** The season engine's inputs for the playoff / title odds (lib/seasonOdds.ts). */
+  season?: SeasonPack | null;
 }
 
 const SHOWN = ["PTS", "REB", "AST", "3PM", "STL", "BLK"];
@@ -42,7 +42,7 @@ const STREAMER_COLS: SortCol[] = [
     key: "rank",
     label: "#",
     num: true,
-    title: "Best move first: this week's Δ Cats plus the Season Δ Cats.",
+    title: "Best move first by this week's Δ Cats.",
   },
   { key: "add", label: "Add", title: "The free agent to pick up." },
   { key: "nba", label: "NBA", title: "His NBA team." },
@@ -181,9 +181,11 @@ export default function StreamersView({
   const horizon = useMemo(
     () => ({
       weeks: Math.max(0, (league.regularSeasonWeeks ?? 0) - league.period),
-      gamesPerWeek: 3.5,
+      // League-wide NBA games per team-week from the exported schedules (the season
+      // engine's own inputs), not a constant.
+      gamesPerWeek: season ? gamesPerWeek(season.inputs) : 3.5,
     }),
-    [league.regularSeasonWeeks, league.period]
+    [league.regularSeasonWeeks, league.period, season]
   );
   /*
    * Never a drop: players you protected, and anyone in an IR slot — dropping him frees
@@ -225,41 +227,57 @@ export default function StreamersView({
         return activeDays.every((d) => plays.has(d));
       })
     : results;
-  const shown = onDays;
+  // Ranked by THIS WEEK's Δ Cats (owner, 2026-11-09): # is that rank and the table opens
+  // on it. Ties fall back to analyzeStreamers' Net order (the sort is stable).
+  const shown = [...onDays].sort((a, b) => b.deltaCats - a.deltaCats);
 
   /*
-   * PLAYOFF / TITLE ODDS per move (lib/playoffOdds.ts). The simulator is built once per
+   * PLAYOFF / TITLE ODDS per move (lib/seasonOdds.ts). The engine is built once per
    * roster set; the baseline and each move are then ~10ms apiece, run in small batches
    * after paint so the table appears at once and the odds fill in over about a second.
    */
-  const sim = useMemo(
-    () => (season ? makeOddsSimulator(league, season, teamId) : null),
-    [season, league, teamId]
-  );
-  const simPlayer = (name: string, avg: number[], value?: number): SimPlayer =>
-    season?.players[name] ?? { v: avg, value: value ?? 0 };
+  const engine = useMemo(() => (season ? makeSeasonEngine(league, season.inputs) : null), [season, league]);
+  type Odds = { playoff: number; champ: number };
   const [odds, setOdds] = useState<{ base: Odds; byMove: Map<string, Odds> } | null>(null);
   const moveKey = (r: (typeof results)[number]) => `${r.add.name}|${r.drop?.name ?? ""}`;
   useEffect(() => {
-    if (!sim) return;
+    if (!engine || !season) return;
     let alive = true;
-    const mine = you.players.map((p) => simPlayer(p.name, p.avg, p.value));
-    const base = sim(mine, categoryProbabilities(league, youMoments, oppMoments));
+    // This week: the export's gauge sides for every team, with YOUR matchup's replaced by
+    // the live ones on this page (yours with the move, his as now) - the same sides the
+    // gauge shows. Later weeks: the exported rosters, the move applied to yours.
+    const exportSides = packCurrent(season);
+    const oppId = matchup.homeId === teamId ? matchup.awayId : matchup.homeId;
+    const pick = (o: ReturnType<typeof engine.run>) => {
+      const m = o.get(teamId);
+      return { playoff: m?.playoff ?? 0, champ: m?.champ ?? 0 };
+    };
+    const base = pick(engine.run({ current: { ...exportSides, [teamId]: youMoments, [oppId]: oppMoments } }));
     const byMove = new Map<string, Odds>();
     setOdds({ base, byMove: new Map(byMove) });
+    const nextWeek = season.inputs.currentWeek + 1;
     let i = 0;
     let timer = 0 as unknown as ReturnType<typeof setTimeout>;
     const step = () => {
       if (!alive) return;
-      for (const end = Math.min(results.length, i + 8); i < end; i++) {
+      for (const end = Math.min(results.length, i + 4); i < end; i++) {
         const r = results[i];
-        const roster = [
-          ...you.players
-            .filter((p) => p.name !== r.drop?.name)
-            .map((p) => simPlayer(p.name, p.avg, p.value)),
-          simPlayer(r.add.name, r.add.avg, r.add.value),
-        ];
-        byMove.set(moveKey(r), sim(roster, categoryProbabilities(league, r.weekMoments, oppMoments)));
+        // The free-agent row's own line and value: the same blend and the same value scale
+        // as the rostered players in the season inputs.
+        const add = pickupPlayer(
+          season.inputs,
+          { name: r.add.name, nbaTeam: r.add.nbaTeam, avg: r.add.avg, value: r.add.value ?? season.players[r.add.name]?.value ?? 0 },
+          nextWeek
+        );
+        byMove.set(
+          moveKey(r),
+          pick(
+            engine.run({
+              current: { ...exportSides, [teamId]: r.weekMoments, [oppId]: oppMoments },
+              changes: [{ teamId, drop: r.drop ? [r.drop.name] : [], add: [add] }],
+            })
+          )
+        );
       }
       setOdds({ base, byMove: new Map(byMove) });
       if (i < results.length) timer = setTimeout(step, 0);
@@ -270,7 +288,7 @@ export default function StreamersView({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sim, results, you.players, oppMoments, youMoments]);
+  }, [engine, results, oppMoments, youMoments]);
   // The change this model's simulation measures for the move, in percentage points.
   const shownOdds = (r: (typeof results)[number]) => {
     const o = odds?.byMove.get(moveKey(r));
@@ -348,8 +366,8 @@ export default function StreamersView({
           {/* About ten rows tall, scrolling inside itself (owner, 2026-10-20): the full
               candidate list made this section the longest on the one-page matchup. The
               header row stays pinned while the rows scroll under it. Sortable on every
-              column; opens on Net, the order analyzeStreamers ranks by, and # keeps
-              that rank whatever the current sort. */}
+              column; opens on # (this week's Δ Cats), and # keeps that rank whatever
+              the current sort. */}
           {activeDays.length > 0 && onDays.length === 0 && (
             <p className="caption">
               No free agent plays on all of {activeDays.map(dayLabel).join(", ")}.
@@ -357,7 +375,8 @@ export default function StreamersView({
           )}
           <SortableTable
             scrollClassName="st-scroll"
-            defaultKey="dPlayoff"
+            defaultKey="rank"
+            defaultDesc={false}
             cols={STREAMER_COLS}
             rows={shown.map((r, i): SortRow => {
               // Net games your lineup gains — the count the Δ Cats maths used: the

@@ -9,7 +9,21 @@ export interface SeasonPlayer {
   gp: number;
   /** Season totals accumulated while on your roster, keyed by stat. */
   stats: Record<string, number>;
+  /**
+   * League value PER GAME of his line while on your roster (lib/percentiles.ts makeValuer,
+   * the Player Value scale). Total value = this x GP. Null when he has no games.
+   */
+  value: number | null;
 }
+
+/**
+ * ONE value column, in both groups (owner, 2026-11-09), following the unit toggle like the
+ * counting stats: Totals = per-game value x games (what he added over the season); Per
+ * game = per-game value; % of total = his total as a share of the whole roster's summed
+ * total. Value can be negative, so a player who cost you shows a negative share.
+ */
+const VALUE = "Value";
+const VALUE_KEYS = [VALUE];
 
 /** How to express each counting stat. Totals are the raw season figures. */
 type Mode = "total" | "game" | "share";
@@ -101,6 +115,11 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
   });
 
   const cols = GROUPS[group];
+  // The roster's summed total value: the denominator for Value's "% of total".
+  const teamValue = useMemo(
+    () => players.reduce((a, p) => a + (p.value ?? 0) * p.gp, 0),
+    [players]
+  );
   const colOf = (key: string) => cols.find((c) => c.key === key);
 
   // Sort by what is on screen, not by the underlying totals — otherwise "Per game"
@@ -108,6 +127,11 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
   // since every row shares a denominator, but deriving it uniformly costs nothing.)
   const shown = (p: SeasonPlayer, key: string): number => {
     if (key === "GP") return p.gp;
+    if (key === VALUE) {
+      if (mode === "game") return p.value ?? 0;
+      const total = (p.value ?? 0) * p.gp;
+      return mode === "share" ? (teamValue !== 0 ? (total / teamValue) * 100 : 0) : total;
+    }
     const col = colOf(key);
     if (col?.pct) {
       const den = p.stats[col.pct.den] ?? 0;
@@ -127,7 +151,7 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
     // The sorted column can vanish when the group changes (sorting by PTS, then
     // switching to Shooting) — fall back to that group's first column.
     const stillShown =
-      sort.key === "Player" || sort.key === "GP" || Boolean(colOf(sort.key));
+      sort.key === "Player" || sort.key === "GP" || VALUE_KEYS.includes(sort.key) || Boolean(colOf(sort.key));
     const key = stillShown ? sort.key : cols[0].key;
     out.sort((a, b) => {
       if (key === "Player") {
@@ -209,8 +233,31 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
     }
     if (bestGp > 0) out.GP = gpNames;
 
+    // Value: the total leads by itself (a total qualifies itself); per game needs the same
+    // share of games as a rate needs of attempts, or a one-game call-up leads it.
+    const lead = (rank: (p: SeasonPlayer) => number | null) => {
+      let best = -Infinity;
+      let names = new Set<string>();
+      for (const p of players) {
+        const v = rank(p);
+        if (v === null) continue;
+        if (v > best) {
+          best = v;
+          names = new Set([p.name]);
+        } else if (v === best) names.add(p.name);
+      }
+      return best > 0 ? names : null;
+    };
+    // Value is the one column whose leader follows the unit: on Per game it is a rate
+    // with its games floor; otherwise the total.
+    const valueLead =
+      mode === "game"
+        ? lead((p) => (p.value == null || p.gp < bestGp * QUALIFY ? null : Math.round(p.value * 10) / 10))
+        : lead((p) => (p.value == null ? null : Math.round(p.value * p.gp * 10) / 10));
+    if (valueLead) out[VALUE] = valueLead;
+
     return out;
-  }, [players, group]);
+  }, [players, group, mode]);
 
   const click = (key: string) =>
     setSort((s) =>
@@ -221,6 +268,12 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
 
   const fmt = (p: SeasonPlayer, key: string): string => {
     if (key === "GP") return String(p.gp);
+    if (VALUE_KEYS.includes(key)) {
+      if (p.value == null) return "—";
+      const v = shown(p, key);
+      const t = Math.abs(v) < 0.05 ? "0.0" : v.toFixed(1);
+      return mode === "share" ? (teamValue !== 0 ? `${t}%` : "—") : t;
+    }
     const col = colOf(key);
     const v = shown(p, key);
     if (col?.pct) return (p.stats[col.pct.den] ?? 0) > 0 ? `${v.toFixed(1)}%` : "—";
@@ -229,7 +282,7 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
     return Math.round(v).toLocaleString("en-US");
   };
 
-  const headers = ["Player", "GP", ...cols.map((c) => c.key)];
+  const headers = ["Player", "GP", ...cols.map((c) => c.key), ...VALUE_KEYS];
 
   // What the numbers under the current toggles actually mean. The bold note leads, because
   // an unexplained bold is the reader's first question; "Totals" needs no unit note at all.
@@ -246,6 +299,11 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
     // Named rather than left as a silent gap — a reader who notices no bold in the
     // turnover column should find out that it is deliberate.
     group === "Overview" && "Turnovers have no leader: fewest is a function of minutes, most is not an achievement.",
+    mode === "game"
+      ? "Value: the Player Value scale on his line while on your roster, per game; its leader needs the same share of games as a rate needs of attempts."
+      : mode === "share"
+        ? "Value: his season total value as a share of your whole roster's summed total; a player who cost you value shows a negative share."
+        : "Value: the Player Value scale on his line while on your roster, times games played - what he added over the season.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -324,7 +382,8 @@ export default function SeasonStatsView({ players, teamTotals }: Props) {
                     </td>
                   );
                 })()}
-                {cols.map((c) => {
+                {[...cols.map((c) => c.key), ...VALUE_KEYS].map((key) => {
+                  const c = { key };
                   const leads = leaders[c.key]?.has(p.name) ?? false;
                   return (
                     <td key={c.key} className={leads ? "num is-leader" : "num"}>

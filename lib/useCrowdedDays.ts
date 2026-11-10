@@ -7,6 +7,9 @@ import type { TodayLine } from "./useLiveTotals";
 import { analyzeCrowdedDays, type CrowdedDay } from "./crowdedDays";
 import { lineupOrder } from "./lineupOrder";
 import { useMoveWindow } from "./useMoveWindow";
+import { irOf, startingLayout } from "./gaugeSides";
+
+export { startingLayout };
 
 /**
  * One side's crowded days (lib/crowdedDays.ts) with the page's live inputs: the days a
@@ -23,11 +26,7 @@ export function useCrowdedDays(
   eligibility: Record<string, string[]> | undefined
 ): CrowdedDay[] | null {
   const win = useMoveWindow(league, gameLeft);
-  const ir = useMemo(
-    () =>
-      new Set([...lineupOrder(today)].filter(([, v]) => v.label === "IR").map(([name]) => name)),
-    [today]
-  );
+  const ir = useMemo(() => irOf(lineupOrder(today)), [today]);
   return useMemo(
     () =>
       league.weekSchedule
@@ -47,7 +46,3 @@ export function useCrowdedDays(
     [league, roster, teamMoments, oppMoments, win.dates, win.teams, win.slots, ir, eligibility]
   );
 }
-
-/** The league's starting slots in order: every roster slot that is not Bench or IR. */
-export const startingLayout = (league: LeagueData) =>
-  (league.rosterSlots ?? []).filter((s) => s !== "Bench" && s !== "IR");

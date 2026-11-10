@@ -1,5 +1,5 @@
 import { loadLeague } from "@/lib/loadLeague";
-import { buildSeasonContext } from "@/lib/playoffOdds";
+import { buildSeasonPack } from "@/lib/seasonOdds";
 import RecentMovesView from "@/components/RecentMovesView";
 
 /**
@@ -41,16 +41,16 @@ export default async function Page() {
   }
 
   /*
-   * What each swap does to its team's playoff / title odds (lib/playoffOdds.ts, the same
-   * simulation as the Streamers table). Only the players these moves touch cross to the
-   * client, plus every roster and the remaining schedule — not the pool.
+   * What each swap does to its team's playoff / title odds (lib/seasonOdds.ts, the same
+   * engine as the Playoffs page and Streamers). Only the players these moves touch cross
+   * to the client, plus the engine's inputs - not the pool.
    */
-  const ctx = league.teams.length
-    ? buildSeasonContext(league, league.teams[0].id, new Set(moves.map((m) => m.player)))
+  const pack = league.teams.length
+    ? buildSeasonPack(league, league.teams[0].id, new Set(moves.map((m) => m.player)))
     : null;
-  const odds = ctx
+  const odds = pack
     ? {
-        ctx,
+        pack,
         teamIds: Object.fromEntries(league.teams.map((t) => [t.name, t.id])),
         meta: {
           stats: league.stats,
@@ -58,6 +58,9 @@ export default async function Page() {
           lowerIsBetter: league.lowerIsBetter,
           variance: league.variance,
           projectionError: league.projectionError,
+          categoryCorrelation: league.categoryCorrelation,
+          shotCorrelation: league.shotCorrelation,
+          teamSigma: league.teamSigma,
         },
       }
     : null;

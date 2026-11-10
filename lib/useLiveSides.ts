@@ -1,22 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
-import { applyAvailability, sideMoments, winProbability, type LeagueData, type Matchup } from "./league";
-import { lineupOrder } from "./lineupOrder";
-import { recountTheirs, recountYours } from "./lineupCount";
-import { startingLayout, useCrowdedDays } from "./useCrowdedDays";
-import { useMoveWindow } from "./useMoveWindow";
-import { liveRoster, remainingSide } from "./liveAdjust";
+import { useEffect, useMemo, useState } from "react";
+import { winProbability, type LeagueData, type Matchup } from "./league";
+import { etDate } from "./dates";
+import { liveSides, projectedSides } from "./gaugeSides";
 import { useLiveTotals } from "./useLiveTotals";
 
 /**
  * Your matchup, live: ESPN's totals for both sides (games in progress included) and each
- * side's projection MINUS every game those totals already count — played today, or on a
- * day since the export (lib/liveAdjust.ts) — so the two never count a game twice and the
- * odds move as games finish.
- *
- * The one place the live wiring lives; Matchup Odds, Streamers and Bench all use it, and
- * share a single poller through useLiveTotals.
+ * side's projection MINUS every game those totals already count — so the two never count a
+ * game twice and the odds move as games finish. The pipeline is lib/gaugeSides.ts
+ * `liveSides`; this hook only fetches and memoises.
  */
 export function useLiveSides(
   league: LeagueData,
@@ -28,54 +22,20 @@ export function useLiveSides(
 ) {
   const youRaw = isHome ? matchup.home : matchup.away;
   const oppRaw = isHome ? matchup.away : matchup.home;
-
   const live = useLiveTotals(league.period, teamId, youRaw.current, oppRaw.current, enabled);
-
-  // Today's ESPN rosters first (pickups and drops since the export), then the games
-  // already played come out of what is left.
-  const you = useMemo(
-    () =>
-      // Will They Play last: a doubtful player's remaining games become likely, not
-      // certain (lib/league.ts applyAvailability).
-      applyAvailability(
-        league,
-        remainingSide(
-          league,
-          liveRoster(league, youRaw, live.youToday, live.youAdded),
-          live.youPlayed,
-          live.gameLeft
-        )
-      ),
-    [league, youRaw, live.youToday, live.youAdded, live.youPlayed, live.gameLeft]
+  const sides = useMemo(
+    () => liveSides(league, matchup, isHome, live),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [league, matchup, isHome, live.youToday, live.youAdded, live.youPlayed, live.oppToday, live.oppAdded, live.oppPlayed, live.gameLeft]
   );
-  const opp = useMemo(
-    () =>
-      applyAvailability(
-        league,
-        remainingSide(
-          league,
-          liveRoster(league, oppRaw, live.oppToday, live.oppAdded),
-          live.oppPlayed,
-          live.gameLeft
-        )
-      ),
-    [league, oppRaw, live.oppToday, live.oppAdded, live.oppPlayed, live.gameLeft]
-  );
-
-  return { live, you, opp };
+  return { live, you: sides.you, opp: sides.opp };
 }
 
 /**
- * THE week's win probability, live — the number every page shows for your matchup
- * (Current Matchup's gauge, League Home, Game Day, Schedule). ESPN's live totals plus the
- * projection minus every game they already count, through `winProbability`; `.win` is a
- * win outright (a tied matchup is not one). Read it from here, never recompute it.
- */
-/**
  * The live sides as the WIN PROBABILITY counts them (owner, 2026-11-03): on each crowded
  * day still to set, your team starts the Bench recommendation and the opponent his ESPN
- * lineup, positions checked (lib/lineupCount.ts). Every win-probability number reads
- * this; the tools (Streamers, planner, crowded days) keep useLiveSides' export baseline.
+ * lineup, positions checked. lib/gaugeSides.ts `projectedSides` is the one implementation
+ * (the export's Node step runs it too); every win-probability number reads this.
  */
 export function useProjectedSides(
   league: LeagueData,
@@ -84,45 +44,37 @@ export function useProjectedSides(
   teamId: number,
   enabled = true
 ) {
-  const base = useLiveSides(league, matchup, isHome, teamId, enabled);
-  const { live } = base;
-  const youM = useMemo(() => sideMoments(base.you, live.you), [base.you, live.you]);
-  const oppM = useMemo(() => sideMoments(base.opp, live.opp), [base.opp, live.opp]);
-  const crowded = useCrowdedDays(league, base.you.players, youM, oppM, live.youToday, live.gameLeft, undefined);
-  const win = useMoveWindow(league, live.gameLeft);
-  const youLineup = useMemo(() => lineupOrder(live.youToday), [live.youToday]);
-  const oppLineup = useMemo(() => lineupOrder(live.oppToday), [live.oppToday]);
-  const irOf = (l: ReturnType<typeof lineupOrder>) =>
-    new Set([...l].filter(([, v]) => v.label === "IR").map(([n]) => n));
-  const window = useMemo(
-    () => ({ dates: win.dates, teams: win.teams, slots: win.slots, layout: startingLayout(league) }),
-    [win.dates, win.teams, win.slots, league]
-  );
-  const you = useMemo(
-    () => recountYours(league, base.you, window, irOf(youLineup), crowded),
+  const youRaw = isHome ? matchup.home : matchup.away;
+  const oppRaw = isHome ? matchup.away : matchup.home;
+  const live = useLiveTotals(league.period, teamId, youRaw.current, oppRaw.current, enabled);
+  // Today (ET) after mount, as useMoveWindow: server and browser clocks can straddle midnight.
+  const [today, setToday] = useState<string | null>(null);
+  useEffect(() => setToday(etDate()), []);
+  const p = useMemo(
+    () => projectedSides(league, matchup, isHome, live, today),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [league, base.you, window, youLineup, crowded]
-  );
-  const opp = useMemo(
-    () => recountTheirs(league, base.opp, window, irOf(oppLineup), oppLineup),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [league, base.opp, window, oppLineup]
+    [league, matchup, isHome, today, live.you, live.opp, live.youToday, live.youAdded, live.youPlayed, live.oppToday, live.oppAdded, live.oppPlayed, live.gameLeft]
   );
   // The same lineup rule for tools that re-seat your week (Streamers, the planner): with
-  // no move it reproduces the recount above, so their "no move" is this win probability.
+  // no move it reproduces the recount, so their "no move" is this win probability.
   const rule = useMemo(
     () => ({
-      layout: window.layout,
+      layout: (league.rosterSlots ?? []).filter((s) => s !== "Bench" && s !== "IR"),
       eligibility: league.eligibility,
       sits: new Map(
-        (crowded ?? []).map((c) => [c.date, new Set(c.players.filter((x) => x.recSit).map((x) => x.name))])
+        (p.crowded ?? []).map((c) => [c.date, new Set(c.players.filter((x) => x.recSit).map((x) => x.name))])
       ),
     }),
-    [window.layout, league.eligibility, crowded]
+    [league.rosterSlots, league.eligibility, p.crowded]
   );
-  return { live, you, opp, crowded, rule };
+  return { live, you: p.you, opp: p.opp, crowded: p.crowded, rule };
 }
 
+/**
+ * THE week's win probability, live — the number every page shows for your matchup
+ * (Current Matchup's gauge, League Home, Game Day, Schedule). Read it from here, never
+ * recompute it.
+ */
 export function useLiveWin(
   league: LeagueData,
   matchup: Matchup,

@@ -14,7 +14,7 @@ import WeekSelect from "@/components/WeekSelect";
 import LiveSeed from "@/components/LiveSeed";
 import { liveSeed } from "@/lib/liveMatchup";
 import { periodLabel } from "@/lib/league";
-import { buildSeasonContext } from "@/lib/playoffOdds";
+import { buildSeasonPack } from "@/lib/seasonOdds";
 import {
   loadBoxScores,
   loadPredictions,
@@ -162,10 +162,10 @@ export default async function Page({
    * One trimmed league (with free agents, for Streamers) is handed to all of them.
    */
   const deckLeague = trimLeague(league, { matchupTeamId: me.id, freeAgents: true });
-  // The Streamers table's playoff / title odds: every roster and the remaining schedule,
+  // The Streamers table's playoff / title odds: the season engine's inputs (lib/seasonOdds.ts),
   // compact — only your roster's and the free agents' lines, not the whole pool.
   const mySide = r.isHome ? r.matchup.home : r.matchup.away;
-  const seasonCtx = buildSeasonContext(league, me.id, [
+  const seasonCtx = buildSeasonPack(league, me.id, [
     ...mySide.players.map((p) => p.name),
     ...league.freeAgents.map((f) => f.name),
   ]);

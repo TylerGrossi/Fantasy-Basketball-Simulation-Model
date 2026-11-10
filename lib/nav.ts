@@ -118,6 +118,8 @@ export const FLAT_NAV: NavEntry[] = [
       // which is a more common question than any of the stat tables under it. It used to
       // be a top-level header link and moved here to make room for History.
       { label: "Schedule", href: "/schedule" },
+      // A finished week across the league (owner, 2026-11-09).
+      { label: "Weekly Recap", href: "/recap" },
       { label: "Season Stats", href: "/season-stats" },
       { label: "League Stats", href: "/league-stats" },
       { label: "Power Rankings", href: "/rankings" },
@@ -188,6 +190,7 @@ export const SEASON_PAGES: NavPage[] = [
   // "what happened / what's next" is a more common question than any stat table under it.
   { label: "Home", href: "/league", blurb: "Standings, scores, moves, risers" },
   { label: "Schedule", href: "/schedule", blurb: "Week by week results" },
+  { label: "Weekly Recap", href: "/recap", blurb: "Last week: scores, upsets, luck, top players and games" },
   { label: "Summary", href: "/season", blurb: "Standings, champion, schedule luck" },
   { label: "Season Stats", href: "/season-stats", blurb: "Category leaders and every player's line" },
   { label: "League Stats", href: "/league-stats", blurb: "Every team's totals and where they rank" },

@@ -44,7 +44,7 @@
  */
 
 import type { FreeAgent, LeagueData, PlayerRow } from "./league";
-import { rowMoments } from "./league";
+import { playerRank, rowMoments, shiftGames } from "./league";
 import type { Moments } from "./probability";
 import { addMoments, categoryProbabilities, subtractMoments } from "./probability";
 import { playerStatus } from "./playerPool";
@@ -140,6 +140,8 @@ interface Seat {
   until: string | null;
   added: boolean;
   ir: boolean;
+  /** Games the plan's starting projection already counts for him (shiftGames). */
+  held: number;
 }
 
 /** Everything about a context that does not depend on the plan, computed once. */
@@ -155,7 +157,7 @@ export interface PreparedPlan {
 }
 
 const rankOf = (value: number | undefined, avg: number[], ptsIdx: number) =>
-  typeof value === "number" ? value : (avg[ptsIdx] ?? 0);
+  playerRank({ value, avg }, ptsIdx);
 
 export function preparePlan(ctx: PlanContext): PreparedPlan {
   const ptsIdx = ctx.league.stats.indexOf("PTS");
@@ -172,6 +174,8 @@ export function preparePlan(ctx: PlanContext): PreparedPlan {
     until: null,
     added: false,
     ir: ir.has(p.name),
+    // IR players are taken out of teamMoments below, so they start from 0.
+    held: ir.has(p.name) ? 0 : p.gamesLeft,
   }));
   // A player on IR scores nothing until activated, whatever games the projection gave
   // him (it only knows about IR as of the export).
@@ -202,6 +206,7 @@ export function preparePlan(ctx: PlanContext): PreparedPlan {
       until: null,
       added: true,
       ir: false,
+      held: 0, // not in the projection until picked up
     });
   }
   const seated = seat(roster, ctx.dates, ctx.slots, ctx.rule);
@@ -312,7 +317,7 @@ export function evaluatePlan(prep: PreparedPlan, moves: PlannedMove[]): PlanEval
     const from = prep.base.get(s.name) ?? 0;
     const to = started.get(s.name) ?? 0;
     if (from === to) continue;
-    mine = addMoments(subtractMoments(mine, rowMoments(ctx.league, s, from)), rowMoments(ctx.league, s, to));
+    mine = shiftGames(ctx.league, mine, s, s.held, to - from);
   }
   const expectedCats = categoryProbabilities(ctx.league, mine, ctx.oppMoments).reduce((a, b) => a + b, 0);
 

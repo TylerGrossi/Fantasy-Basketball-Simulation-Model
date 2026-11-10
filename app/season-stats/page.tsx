@@ -1,5 +1,6 @@
 import SeasonStatsView, { type SeasonPlayer } from "@/components/SeasonStatsView";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { makeValuer } from "@/lib/percentiles";
 
 /** Every stat the table's column groups can draw from. */
 const STATS = [
@@ -36,10 +37,18 @@ export default async function Page() {
   const mine = standings.find((s) => s.teamId === me.id);
   const teamTotals: Record<string, number> = { ...(mine?.catTotals ?? {}), ...ts.totals };
 
+  // Value of his line WHILE ON YOUR ROSTER, per game, on the Player Value scale (the
+  // season pool as reference, exactly as Player Value and the Weekly Recap score it).
+  const valuer = makeValuer(league.seasonData?.playerPool ?? []);
   const players: SeasonPlayer[] = ts.players.map((p) => {
     const stats: Record<string, number> = {};
     for (const s of STATS) stats[s] = Number(p[s] ?? 0);
-    return { name: p.name, gp: p.gp, stats };
+    let value: number | null = null;
+    if (p.gp > 0) {
+      const v = valuer(Object.fromEntries(STATS.map((s) => [s, stats[s] / p.gp])));
+      value = v.off + v.def + v.other;
+    }
+    return { name: p.name, gp: p.gp, stats, value };
   });
 
   /*

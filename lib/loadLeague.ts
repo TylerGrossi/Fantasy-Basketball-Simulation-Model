@@ -6,6 +6,7 @@ import type { CareerLog } from "./career";
 import type { ConsistencyPool } from "./espnLive";
 import type { AvailabilityData } from "./availability";
 import { resolveTeam } from "./team";
+import { normaliseLeague } from "./leagueAttach";
 
 /**
  * Parsed data files, kept for the life of the server process.
@@ -46,43 +47,7 @@ export async function loadLeague(): Promise<LeagueData> {
   // Normalise the optional sections. An older or partially-generated export was enough to
   // crash a production BUILD (`Cannot read properties of undefined`) rather than just
   // render an empty page — defaults make a stale file degrade instead of failing.
-  return {
-    ...raw,
-    teams: raw.teams ?? [],
-    matchups: raw.matchups ?? [],
-    freeAgents: raw.freeAgents ?? [],
-    seasonData: raw.seasonData ?? {},
-    availability: doubtful(avail),
-    eligibility: rosteredEligibility(raw),
-  };
-}
-
-/** Rostered players' eligible slots (see LeagueData.eligibility). */
-function rosteredEligibility(raw: LeagueData): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  for (const p of raw.seasonData?.playerPool ?? []) {
-    if (!p.owner || p.owner === "Waivers") continue;
-    const e = p.eligibleSlots?.length ? p.eligibleSlots : [p.position].filter(Boolean);
-    if (e.length) out[p.name] = e;
-  }
-  return out;
-}
-
-/**
- * Will They Play, reduced to what the projections use (owner's option b, 2026-11-03): only
- * players WITH DOUBT - a status on the report or ESPN, or any game this week under 85% -
- * with [date, chance] per remaining game. Healthy players are left out so their
- * projections do not move. Undefined without availability.json.
- */
-function doubtful(data: AvailabilityData | null): LeagueData["availability"] {
-  if (!data) return undefined;
-  const out: Record<string, Array<[string, number]>> = {};
-  for (const p of data.players) {
-    if (!p.week.length) continue;
-    if (!p.status && !p.week.some((g) => g.p < 0.85)) continue;
-    out[p.name] = p.week.map((g) => [g.date, g.p]);
-  }
-  return out;
+  return normaliseLeague(raw, avail);
 }
 
 /** One player's line for one scoring period, as ESPN reported it. */
@@ -115,6 +80,35 @@ export interface BoxScores {
 export async function loadBoxScores(): Promise<BoxScores | null> {
   try {
     return await readJson<BoxScores>(dataFile("boxscores.json"));
+  } catch {
+    return null;
+  }
+}
+
+/** One counted player-day of a finished week (gamelogs.json). */
+export interface GameLogLine {
+  name: string;
+  /** ISO date (Eastern). */
+  date: string;
+  /** That day's line, `stats` order. */
+  v: number[];
+}
+
+export interface GameLogs {
+  generatedAt: string;
+  stats: string[];
+  /** period -> team id -> counted day-lines. Finished weeks only. */
+  periods: Record<string, Record<string, GameLogLine[]>>;
+}
+
+/**
+ * Each finished week's counted day-by-day lines (Weekly Recap's best games), written by
+ * the export from the same per-day ESPN reads as the missed/bench-game counts. Null when
+ * the export has not written it yet - the recap then leaves that section out.
+ */
+export async function loadGameLogs(): Promise<GameLogs | null> {
+  try {
+    return await readJson<GameLogs>(dataFile("gamelogs.json"));
   } catch {
     return null;
   }

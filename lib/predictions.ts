@@ -20,6 +20,31 @@
 
 import { matchupOutcome, type LeagueMeta, type Moments } from "./probability";
 
+/**
+ * The maths an entry was scored with, stored WITH it by the recorder (2026-11-09) so a
+ * constant re-measured later never regrades history. Entries from before then carry
+ * none: they were recorded with made and attempted INDEPENDENT (shotCorrelation 0) and
+ * are scored that way; their category correlation falls back to the current one.
+ */
+interface LoggedConstants {
+  variance?: number[];
+  projectionError?: number[];
+  shotCorrelation?: Record<string, number>;
+  categoryCorrelation?: number[][];
+}
+const INDEPENDENT_SHOTS: Record<string, number> = { "FG%": 0, "FT%": 0, "3P%": 0 };
+
+/** The meta to score one entry with: the log's categories, the entry's own constants. */
+function entryMeta(log: { stats?: string[]; categories?: string[]; lowerIsBetter?: string[] } | null, entry: LoggedConstants, meta: LeagueMeta): LeagueMeta {
+  return {
+    stats: log?.stats ?? meta.stats,
+    categories: log?.categories ?? meta.categories,
+    lowerIsBetter: log?.lowerIsBetter ?? meta.lowerIsBetter,
+    categoryCorrelation: entry.categoryCorrelation ?? logCorrelation(log, meta),
+    shotCorrelation: entry.shotCorrelation ?? INDEPENDENT_SHOTS,
+  };
+}
+
 export interface PreWeekGame {
   homeId: number;
   awayId: number;
@@ -27,9 +52,12 @@ export interface PreWeekGame {
   homeVar: number[];
   awayMu: number[];
   awayVar: number[];
+  /** The week term inside each var (since 2026-11-09); older entries have none. */
+  homeWk?: number[];
+  awayWk?: number[];
 }
 
-export interface PreWeekPeriod {
+export interface PreWeekPeriod extends LoggedConstants {
   /** When the forecast was written — before any of the week was played. */
   recordedAt: string;
   games: PreWeekGame[];
@@ -92,23 +120,14 @@ export function forecastFor(
   );
   if (!game) return null;
 
+  // The gauge's own sides at the time (since 2026-11-09 the recorder logs those).
   const isHome = game.homeId === teamId;
-  const you: Moments = {
-    mu: isHome ? game.homeMu : game.awayMu,
-    var: isHome ? game.homeVar : game.awayVar,
-  };
-  const opp: Moments = {
-    mu: isHome ? game.awayMu : game.homeMu,
-    var: isHome ? game.awayVar : game.homeVar,
-  };
+  const mom = (mu: number[], v: number[], wk?: number[]): Moments => (wk ? { mu, var: v, wk } : { mu, var: v });
+  const you = isHome ? mom(game.homeMu, game.homeVar, game.homeWk) : mom(game.awayMu, game.awayVar, game.awayWk);
+  const opp = isHome ? mom(game.awayMu, game.awayVar, game.awayWk) : mom(game.homeMu, game.homeVar, game.homeWk);
   // Scored with the meta the log itself carries where present: a league that changed its
   // categories mid-history must not have old forecasts re-graded under the new rules.
-  const scoreMeta: LeagueMeta = {
-    stats: log?.stats ?? meta.stats,
-    categories: log?.categories ?? meta.categories,
-    lowerIsBetter: log?.lowerIsBetter ?? meta.lowerIsBetter,
-    categoryCorrelation: logCorrelation(log, meta),
-  };
+  const scoreMeta = entryMeta(log, entry, meta);
   const out = matchupOutcome(scoreMeta, you, opp);
   return {
     win: out.win,
@@ -143,7 +162,7 @@ export function gradeForecast(
 /* --------------------------------------------------- win probability over the week */
 
 /** One recorded reading of every matchup (scripts/build_data.py record_winprob_reading). */
-export interface WinProbReading {
+export interface WinProbReading extends LoggedConstants {
   at: string;
   games: Array<{
     homeId: number;
@@ -154,6 +173,8 @@ export interface WinProbReading {
     homeVar: number[];
     awayMu: number[];
     awayVar: number[];
+    homeWk?: number[];
+    awayWk?: number[];
   }>;
 }
 
@@ -192,23 +213,18 @@ export function winProbHistory(
   const pre = forecastFor(forecastLog, meta, period, teamId);
   if (pre) points.push({ at: pre.recordedAt, win: pre.win, kind: "forecast" });
 
-  const scoreMeta: LeagueMeta = {
-    stats: log?.stats ?? meta.stats,
-    categories: log?.categories ?? meta.categories,
-    lowerIsBetter: log?.lowerIsBetter ?? meta.lowerIsBetter,
-    categoryCorrelation: logCorrelation(log, meta),
-  };
   for (const r of log?.periods?.[String(period)] ?? []) {
     const g = r.games.find((x) => x.homeId === teamId || x.awayId === teamId);
     if (!g) continue;
     const home = g.homeId === teamId;
-    const side = (mu: number[], vr: number[], cur: number[]): Moments => ({
+    const side = (mu: number[], vr: number[], cur: number[], wk?: number[]): Moments => ({
       mu: mu.map((v, i) => v + (cur[i] ?? 0)),
       var: vr.slice(),
+      ...(wk ? { wk } : {}),
     });
-    const you = home ? side(g.homeMu, g.homeVar, g.homeCur) : side(g.awayMu, g.awayVar, g.awayCur);
-    const opp = home ? side(g.awayMu, g.awayVar, g.awayCur) : side(g.homeMu, g.homeVar, g.homeCur);
-    points.push({ at: r.at, win: matchupOutcome(scoreMeta, you, opp).win, kind: "reading" });
+    const you = home ? side(g.homeMu, g.homeVar, g.homeCur, g.homeWk) : side(g.awayMu, g.awayVar, g.awayCur, g.awayWk);
+    const opp = home ? side(g.awayMu, g.awayVar, g.awayCur, g.awayWk) : side(g.homeMu, g.homeVar, g.homeCur, g.homeWk);
+    points.push({ at: r.at, win: matchupOutcome(entryMeta(log, r, meta), you, opp).win, kind: "reading" });
   }
   return points.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }

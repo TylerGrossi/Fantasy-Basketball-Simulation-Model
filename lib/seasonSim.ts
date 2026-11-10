@@ -29,6 +29,7 @@
  */
 
 import type { ProjectedLine } from "./projection";
+import { RATIO_PAIRS } from "./probability";
 
 /**
  * Real 2025-26 week-to-week CV per stat (this owner's league), measured from WEEK-OVER-
@@ -62,11 +63,7 @@ const PCT_SD: Record<string, number> = { "FG%": 0.0235, "FT%": 0.0363, "3P%": 0.
 export const SEASON_SIGMAS = { player: 0.15, games: 0.2, team: 0.04 };
 
 const STATS = Object.keys(REAL_WEEKLY_CV);
-const RATIO: Record<string, [string, string]> = {
-  "FG%": ["FGM", "FGA"],
-  "FT%": ["FTM", "FTA"],
-  "3P%": ["3PM", "3PA"],
-};
+const RATIO = RATIO_PAIRS;
 const GAMES_PER_WEEK = 82 / 25;
 
 /**

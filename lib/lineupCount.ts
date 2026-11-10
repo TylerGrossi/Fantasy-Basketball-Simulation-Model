@@ -22,7 +22,7 @@
  */
 
 import type { LeagueData, PlayerRow, TeamSide } from "./league";
-import { rowMoments } from "./league";
+import { playerRank, rowMoments } from "./league";
 import { addMoments, subtractMoments } from "./probability";
 import { rosterDays } from "./streamers";
 import type { CrowdedDay } from "./crowdedDays";
@@ -36,8 +36,7 @@ export interface Window {
   layout: string[];
 }
 
-const rank = (league: LeagueData, p: PlayerRow) =>
-  typeof p.value === "number" ? p.value : (p.avg[league.stats.indexOf("PTS")] ?? 0);
+const rank = (league: LeagueData, p: PlayerRow) => playerRank(p, league.stats.indexOf("PTS"));
 
 /** Recount one side's remaining starts with `startersFor(date, playing)`. */
 function recount(
@@ -62,6 +61,12 @@ function recount(
       const dd = (now.has(p.name) ? 1 : 0) - (old.has(p.name) ? 1 : 0);
       if (dd) delta.set(p.name, (delta.get(p.name) ?? 0) + dd);
     }
+  }
+  // A player in an IR slot today scores nothing until he is activated (an activation is
+  // a planner move) - the planner and crowded days always counted it that way; the gauge
+  // kept his projected games until 2026-11-09, so their "no move" and the gauge differed.
+  for (const p of side.players) {
+    if (ir.has(p.name) && p.gamesLeft > 0) delta.set(p.name, -p.gamesLeft);
   }
   if (!delta.size) return side;
   let mine = { mu: side.projMu, var: side.projVar };

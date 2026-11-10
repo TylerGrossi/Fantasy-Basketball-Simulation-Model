@@ -44,6 +44,7 @@ from simulation import (
     _team_ids_from_raw_schedule_matchup,
     calculate_league_stats,
     simulate_playoff_probabilities,
+    season_inputs,
 )
 
 # ESPN-style periods: regular weeks 1-19, then playoff matchup 1 = periods 20-21,
@@ -99,11 +100,24 @@ def get_season_stats(league_id, year, espn_s2, swid):
     return calculate_league_stats(league, year)
 
 
-def get_playoff_probabilities(year, sims, league_stats, blend_weight, injury_data):
+def get_season_inputs(year, league_stats, blend_weight, injury_data, extra_abbrevs=()):
     """
-    Playoff / championship Monte Carlo. The season is over, so there's no live
-    current-week matchup to seed — keying only on stable inputs lets this be computed
-    once per run.
+    The inputs of the ONE season engine (lib/seasonOdds.ts): per-player weekly games and
+    lines, schedule, records, bracket. The odds themselves are computed in the export's
+    Node step (scripts/node/season.ts), not here.
+    """
+    league = get_league_cached(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
+    return season_inputs(
+        league, league_stats, year, injury_data, blend_weight,
+        regular_season_weeks=REGULAR_SEASON_WEEKS, extra_abbrevs=extra_abbrevs,
+    )
+
+
+def get_playoff_probabilities(year, sims, league_stats, blend_weight, injury_data,
+                              current_week_projected=None):
+    """
+    RETIRED 2026-11-09 - not called by the export. The odds come from lib/seasonOdds.ts
+    now; this Python Monte Carlo is kept only until that has run a full season.
     """
     league = get_league_cached(ESPN_LEAGUE_ID, ESPN_SEASON_YEAR, ESPN_S2, ESPN_SWID)
     return simulate_playoff_probabilities(
@@ -113,6 +127,7 @@ def get_playoff_probabilities(year, sims, league_stats, blend_weight, injury_dat
         current_week_matchup_outcomes=None,
         period_end_date=None,
         return_projected=True,
+        current_week_projected=current_week_projected,
     )
 
 

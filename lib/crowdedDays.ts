@@ -36,7 +36,7 @@
  */
 
 import type { LeagueData, PlayerRow } from "./league";
-import { rowMoments } from "./league";
+import { shiftGames } from "./league";
 import type { Moments } from "./probability";
 import { addMoments, categoryProbabilities, matchupOutcome, subtractMoments } from "./probability";
 import { evaluatePlan, preparePlan } from "./planner";
@@ -181,10 +181,8 @@ export function analyzeCrowdedDays(ctx: CrowdedContext): CrowdedDay[] {
     const p = byName.get(r.name);
     const to = started.get(r.name) ?? 0;
     if (!p || to === r.baseStarted) continue;
-    baseMoments = addMoments(
-      subtractMoments(baseMoments, rowMoments(league, p, r.baseStarted)),
-      rowMoments(league, p, to)
-    );
+    // From the games the projection holds for him (gamesLeft), not his window count.
+    baseMoments = shiftGames(league, baseMoments, p, p.gamesLeft, to - r.baseStarted);
   }
 
   const out: CrowdedDay[] = [];
@@ -204,11 +202,9 @@ export function analyzeCrowdedDays(ctx: CrowdedContext): CrowdedDay[] {
         if (was === now) return;
         const p = byName.get(r.name);
         if (!p) return;
-        const from = started.get(r.name) ?? 0;
-        m = addMoments(
-          subtractMoments(m, rowMoments(league, p, from)),
-          rowMoments(league, p, from + (now ? 1 : -1))
-        );
+        // What baseMoments holds for him: gamesLeft, shifted by the re-base above.
+        const held = p.gamesLeft + (started.get(r.name) ?? 0) - r.baseStarted;
+        m = shiftGames(league, m, p, held, now ? 1 : -1);
       });
       return m;
     };

@@ -83,8 +83,59 @@ noise), `PROJECTION_ERROR` (the average itself being wrong; adds `(games·avg·e
 player's variance is **not additive over games** — change his games by swapping his whole
 moments, never by subtracting the difference) and `CATEGORY_CORRELATION`, all in
 `engine/config.py` and all printed by `node scripts/measure_variance.mjs` from the archived
-box scores. Rerun it on a newer season rather than hand-editing the numbers. The Python
-Monte Carlo (`simulation.py`, playoff odds) shares `CATEGORY_VARIANCE` but not the other two.
+box scores. Rerun it on a newer season rather than hand-editing the numbers.
+
+**`SHOT_CORRELATION` (2026-11-09)** - made vs attempted, per ratio category, measured on
+team-week forecast misses (FG 0.78, FT 0.93, 3P 0.77); exported as `shotCorrelation` and
+used by `ratioMoments` in lib/probability.ts (the projection table's 10-90% ranges reuse it).
+Before it the delta method treated them as independent: an FT% range read 60-100% and every
+shooting category leaned toward 50/50.
+
+**WEEK TERM (2026-11-09) - what nobody can know before the games are played.** The
+per-player spreads (CATEGORY_VARIANCE, PROJECTION_ERROR) are measured GIVEN the games played,
+so injuries, rest, pickups, drops and returns during a week were in nothing: Monday read 96%
+on weeks the favourite then lost. `WEEK_UNCERTAINTY` (config.py, measured by section 4 of the
+measure script: 13-21% CV of the team-week total) is added as (cv x REST-of-week projection)^2
+- big on Monday, gone by Sunday - by `withWeekTerm` (lib/league.ts) on the gauge's sides,
+once, so the gauge, Streamers, planner, logs and the season engine's weeks (`sumWeeks`) all
+carry it. It is kept apart in `Moments.wk` / `TeamSide.projWk` because it moves made and
+attempted together: `ratioMoments` leaves it out (FG%/FT%/3P% unchanged) and `subtractMoments`
+keeps it (it is the side's, not a player's). SEASON_TEAM_SIGMA was re-measured on top of it
+(0.456 -> 0.320). Re-scoring the 12 logged forecasts: Brier 0.235 -> 0.221, log loss 0.715 ->
+0.637 (coin flip 0.693); week 3's 96% upset reads 85%.
+
+**ONE SEASON ENGINE (2026-11-09) - every season number comes from `lib/seasonOdds.ts`.**
+The Playoffs page, Schedule's future weeks, League/Team odds, Streamers' and Recent Moves'
+playoff/title change all run it. Before, a Python Monte Carlo (spread each team-week by
+the per-GAME cv: every future week ~50%) and a lighter TS model (3.5 games a week for
+everyone) disagreed; the Python one (`simulate_playoff_probabilities`) is RETIRED - not
+called, kept only until the TS engine has run a season.
+- **Inputs from Python** (`season_inputs` in engine/simulation.py -> `seasonData.seasonInputs`):
+  every rostered player's blended line, league value and injury-aware game DAYS per
+  remaining week (playoff weeks too), the schedule, records, all-play strength, bracket
+  state, NBA teams' days (for pickups). No maths in Python.
+- **The caps are applied in the engine** (`countedGames`: 13 active by value, idle last;
+  10 starters a day by value) - never baked into exported counts, or a pickup plays as a
+  14th man (a streamer read +24 title points). Ported from `_roster_for_projection_caps` /
+  `_accumulate_counted_games_by_day`; 95% of player-weeks match the old Python counts, the
+  rest because value is now league-referenced (as the gauge's lineup counts already were).
+- **Model**: team-week = sum of `playerMoments` at counted games (a two-week round sums a
+  player's games first); per-category odds = `categoryProbabilities`; categories drawn
+  jointly through the gauge's copula (`choleskyFactor`); one team shift per simulated
+  season, N(0, `SEASON_TEAM_SIGMA`) on the probit (measured: 0.456, split-half - see the
+  measure script); no playoff "upset" multiplier (owner: dropped); standings by win %,
+  then all-play; 1v4 / 2v3; draws fixed per (sim, slot) so a move's delta is the move.
+- **This week = the gauge's sides**: `lib/gaugeSides.ts` is the gauge pipeline as plain
+  functions (the hooks wrap it). The export's Node step (`npm run season` ->
+  scripts/node/season.ts, compiled to .cache/node) builds every matchup's sides (owner's
+  view for the owner's matchup, `observerSides` for the rest; lineups from the pool's
+  `lineupSlot`) -> `seasonData.currentWeekSides`, then runs the engine (8,000 seasons, ~1s)
+  -> `playoffOdds`. Browser pages use the same sides, swapping in their own live matchup.
+- **Pipeline**: build_data.py -> score.py -> `npm run season` -> `build_data.py
+  --record-logs` (the logs record `currentWeekSides`, so a logged number IS the gauge's).
+  `npm run data` chains the same locally (it calls `python`; use a Python with the
+  engine's requirements).
+- Not unified: lib/seasonSim.ts (the draft-night season sim, a frozen preseason model).
 
 ### Traps already hit here — don't repeat them
 
@@ -479,8 +530,48 @@ game under 85%) change - loadLeague attaches `league.availability` for them, `us
 runs `applyAvailability` (their games become likely: `availabilityMoments`, expected games
 + the variance of not knowing whether he plays), and every swap (Streamers, Bench, planner,
 crowded days) uses `rowMoments`, which subtracts exactly what was added. Healthy players are
-byte-identical to before. NOT in the Python export yet: the logged win-probability readings
-(winprob-log) and pre-week forecast still count every game as certain.
+byte-identical to before. THE LOGS TOO (2026-11-09): the pre-week forecast and winprob-log
+readings record the gauge's own sides (`seasonData.currentWeekSides`, written by the Node
+season step after Will They Play is scored) plus the scoring constants they used
+(variance, projectionError, shotCorrelation, categoryCorrelation), and lib/predictions.ts
+scores each entry with ITS constants (older entries: shots independent, as recorded). Week
+4's forecast had read 49.1% against a first live 84.6%; re-recorded this way it equals the
+gauge. Everything reads availability through `lib/leagueAttach.ts normaliseLeague`, the
+pages and the Node step alike.
+
+**Weekly Recap (`/recap`, owner 2026-11-09)** - a finished week league-wide: every matchup
+(final score, all 15 categories, PRE-WEEK win % from predictions.json, an Upset tag when the
+side under 50% won), all-play + luck (`weeklyAllPlay`), category leaders, top players (the
+week's per-game `makeValuer` value, >= 2 GP, beside season value), risers/fallers (week minus
+season value), best single games by Game Score (`makeGameValuer`, as Game Day scores a final).
+Logic in lib/weekRecap.ts, page in app/recap; League menu after Schedule, and the phone's
+Season index. Owner chose NO weekly WPA. Day-by-day lines come from the new
+`public/data/gamelogs.json`: written by build_data from the SAME per-day mRoster reads as
+`fetch_daily_counts` (no extra requests), counted (non-bench, non-IR) lines only, FINISHED
+weeks only (so it changes once a week), days assigned to weeks BY DATE via the league
+calendar - ESPN's `matchupPeriods` lists matchup ids, not scoring days. Verified: the days
+sum to boxscores.json's weekly totals for all 337 player-weeks. Phones hide the secondary
+columns (`.wr-hide-sm`) instead of scrolling sideways.
+
+**WPA on Game Day (owner, 2026-11-09)** - `playerWpa` in `lib/gamedayImpact.ts`: your win
+chance now minus with his night undone (line out of the totals, his game back to unplayed),
+your perspective, matchup starters only. Average night ~0. Box column + phone card chip.
+Both WPA and the header's "+X tonight" run on the HEADLINE's own sides (useProjectedSides:
+injury odds + who starts), tonight undone with `shiftGames`; before tip-off "tonight" is
+exactly zero. (Tip-off used to be rebuilt from plain export sides, so it read a change
+before any game started.)
+
+**Model review fixes (2026-11-09)** - kept here so they do not come back:
+- **Re-seat swaps start from the projection's own count.** `shiftGames` (lib/league.ts)
+  swaps M(held) -> M(held + delta), `held` = the games the side already counts (gamesLeft;
+  0 for a pickup or an IR player). Streamers, the planner and crowded days used to swap
+  from the WINDOW's started games, which differ once today is locked (~5x the leftover
+  variance on a sit). lineupCount.ts always did it right.
+- **`availProbs` repeats the LAST known chance** for counted games beyond the dated rows
+  (it clamped to index 0 and repeated the earliest). Python `_avail_probs` matches.
+- **The gauge's IR rule**: a player in an IR slot today scores nothing until activated
+  (lib/lineupCount.ts), as the planner and crowded days always counted it.
+- One copy each: `RATIO_PAIRS` (lib/probability.ts) and `playerRank` (lib/league.ts).
 
 **Who starts, in the win probability (owner, 2026-11-03).** On each crowded day still to set,
 the WIN PROBABILITY counts your team's Bench recommendation and the opponent's ESPN lineup

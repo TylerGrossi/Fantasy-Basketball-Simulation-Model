@@ -9,7 +9,7 @@ import {
   categoryRecord,
   sideMoments,
 } from "@/lib/league";
-import { matchupOutcome, projectionPercentile } from "@/lib/probability";
+import { matchupOutcome, projectionPercentile, RATIO_PAIRS, ratioMoments, shotCorrelation } from "@/lib/probability";
 import { gradeForecast, type Forecast, type WinProbPoint } from "@/lib/predictions";
 import { formatGames } from "@/lib/liveAdjust";
 import { useProjectedSides } from "@/lib/useLiveSides";
@@ -59,11 +59,6 @@ interface Props {
   embedded?: boolean;
 }
 
-const RATIO_PAIRS: Record<string, [string, string]> = {
-  "FG%": ["FGM", "FGA"],
-  "FT%": ["FTM", "FTA"],
-  "3P%": ["3PM", "3PA"],
-};
 
 export default function MatchupView({
   league,
@@ -183,8 +178,10 @@ export default function MatchupView({
         probs={outcome.categoryProbs}
         youMu={youMoments.mu}
         youVar={youMoments.var}
+        youWk={youMoments.wk}
         oppMu={oppMoments.mu}
         oppVar={oppMoments.var}
+        oppWk={oppMoments.wk}
       />
     </>
   );
@@ -379,6 +376,8 @@ function ProjectionTable({
   youVar,
   oppMu,
   oppVar,
+  youWk,
+  oppWk,
 }: {
   league: LeagueData;
   probs: number[];
@@ -386,21 +385,19 @@ function ProjectionTable({
   youVar: number[];
   oppMu: number[];
   oppVar: number[];
+  /** The week term inside each var (lib/probability.ts Moments.wk), for the ratios. */
+  youWk?: number[];
+  oppWk?: number[];
 }) {
   const idx = (s: string) => league.stats.indexOf(s);
 
-  function moments(cat: string, mu: number[], v: number[]): [number, number] {
+  function moments(cat: string, mu: number[], v: number[], wk?: number[]): [number, number] {
     const pair = RATIO_PAIRS[cat];
     if (pair) {
-      const a = mu[idx(pair[0])];
-      const b = mu[idx(pair[1])];
-      if (b <= 0) return [0, 0];
-      const r = a / b;
-      const varr =
-        r * r *
-        (v[idx(pair[0])] / Math.max(a * a, 1e-12) +
-          v[idx(pair[1])] / Math.max(b * b, 1e-12));
-      return [r, Math.sqrt(Math.max(varr, 0))];
+      // The engine's own ratio maths (made and attempted correlated), so this range and
+      // the category's win % come from the same spread.
+      if (mu[idx(pair[1])] <= 0) return [0, 0];
+      return ratioMoments({ mu, var: v, wk }, idx(pair[0]), idx(pair[1]), shotCorrelation(league, cat));
     }
     const i = idx(cat);
     return [mu[i], Math.sqrt(Math.max(v[i], 0))];
@@ -422,11 +419,13 @@ function ProjectionTable({
         </thead>
         <tbody>
           {league.categories.map((cat, i) => {
-            const [ym, ys] = moments(cat, youMu, youVar);
-            const [om, os] = moments(cat, oppMu, oppVar);
+            const [ym, ys] = moments(cat, youMu, youVar, youWk);
+            const [om, os] = moments(cat, oppMu, oppVar, oppWk);
             const p = probs[i] * 100;
             const swing = Math.abs(p - (100 - p)) <= 15;
-            const fmt = (v: number) => formatValue(cat, v);
+            // A percentage can't leave 0-100%: the normal approximation's tails can.
+            const fmt = (v: number) =>
+              formatValue(cat, RATIO_PAIRS[cat] ? Math.min(1, Math.max(0, v)) : v);
             return (
               <tr key={cat}>
                 <td>{cat}</td>

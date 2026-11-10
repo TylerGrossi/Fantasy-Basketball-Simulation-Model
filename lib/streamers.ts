@@ -22,7 +22,7 @@
  */
 
 import type { FreeAgent, LeagueData, PlayerRow } from "./league";
-import { playerMoments, rowMoments } from "./league";
+import { playerMoments, playerRank, rowMoments, shiftGames } from "./league";
 import type { Moments } from "./probability";
 import { categoryProbabilities, matchupOutcome, subtractMoments, addMoments } from "./probability";
 import { seatDay, type SeatRule } from "./seatRule";
@@ -140,8 +140,7 @@ function startedGames(
 
 /** Value when the export carries it; points per game on an export from before it did. */
 let ptsIdx = -1;
-const rankOf = (p: Pick<Seatable, "avg" | "value">) =>
-  typeof p.value === "number" ? p.value : (p.avg[ptsIdx] ?? 0);
+const rankOf = (p: Pick<Seatable, "avg" | "value">) => playerRank(p, ptsIdx);
 
 /**
  * The days a roster player can play within `dates`: his team's games, unless he is hurt —
@@ -244,21 +243,19 @@ export function analyzeStreamers(
           daily.rule
         );
         netGames = 0;
-        // From `from` started games to `to`: swap his whole moments rather than adding the
-        // difference, since the projection-error term is not additive over games.
-        const apply = (row: { name: string; avg: number[] }, from: number, to: number) => {
+        // His started games in the window moved from `from` to `to`: shift the games the
+        // projection holds for him (`held` - gamesLeft for a roster player, 0 for the
+        // pickup) by the difference (lib/league.ts shiftGames).
+        const apply = (row: { name: string; avg: number[] }, held: number, from: number, to: number) => {
           if (from === to) return;
           netGames += to - from;
-          mine = addMoments(
-            subtractMoments(mine, rowMoments(league, row, from)),
-            rowMoments(league, row, to)
-          );
+          mine = shiftGames(league, mine, row, held, to - from);
         };
         for (const [name, g] of before) {
           const p = byName.get(name);
-          if (p) apply(p, g, after.get(name) ?? 0);
+          if (p) apply(p, p.gamesLeft, g, after.get(name) ?? 0);
         }
-        apply(fa, 0, after.get(fa.name) ?? 0);
+        apply(fa, 0, 0, after.get(fa.name) ?? 0);
       } else {
         if (drop) {
           const dm = dropMoments.get(drop.name);

@@ -4,7 +4,7 @@
  */
 
 import type { LeagueMeta, Moments, StatVector } from "./probability";
-import { addMoments, matchupOutcome, subtractMoments, withCurrentTotals } from "./probability";
+import { addMoments, matchupOutcome, RATIO_PAIRS, subtractMoments, withCurrentTotals } from "./probability";
 import { etDate } from "./dates";
 
 export interface PlayerRow {
@@ -49,6 +49,11 @@ export interface TeamSide {
   /** Projected REMAINING production. Zero for a completed period. */
   projMu: StatVector;
   projVar: StatVector;
+  /**
+   * The week term (withWeekTerm), set on the gauge's sides only: added to `projVar` by
+   * `sideMoments`, never part of `projVar` itself, so player swaps stay exact.
+   */
+  projWk?: StatVector;
   /** Snapshot of banked totals; api/live supersedes this. */
   current: StatVector;
 }
@@ -341,12 +346,28 @@ export interface SeasonData {
   schedules?: Record<string, ScheduleRow[]>;
   playoffOdds?: PlayoffOddsRow[];
   championshipFinalists?: number[];
+  /** The season engine's inputs (engine/simulation.py season_inputs). */
+  seasonInputs?: import("./seasonOdds").SeasonInputs;
+  /**
+   * This week's sides per team as the gauge counts them at export time (lib/gaugeSides.ts,
+   * from the owner's view), written by the export's Node step: banked `current` plus the
+   * rest-of-week `projMu`/`projVar`. The season engine's current week and the logs read it.
+   */
+  currentWeekSides?: Record<string, { current: number[]; projMu: number[]; projVar: number[]; projWk?: number[] }>;
   /** League-wide add/drop/trade feed, newest first. */
   recentMoves?: RecentMoveRow[];
 }
 
 export interface LeagueData extends LeagueMeta {
   generatedAt: string;
+  /**
+   * Season-long team-strength spread (probit, per category), measured by
+   * scripts/measure_variance.mjs - the season engine (lib/seasonOdds.ts) shifts each team
+   * by N(0, teamSigma) once per simulated season.
+   */
+  teamSigma?: number;
+  /** WEEK_UNCERTAINTY per stat, `stats` order (withWeekTerm). */
+  weekUncertainty?: number[];
   /**
    * Will They Play (lib/availability.ts), attached by loadLeague: the chance of playing
    * each remaining game, [ISO date, p], for players WITH DOUBT only - a listed or ESPN
@@ -540,7 +561,9 @@ export function availProbs(
   const whole = Math.floor(games);
   const frac = games - whole;
   // More counted games than dated rows (a stale export): repeat the last known chance.
-  const pick = (k: number) => left[Math.max(0, left.length - k)] ?? left[left.length - 1];
+  // (Was left[max(0, len - k)], which clamped to index 0 and repeated the EARLIEST chance
+  // - e.g. 5% for an OUT-today player who is 90% later in the week. Fixed 2026-11-09.)
+  const pick = (k: number) => (left.length - k >= 0 ? left[left.length - k] : left[left.length - 1]);
   const probs: number[] = [];
   for (let k = whole; k >= 1; k--) probs.push(pick(k));
   // Today's partly-played game counts as a fraction: scale its chance the same way.
@@ -566,6 +589,40 @@ export function rowMoments(
 }
 
 /**
+ * How a player ranks for a starting spot on a crowded day: his season value when the
+ * export carries it, points per game on an export from before it did. The one copy of
+ * this rule (Streamers, the planner and the lineup recount all seat by it).
+ */
+export function playerRank(p: { value?: number | null; avg: StatVector }, ptsIdx: number): number {
+  return typeof p.value === "number" ? p.value : (p.avg[ptsIdx] ?? 0);
+}
+
+/**
+ * Change a player's games in a side's projection by `delta`, starting from the `held`
+ * games that projection ALREADY counts for him (his `gamesLeft` there; 0 for a pickup or
+ * a player taken out, like IR). His whole moments are swapped, never the difference: the
+ * projection-error term is not additive over games.
+ *
+ * The re-seat tools (Streamers, the planner, crowded days) used to swap from his started
+ * games inside the move WINDOW instead, which is a different number whenever today is
+ * locked - sitting a 3-game player with 2 in the window took M(3) - M(2) + M(0) instead of
+ * M(1), leaving ~5x his real leftover variance (fixed 2026-11-09).
+ */
+export function shiftGames(
+  league: Pick<LeagueData, "availability" | "variance" | "projectionError">,
+  m: Moments,
+  p: { name: string; avg: StatVector },
+  held: number,
+  delta: number
+): Moments {
+  if (!delta) return m;
+  return addMoments(
+    subtractMoments(m, rowMoments(league, p, held)),
+    rowMoments(league, p, Math.max(0, held + delta))
+  );
+}
+
+/**
  * A side's projection with each doubtful player's games swapped from certain to likely:
  * his playerMoments out, his rowMoments in. Run on the LIVE side (after remainingSide),
  * so `gamesLeft` is what is really left. Players with no doubt are untouched.
@@ -584,11 +641,6 @@ export function applyAvailability(league: LeagueData, side: TeamSide): TeamSide 
   return changed ? { ...side, projMu: mine.mu, projVar: mine.var } : side;
 }
 
-const RATIO_PAIRS: Record<string, [string, string]> = {
-  "FG%": ["FGM", "FGA"],
-  "FT%": ["FTM", "FTA"],
-  "3P%": ["3PM", "3PA"],
-};
 
 /** The value shown for a scored category, derived from the raw stat vector. */
 export function categoryValue(
@@ -694,7 +746,40 @@ export function categoryRecord(rows: ScoreboardRow[]) {
 
 /** Combine a side's cached projection with (possibly live) current totals. */
 export function sideMoments(side: TeamSide, current: StatVector): Moments {
-  return withCurrentTotals({ mu: side.projMu, var: side.projVar }, current);
+  const wk = side.projWk;
+  return withCurrentTotals(
+    wk ? { mu: side.projMu, var: side.projVar.map((v, i) => v + (wk[i] ?? 0)), wk } : { mu: side.projMu, var: side.projVar },
+    current
+  );
+}
+
+/**
+ * Measured CV of what a pre-week projection cannot know (engine/config.py WEEK_UNCERTAINTY),
+ * for an export that predates `weekUncertainty`. The export's own value always wins.
+ */
+const DEFAULT_WEEK_UNCERTAINTY: Record<string, number> = {
+  FGM: 0.13, FGA: 0.13, FTM: 0.17, FTA: 0.17, "3PM": 0.13, "3PA": 0.14,
+  REB: 0.13, AST: 0.13, STL: 0.15, BLK: 0.21, TO: 0.13, PTS: 0.14, DD: 0.12, TW: 0.14,
+};
+
+/** The week term's variance for a rest-of-week projection `mu`: (cv x mu)^2 per stat. */
+export function weekTerm(league: Pick<LeagueData, "stats" | "weekUncertainty">, mu: StatVector): StatVector {
+  return mu.map((m, i) => {
+    const cv = league.weekUncertainty?.[i] ?? DEFAULT_WEEK_UNCERTAINTY[league.stats[i]] ?? 0;
+    return (cv * Math.max(0, m)) ** 2;
+  });
+}
+
+/**
+ * A side with the WEEK term (2026-11-09): what nobody can know before the games are played
+ * - injuries, rest days, pickups and drops, players returning - as (cv x rest-of-week
+ * projection)^2. The per-player spreads are measured GIVEN the games played, so without it
+ * a Monday read 96% on a week the favourite then lost. Proportional to what is LEFT, so it
+ * is largest on Monday and gone by the last night. Applied once, on the gauge's sides
+ * (lib/gaugeSides.ts), so every number built on them carries it.
+ */
+export function withWeekTerm(league: Pick<LeagueData, "stats" | "weekUncertainty">, side: TeamSide): TeamSide {
+  return { ...side, projWk: weekTerm(league, side.projMu) };
 }
 
 /** Live win probability for a matchup, given whatever current totals we have. */

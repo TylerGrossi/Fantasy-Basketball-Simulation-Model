@@ -15,7 +15,7 @@ import MultiSelect from "./MultiSelect";
 import PlayerLink from "./PlayerLink";
 import SortableTable, { type SortCol, type SortRow } from "./SortableTable";
 import FitText, { shortName } from "./FitText";
-import { makeOddsSimulator, type Odds, type SeasonContext, type SimPlayer } from "@/lib/playoffOdds";
+import { makeSeasonEngine, packCurrent, pickupPlayer, type SeasonMeta, type SeasonPack, type SeasonPlayer } from "@/lib/seasonOdds";
 import type { LeagueData } from "@/lib/league";
 
 /**
@@ -100,9 +100,9 @@ const PAIR_COLS: SortCol[] = [
 
 /** What the page hands over for the playoff / title columns (built server-side). */
 export interface MovesOdds {
-  ctx: SeasonContext;
+  pack: SeasonPack;
   teamIds: Record<string, number>;
-  meta: Pick<LeagueData, "stats" | "categories" | "lowerIsBetter" | "variance" | "projectionError">;
+  meta: SeasonMeta;
 }
 
 /** One name list as "J. Poeltl, D. Acuff Jr." when the full one does not fit. */
@@ -167,19 +167,21 @@ export default function RecentMovesView({
   const feed = useMemo(() => groupByDay(groups), [groups]);
 
   /*
-   * Δ PLAYOFF / Δ CHAMP per swap (owner, 2026-10-30). For each add-for-drop, the team's
-   * CURRENT roster is put back the way it would be without the swap (added player out,
-   * dropped player in) and then with it, and the season simulated both ways
-   * (lib/playoffOdds.ts — same random draws, so the gap is the swap). Measured from today
-   * forward; the weeks already played are in the records either way. Runs after paint in
-   * small batches — a simulator per team (~0.1s) and two runs per swap (~10ms each).
+   * Δ PLAYOFF / Δ CHAMP per swap (owner, 2026-10-30). The season engine (lib/seasonOdds.ts,
+   * the same one behind the Playoffs page and Streamers) runs the league as it is, and
+   * again with the swap undone on that team (its added players out, its dropped players
+   * back in) - same random draws, so the gap is the swap. This week is the gauge's sides
+   * either way (as of the export), so the change counts from NEXT week on.
    */
   const [swapOdds, setSwapOdds] = useState<Map<string, { dP: number; dC: number }>>(new Map());
   useEffect(() => {
     if (!oddsInput) return;
-    const { ctx, teamIds, meta } = oddsInput;
+    const { pack, teamIds, meta } = oddsInput;
+    const engine = makeSeasonEngine(meta, pack.inputs);
+    const current = packCurrent(pack);
+    const nextWeek = pack.inputs.currentWeek + 1;
+    const actual = engine.run({ current });
     const swaps = groupMoves(rows).filter((g) => netValue(g) != null);
-    const sims = new Map<number, ReturnType<typeof makeOddsSimulator>>();
     const out = new Map<string, { dP: number; dC: number }>();
     let alive = true;
     let i = 0;
@@ -190,26 +192,16 @@ export default function RecentMovesView({
         const g = swaps[i];
         const id = teamIds[g.team];
         if (id == null) continue;
-        if (!sims.has(id)) sims.set(id, makeOddsSimulator(meta, ctx, id));
-        const run = sims.get(id);
-        if (!run) continue;
-        const addN = new Set(g.adds.map((r) => r.player));
-        const dropN = new Set(g.drops.map((r) => r.player));
-        const p = (n: string): SimPlayer | undefined => ctx.players[n];
-        const current = ctx.rosters[id] ?? [];
-        // Without the swap: added players out, dropped players back in.
-        const base = [
-          ...current.filter((x) => !addN.has(x.name ?? "") && !dropN.has(x.name ?? "")),
-          ...[...dropN].map(p).filter((x): x is SimPlayer => !!x),
-        ];
-        // With it: the dropped players out, the added ones in.
-        const withSwap = [
-          ...base.filter((x) => !dropN.has(x.name ?? "")),
-          ...[...addN].map(p).filter((x): x is SimPlayer => !!x),
-        ];
-        const a: Odds = run(base, null);
-        const b: Odds = run(withSwap, null);
-        out.set(g.key, { dP: b.playoff - a.playoff, dC: b.champ - a.champ });
+        const back: SeasonPlayer[] = g.drops
+          .map((r) => {
+            const line = pack.players[r.player];
+            return line ? pickupPlayer(pack.inputs, { name: r.player, ...line }, nextWeek) : null;
+          })
+          .filter((x): x is SeasonPlayer => !!x);
+        const undone = engine.run({ current, changes: [{ teamId: id, drop: g.adds.map((r) => r.player), add: back }] });
+        const a = undone.get(id);
+        const b = actual.get(id);
+        if (a && b) out.set(g.key, { dP: b.playoff - a.playoff, dC: b.champ - a.champ });
       }
       setSwapOdds(new Map(out));
       if (i < swaps.length) timer = setTimeout(step, 0);

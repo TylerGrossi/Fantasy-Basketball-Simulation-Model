@@ -22,3 +22,6 @@ tsconfig.tsbuildinfo
 # The owner's personal draft plan, written by app/api/draft/plan on the local dev server
 scripts/draft_inputs/draft-plan.json
 
+
+# Compiled export scripts (scripts/node, npm run season)
+.cache/

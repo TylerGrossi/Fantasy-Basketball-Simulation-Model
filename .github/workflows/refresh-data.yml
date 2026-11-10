@@ -95,6 +95,20 @@ jobs:
       - name: Install the Node toolchain
         run: npm ci
 
+      # THE season engine and this week's gauge sides (scripts/node/season.ts, 2026-11-09):
+      # the same TypeScript the pages run - lib/gaugeSides.ts for every matchup this week
+      # (Will They Play included, so it runs AFTER the scoring above) and lib/seasonOdds.ts
+      # over the exported season inputs - writing playoffOdds, Schedule's future weeks and
+      # currentWeekSides into league.json. Required: without it the odds would be missing.
+      - name: Season odds and this week's gauge sides
+        run: npm run season
+
+      # The pre-week forecast and the win-prob reading record the gauge sides the step above
+      # wrote, so a logged number IS the gauge's number at that moment (the plain export
+      # projection, recorded before injury scoring, once read 49% against a live 85%).
+      - name: Record the forecast and win-prob logs
+        run: python scripts/build_data.py --record-logs
+
       # The Agent's spread baseline. It is derived from ~290 ESPN game logs and from the
       # season values in the league.json written above, so during a live season it goes
       # stale exactly as fast as the snapshot does. Takes ~2 minutes.
