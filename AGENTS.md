@@ -553,10 +553,9 @@ calendar - ESPN's `matchupPeriods` lists matchup ids, not scoring days. Verified
 sum to boxscores.json's weekly totals for all 337 player-weeks. Phones hide the secondary
 columns (`.wr-hide-sm`) instead of scrolling sideways.
 
-**WPA on Game Day (owner, 2026-11-09)** - `playerWpa` in `lib/gamedayImpact.ts`: your win
-chance now minus with his night undone (line out of the totals, his game back to unplayed),
-your perspective, matchup starters only. Average night ~0. Box column + phone card chip.
-Both WPA and the header's "+X tonight" run on the HEADLINE's own sides (useProjectedSides:
+**No WPA on the site (owner, 2026-11-09).** A per-player Game Day WPA column/chip was built
+and then REMOVED at the owner's request (did not like how it worked or looked) - do not
+re-add it unasked. The header's "+X tonight" (`nightImpact`, lib/gamedayImpact.ts) runs on the HEADLINE's own sides (useProjectedSides:
 injury odds + who starts), tonight undone with `shiftGames`; before tip-off "tonight" is
 exactly zero. (Tip-off used to be rebuilt from plain export sides, so it read a change
 before any game started.)

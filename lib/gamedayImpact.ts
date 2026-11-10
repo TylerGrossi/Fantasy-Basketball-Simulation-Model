@@ -33,7 +33,7 @@ export interface NightImpact {
   startOpp: StatVector;
 }
 
-/** The live inputs both functions read — useLiveTotals' fields of the same names. */
+/** The live inputs nightImpact reads — useLiveTotals' fields of the same names. */
 export interface NightLive {
   you: StatVector;
   opp: StatVector;
@@ -123,46 +123,4 @@ export function nightImpact(
     );
   }
   return { start, tonightYou, tonightOpp, startYou, startOpp };
-}
-
-/**
- * WPA — win probability added (owner, 2026-11-09): for each of your matchup's COUNTED
- * players with a line tonight, how much his night so far has moved YOUR chance of winning
- * the week, as a share (0.031 = +3.1 points). Negative for an opponent's big night.
- *
- *   WPA = P(win | now) - P(win | his night undone)
- *
- * "Undone" = his line out of his side's totals and his share of tonight's game back in
- * his projection, everyone else exactly as now — on the headline's own sides, so P(win |
- * now) IS the headline number. An AVERAGE night reads about 0 (he produced what the
- * projection already expected); it is measured against his expectation, not zero. The
- * WPAs need not add up to "tonight": categories interact.
- */
-export function playerWpa(
-  league: LeagueData,
-  you: TeamSide,
-  opp: TeamSide,
-  youRaw: TeamSide,
-  oppRaw: TeamSide,
-  live: NightLive
-): Map<string, number> {
-  const out = new Map<string, number>();
-  if (!live.youToday || !live.oppToday || !anyLine(live)) return out;
-  const youM = sideMoments(you, live.you);
-  const oppM = sideMoments(opp, live.opp);
-  const base = matchupOutcome(league, youM, oppM).win;
-
-  const undo = (lines: TodayLine[], side: TeamSide, raw: TeamSide, totals: StatVector, mine: boolean) => {
-    const played = tonightPlayed(league, raw, live.gameLeft);
-    const onSide = new Set(side.players.map((p) => p.name));
-    for (const l of lines) {
-      if (!l.counted || !l.v || !onSide.has(l.name)) continue;
-      const m = undoGames(league, side, totals.map((x, i) => x - (l.v![i] ?? 0)), played, l.name);
-      const cf = mine ? matchupOutcome(league, m, oppM) : matchupOutcome(league, youM, m);
-      out.set(l.name, base - cf.win);
-    }
-  };
-  undo(live.youToday, you, youRaw, live.you, true);
-  undo(live.oppToday, opp, oppRaw, live.opp, false);
-  return out;
 }

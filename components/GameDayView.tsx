@@ -13,7 +13,7 @@ import {
 import type { StatVector } from "@/lib/probability";
 import { tally } from "./BoxScoreSheet";
 import { periodLabel as quarter, type GameDayData, type NbaGame, type Play } from "@/lib/gameday";
-import { nightImpact, playerWpa } from "@/lib/gamedayImpact";
+import { nightImpact } from "@/lib/gamedayImpact";
 import { liveRoster } from "@/lib/liveAdjust";
 import { playerStatus } from "@/lib/playerPool";
 import { useProjectedSides } from "@/lib/useLiveSides";
@@ -186,18 +186,6 @@ interface BoxRow {
   onCourt: boolean;
   /** Game Score (GS): the night valued on a single-game scale. Null before his game. */
   value: number | null;
-  /**
-   * WPA (lib/gamedayImpact.ts playerWpa): how much his night so far moved YOUR chance of
-   * winning the week, 0-1. Null for anyone outside your matchup, benched, or not started.
-   */
-  wpa: number | null;
-}
-
-/** WPA as printed: points of win probability, one decimal, with its good/bad tone. */
-function wpaCell(w: number | null): { text: string; tone: string } | null {
-  if (w == null) return null;
-  const tone = w >= 0.0005 ? "var(--good)" : w <= -0.0005 ? "var(--bad)" : "var(--ink-3)";
-  return { text: pp(w), tone };
 }
 
 /** Live first, then still to play (by tip), then final, then no game tonight. */
@@ -266,7 +254,7 @@ export default function GameDayView(props: Props) {
   );
 
   // THE win probability's sides (injury odds, who starts) and its number - exactly what
-  // useLiveWin computes, kept here so tonight's change and WPA use the SAME sides.
+  // useLiveWin computes, kept here so tonight's change uses the SAME sides.
   const proj = useProjectedSides(league, matchup, isHome, teamId, live);
   const winNow = useMemo(
     () => winProbability(league, proj.you, proj.opp, proj.live.you, proj.live.opp),
@@ -281,7 +269,7 @@ export default function GameDayView(props: Props) {
     () => liveRoster(league, oppRaw, totals.oppToday, totals.oppAdded),
     [league, oppRaw, totals.oppToday, totals.oppAdded]
   );
-  // Tonight's change and WPA read the headline's own poll (proj.live), so before any game
+  // Tonight's change reads the headline's own poll (proj.live), so before any game
   // starts "tonight" is exactly zero. The raw sides are the same liveRoster step the
   // projected sides started from.
   const pl = proj.live;
@@ -295,11 +283,6 @@ export default function GameDayView(props: Props) {
   );
   const impact = useMemo(
     () => nightImpact(league, proj.you, proj.opp, youRawLive, oppRawLive, pl),
-    [league, proj.you, proj.opp, youRawLive, oppRawLive, pl]
-  );
-  // Win probability added, per counted matchup player with a line tonight.
-  const wpa = useMemo(
-    () => playerWpa(league, proj.you, proj.opp, youRawLive, oppRawLive, pl),
     [league, proj.you, proj.opp, youRawLive, oppRawLive, pl]
   );
 
@@ -381,7 +364,6 @@ export default function GameDayView(props: Props) {
         min: m?.line ? m.min : l.min,
         onCourt: l.onCourt,
         value: l.value,
-        wpa: m ? (wpa.get(m.row.name) ?? null) : null,
       });
     }
     // Your matchup's players with no box line yet: their game has not started (or they
@@ -402,7 +384,6 @@ export default function GameDayView(props: Props) {
         min: p.min,
         onCourt: p.onCourt,
         value: null,
-        wpa: wpa.get(p.row.name) ?? null,
       });
     }
     // Played tonight, best night first; then yet to play, by tip-off.
@@ -412,7 +393,7 @@ export default function GameDayView(props: Props) {
         (b.value ?? 0) - (a.value ?? 0) ||
         gameOrder(a.game) - gameOrder(b.game)
     );
-  }, [games, gd, nights, ownerOf, owners, statuses, teamAbbrevs, youAbbrev, oppAbbrev, wpa]);
+  }, [games, gd, nights, ownerOf, owners, statuses, teamAbbrevs, youAbbrev, oppAbbrev]);
 
   const nameOfId = useMemo(() => {
     const m = new Map<string, string>();
@@ -792,7 +773,7 @@ function shortName(name: string) {
  * sort by makes. Players whose game has not started have no line and always sink to the
  * bottom, whichever way a stat column points.
  */
-type BoxSort = "name" | "owner" | "game" | "MIN" | (typeof COLS)[number] | "FG" | "FT" | "value" | "wpa";
+type BoxSort = "name" | "owner" | "game" | "MIN" | (typeof COLS)[number] | "FG" | "FT" | "value";
 const BOX_COLS: Array<{ key: BoxSort; label: string; num?: true; title?: string }> = [
   { key: "name", label: "Player" },
   { key: "owner", label: "Owner" },
@@ -811,15 +792,6 @@ const BOX_COLS: Array<{ key: BoxSort; label: string; num?: true; title?: string 
       "Game Score: tonight's line across all 15 league categories, against an average " +
       "player at the same point in the game, on a single-game scale",
   },
-  {
-    key: "wpa",
-    label: "WPA",
-    num: true,
-    title:
-      "Win probability added: how many points his night so far has moved YOUR chance of " +
-      "winning the week, against what the projection already expected from him. Your " +
-      "matchup's starters only; an opponent's big night is negative",
-  },
 ];
 
 function sortValue(r: BoxRow, key: BoxSort): number | string | null {
@@ -832,7 +804,6 @@ function sortValue(r: BoxRow, key: BoxSort): number | string | null {
     case "FG": return l ? (l.FGM ?? 0) : null;
     case "FT": return l ? (l.FTM ?? 0) : null;
     case "value": return r.value;
-    case "wpa": return r.wpa;
     default: return l ? (l[key] ?? 0) : null;
   }
 }
@@ -943,14 +914,6 @@ function BoxTable({
                     <td className="num">
                       {r.value == null ? "" : `${r.value >= 0 ? "+" : ""}${r.value.toFixed(1)}`}
                     </td>
-                    {(() => {
-                      const w = wpaCell(r.wpa);
-                      return (
-                        <td className="num" style={w ? { color: w.tone, fontWeight: 700 } : undefined}>
-                          {w?.text ?? ""}
-                        </td>
-                      );
-                    })()}
                   </tr>
                 );
               })}
@@ -994,20 +957,6 @@ function PlayerCard({ r }: { r: BoxRow }) {
             {`${r.value >= 0 ? "+" : ""}${r.value.toFixed(1)}`}
           </span>
         )}
-        {(() => {
-          const w = wpaCell(r.wpa);
-          return (
-            w && (
-              <span
-                className={`gd-pc-wpa mono${r.value == null ? " solo" : ""}`}
-                style={{ color: w.tone }}
-                title="Win probability added: points of YOUR win chance from his night so far"
-              >
-                {w.text} <span className="gd-pc-wpa-k">WPA</span>
-              </span>
-            )
-          );
-        })()}
       </div>
       <div className="gd-pc-sub">
         {r.game && (
