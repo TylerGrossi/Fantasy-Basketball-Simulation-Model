@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { loadLeague, myTeam, trimLeague } from "@/lib/loadLeague";
+import { loadBoxScores, loadLeague, myTeam, trimLeague } from "@/lib/loadLeague";
+import { weekGames, type WeekGames } from "@/lib/weekGames";
 import LiveSeed from "@/components/LiveSeed";
 import ScheduleLiveWeek from "@/components/ScheduleLiveWeek";
 import { liveSeed } from "@/lib/liveMatchup";
@@ -31,6 +32,15 @@ export default async function Page() {
   // Week-by-week all-play, keyed by period so it can join onto the schedule rows.
   const history = weeklyAllPlay(league, me.id);
   const byPeriod = new Map(history.weeks.map((h) => [h.period, h]));
+
+  // Games played each week: yours, the opponent's, the league average (actual for
+  // finished weeks, projected for the rest — see lib/weekGames.ts).
+  const games = weekGames(
+    league,
+    await loadBoxScores(),
+    me.id,
+    rows.map((r) => r.period)
+  );
 
   /**
    * What to print in the # column. A playoff round's period number (20, 22) means
@@ -223,6 +233,9 @@ export default async function Page() {
               <th>Result</th>
               <th className="num">Score</th>
               <th className="num">Win %</th>
+              <th className="num">GP</th>
+              <th className="num">Opp GP</th>
+              <th className="num">Lg avg</th>
               <th className="num">All-play</th>
               <th className="num">Beat</th>
               <th>vs the field</th>
@@ -284,6 +297,7 @@ export default async function Page() {
                     </td>
                   </>
                 )}
+                <ScheduleGames g={games.get(r.period)} />
                 <ScheduleAllPlay week={byPeriod.get(r.period)} />
               </tr>
             ))}
@@ -291,6 +305,33 @@ export default async function Page() {
         </table>
       </div>
     </LiveSeed>
+  );
+}
+
+/**
+ * The three games-played cells for one week. A projected week (or the unfinished part of
+ * the current one) is muted like the projected score, so it never reads as a result.
+ * The league average keeps one decimal: eight teams' totals rarely average to a whole
+ * number, and rounding would hide a one-game edge.
+ */
+function ScheduleGames({ g }: { g?: WeekGames }) {
+  if (!g) {
+    return (
+      <>
+        <td className="num">—</td>
+        <td className="num">—</td>
+        <td className="num">—</td>
+      </>
+    );
+  }
+  const cls = g.proj ? "num sched-proj" : "num";
+  const n = (x: number | null) => (x == null ? "—" : String(x));
+  return (
+    <>
+      <td className={cls}>{n(g.mine)}</td>
+      <td className={cls}>{n(g.opp)}</td>
+      <td className={cls}>{g.avg == null ? "—" : g.avg.toFixed(1)}</td>
+    </>
   );
 }
 
