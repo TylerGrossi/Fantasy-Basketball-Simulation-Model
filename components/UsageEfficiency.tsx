@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { PoolPlayer } from "@/lib/league";
-import { MIN_GP, gamesFor } from "@/lib/percentiles";
+import { gamesFor, minGamesFor } from "@/lib/percentiles";
 
 /**
  * Volume against efficiency, this player against the whole pool.
@@ -75,7 +75,8 @@ export default function UsageEfficiency({
   const { pts, me, bounds, mx, my } = useMemo(() => {
     // Qualified players only: a four-game cameo at 90% true shooting is not a data point
     // about the trade-off, it is a data point about small samples.
-    const qualified = pool.filter((p) => gamesFor(p, "Regular") >= MIN_GP.Regular);
+    const min = minGamesFor(pool, "Regular");
+    const qualified = pool.filter((p) => gamesFor(p, "Regular") >= min);
     const all: Pt[] = qualified.map((p) => ({
       name: p.name,
       x: usage(p),

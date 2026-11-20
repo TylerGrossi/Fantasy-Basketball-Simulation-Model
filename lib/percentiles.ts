@@ -113,6 +113,31 @@ export const STAT_GROUPS: Array<{ title: string; stats: StatSpec[] }> = [
  */
 export const MIN_GP: Record<ValueBasis, number> = { Regular: 15, "30D": 5, "15D": 3 };
 
+/**
+ * The games bar for a basis, measured against how far into the season the league is.
+ *
+ * The season's 15 is a full-season number. Between the end of the blend (10 games) and the
+ * point teams reach 15 games, a fixed 15 failed nearly every real player: on the 2026-11-16
+ * export teams had played 12-14, so 257 of 271 lines were "Not qualified" and the reference
+ * population was mostly players still carrying LAST season's 60-82-game line (owner,
+ * 2026-11-20). So the season bar is half the games teams have played (the NBA's own rule
+ * is a share of team games too), capped at 15 once the season is long enough.
+ *
+ * "Games teams have played" is the most games any player has THIS season (statSource
+ * "current"): a "last" or blended line's count includes last season's games and would set
+ * the bar at 41. The 30D / 15D windows already fit their own length, so they keep MIN_GP.
+ */
+export function minGamesFor(pool: PoolPlayer[], basis: ValueBasis): number {
+  if (basis !== "Regular") return MIN_GP[basis];
+  let teamGames = 0;
+  for (const p of pool) {
+    if (p.statSource === "current" && (p.gp ?? 0) > teamGames) teamGames = p.gp ?? 0;
+  }
+  // No current lines (preseason, or an archive pool without statSource): the full bar.
+  if (!teamGames) return MIN_GP.Regular;
+  return Math.max(1, Math.min(MIN_GP.Regular, Math.ceil(teamGames / 2)));
+}
+
 function windowOf(p: PoolPlayer, basis: ValueBasis) {
   if (basis === "30D") return p.last30;
   if (basis === "15D") return p.last15;
@@ -252,7 +277,7 @@ export function percentileRows(
   basis: ValueBasis,
   inBlend = false
 ): PercentileRow[] {
-  const min = MIN_GP[basis];
+  const min = minGamesFor(pool, basis);
   const qualified = pool.filter((x) => gamesFor(x, basis) >= min);
   // If the qualifier leaves too few to rank against, it is doing more harm than good —
   // an export mid-season, or a window nobody has played enough games in.

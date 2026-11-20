@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { PoolPlayer } from "@/lib/league";
-import { CAT_AXES, MIN_GP, gamesFor, makeZVector } from "@/lib/percentiles";
+import { CAT_AXES, gamesFor, makeZVector, minGamesFor } from "@/lib/percentiles";
 import { lineOf } from "@/lib/playerShape";
 import PlayerLink from "./PlayerLink";
 
@@ -48,8 +48,9 @@ export default function SimilarPlayers({
   const rows = useMemo(() => {
     const vec = makeZVector(pool);
     const mine = vec(lineOf(player));
+    const min = minGamesFor(pool, "Regular");
     return pool
-      .filter((p) => p.name !== player.name && gamesFor(p, "Regular") >= MIN_GP.Regular)
+      .filter((p) => p.name !== player.name && gamesFor(p, "Regular") >= min)
       .map((p) => ({ p, d: distance(mine, vec(lineOf(p))) }))
       .sort((a, b) => a.d - b.d)
       .slice(0, N);
