@@ -32,8 +32,11 @@ export interface RecapMatchup {
   /** Categories won by home / away, and ties. */
   score: { home: number; away: number; tie: number };
   winnerId: number | null;
-  /** Pre-week P(win) for each side, 0-1; null when no forecast was logged for the week. */
-  pre: { home: number; away: number } | null;
+  /**
+   * Pre-week P(win) for each side, 0-1, and expected categories won (xCats, the sum of
+   * the per-category win chances); null when no forecast was logged for the week.
+   */
+  pre: { home: number; away: number; xHome: number; xAway: number } | null;
   /** The side the forecast had under 50% won. */
   upset: boolean;
 }
@@ -114,7 +117,9 @@ export function buildWeekRecap(
     const score = { home: a.win, away: a.loss, tie: a.tie };
     const winnerId = score.home > score.away ? g.homeId : score.away > score.home ? g.awayId : null;
     const f = forecastFor(preLog, league, period, g.homeId);
-    const pre = f ? { home: f.win, away: f.loss } : null;
+    const pre = f
+      ? { home: f.win, away: f.loss, xHome: f.expected, xAway: f.categoryProbs.length - f.expected }
+      : null;
     const upset =
       !!pre && winnerId != null && (winnerId === g.homeId ? pre.home : pre.away) < 0.5;
     return { homeId: g.homeId, awayId: g.awayId, home: g.home, away: g.away, score, winnerId, pre, upset };

@@ -135,13 +135,8 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
       <nav className="nav" aria-label="Main">
         <div className="nav-inner">
           {/*
-            The brand lockup, reassembled from its parts: the ball, then "FBBSim" with the
-            tagline stacked under it — the artwork's own arrangement.
-
-            The TAGLINE IS TEXT, not part of the image. In the artwork it is 6% of the
-            lockup's height, so any scale that fits a 62px header renders it about 2px tall
-            — a grey smudge. As text its size is independent of the mark's, so it can be
-            set at a readable 12px without the ball having to grow to match.
+            The brand lockup: the ball, then the "FBBSim" wordmark. No tagline under it
+            (owner, 2026-11-21).
 
             Plain <img> rather than next/image: these are fixed-size static assets, and
             routing them through the optimizer would spend Vercel image quota to serve the
@@ -168,7 +163,6 @@ export default function Nav({ seasonOver = false }: { seasonOver?: boolean }) {
                 width={577}
                 height={126}
               />
-              <span className="nav-tagline">Fantasy Basketball Simulator</span>
             </span>
           </Link>
           <div className="nav-links">

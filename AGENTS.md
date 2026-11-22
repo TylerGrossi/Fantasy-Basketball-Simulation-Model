@@ -104,6 +104,48 @@ keeps it (it is the side's, not a player's). SEASON_TEAM_SIGMA was re-measured o
 (0.456 -> 0.320). Re-scoring the 12 logged forecasts: Brier 0.235 -> 0.221, log loss 0.715 ->
 0.637 (coin flip 0.693); week 3's 96% upset reads 85%.
 
+**WEEK CORRELATION (2026-11-21) - the week term moves the categories TOGETHER.** Even with
+the week term, pre-week matchups read 96-98% and lost: each category was calibrated, but the
+copula drew the week term's share of every margin with CATEGORY_CORRELATION, which is measured
+GIVEN the games played (REB~AST 0.18). The week term is mostly games - a short-handed week
+costs REB, AST, PTS and the rest at once (2026-27 team-week misses: REB~AST 0.53, mean 0.33).
+`WEEK_CORRELATION` (config.py, section 4b of the measure script: a one-factor fit, loadings
+0.93-0.99 for most counting stats, BLK 0.45, TW 0.78; ratio rows identity) is exported as
+`weekCorrelation`, and `correlatedWins` draws each margin as a*Zbase + b*Zweek with
+b = `weekShare` (the week term's share of the margin's spread: 0 for ratios, 0 once the week
+is played). With no week term the draw is byte-identical to before. lib/seasonOdds.ts does the
+same per (sim, slot) (a second draw array: engine build ~335 -> ~620 ms at 4,000 sims).
+Out of sample (measured on 2025-26, scored on 2026-27 weeks 1-4 with the week term added):
+log loss 1.000 as logged -> 0.776 week term -> 0.744 with this; Brier 0.309 -> 0.268. Week 4's
+98.3% reads 84%, week 3's 96.0% 83%.
+
+**THE MINUTES PROJECTION (owner, 2026-11-21) replaces 0.7 x last-30 + 0.3 x season** in
+every projection (engine/data.py `blend_season_last30`, all callers unchanged): per-minute
+production with a 42-day half-life x projected minutes (0.2 last-7-day + 0.2 last-15-day +
+0.6 season MPG), applied as the season line x per-stat rate ratio x minutes ratio so the
+early-season prior blend stays. ESPN's season/last-30/15/7 splits all carry MIN; the
+decayed rate is built from their differences. Backtest on 2025-26 (same player-weeks for
+every model, % lower squared miss than season-to-date): weeks 4-19 70/30 -2.84, this +1.05;
+fantasy playoffs 70/30 +14.91, this +14.07 (a season-rate-only version scored +2.50 there -
+late-season recent production matters, so the rate decays). Injured teammates' minutes
+were tested and NOT redistributed (no weekly gain even with perfect knowledge). The
+measure script emulates this projection; every measured constant was re-measured on it
+(projection error down for most stats, SEASON_TEAM_SIGMA 0.320 -> 0.330).
+
+**HISTORY IS REGRADED (owner, 2026-11-21).** lib/predictions.ts now scores every logged entry
+with the CURRENT model (correlations, shot correlation, week correlation) and adds the week
+term to entries logged before it existed - the owner wanted old weeks on the new maths. What
+stays fixed is each entry's MOMENTS (rosters, averages, games, written before the week), so
+a regraded number is still no hindsight. The constants stored with entries remain as an
+audit trail but are not read. Logged weeks 1-4 regraded: log loss 0.753, Brier 0.271.
+
+**WHERE THE 8-17% WENT (2026-11-21).** Every team's actual week ran 8-17% below its pre-week
+mean in weeks 1-4 (actual/logged PTS 0.889). Split player by player against gamelogs.json:
+GAMES 0.948 (ACTIVE players played 93% of projected counted games, DAY_TO_DAY 68%, OUT 55%)
+and PER-GAME RATE 0.957 - but the rate gap was the early-season prior running hot and faded
+by week (0.905, 0.929, 0.984, 1.006); the games gap did not (0.886-0.916 every week). Fixed by
+Will They Play for every player (below).
+
 **ONE SEASON ENGINE (2026-11-09) - every season number comes from `lib/seasonOdds.ts`.**
 The Playoffs page, Schedule's future weeks, League/Team odds, Streamers' and Recent Moves'
 playoff/title change all run it. Before, a Python Monte Carlo (spread each team-week by
@@ -429,7 +471,21 @@ cats / win numbers agree with the rest of the page. Optimize = greedy best move,
 re-pick pass; it keeps any moves already entered, and it finds chains (stream A Thu, drop
 A Sun for B). Verified: the empty plan reproduces the baseline exactly, and the 1-move
 optimum matches brute force over every FA x day x drop on the real export, both
-objectives. Today / roster lock / plannable days come from `lib/useMoveWindow.ts`, which
+objectives. Each move has an IMPACT panel (owner, 2026-11-21, `MoveImpact`): games each
+player gains/loses, a "Helps / Hurts" line (win-chance points per category), and a 3-column
+table of ONLY the categories that move (add vs drop per game, win chance before -> after);
+unchanged ones collapse to one line. No sideways scroll on a phone (checked at 390px).
+LONG TERM / MUST WIN (owner, 2026-11-21; `PlanHorizon`, long term the default, stored with
+the plan): Optimize scores this week only, so with a day left it would drop a star with no
+games remaining (it built Sengun 6.5 -> John Collins -4.7). Long term lets it drop a roster
+player only for a pickup at least as good LONG TERM (lib/longTermValue.ts: this season's
+games plus last season's at half weight and the one before at a quarter, scored on the
+Player Value scale - Herro 1.79 -> 5.77, Podziemski 3.12 -> 1.35, Embiid 4.43 -> 9.19), plus
+its own pickups. Computed on the SERVER in app/scoreboard/page.tsx for your roster and the
+free agents only, because the page's trimmed league has no player pool. (First tries:
+"best free agent + 1.5" let Embiid go; "+ 0" still traded Herro for Podziemski on season
+value.) Must win: anyone not protected. Manual moves are never restricted.
+Today / roster lock / plannable days come from `lib/useMoveWindow.ts`, which
 Streamers also uses — keep it the one place that rule lives. The plan persists in
 localStorage (`fbb.planner.v1`, one entry for the current season:week:team). IR: a player
 in ESPN's IR slot today (live `lineupSlotId` 13) is inactive until an `activate` move,
@@ -525,16 +581,29 @@ playing each game left this week, from two trained models (official NBA injury r
 ESPN box scores, 2018-26). Everything - data, training, results, retraining, traps - is in
 [scripts/injury/README.md](scripts/injury/README.md). Scored in CI by `scripts/injury/score.py`
 (a `continue-on-error` step in refresh-data.yml) into `public/data/availability.json`.
-IN THE PROJECTIONS (option b, owner 2026-11-03): only players WITH DOUBT (a status, or a
-game under 85%) change - loadLeague attaches `league.availability` for them, `useLiveSides`
+IN THE PROJECTIONS - EVERY PLAYER since 2026-11-21 (owner; it was players WITH DOUBT only,
+option b of 2026-11-03, so healthy players projected every game). Week 4 test: healthy
+players played 93% of projected counted games and the model said 92% (doubtful 81% / 81%);
+counted games 350 projected / 313 played / 307 with every chance (per-team miss 4.6 -> 3.5;
+with bench fill on crowded days 2.5). BENCH FILL (owner, 2026-11-21) is built in
+lib/lineupCount.ts `benchFillDay`: per crowded day still to set, 200 seeded draws of who
+plays (Will They Play), re-seated in the same priority (the day's starters, then the bench by
+value, positions checked); a benched player's share of draws where he is seated is added as
+availabilityMoments games and reported as `PlayerRow.benchFill` (in the moments, NOT in
+`gamesLeft`). Only the recount's sides carry it (gauge, observerSides -> season engine's this
+week and the logs). ~20 ms per crowded day per side. The matchup tiles show Games left
+(You/Opp) and xGames (You/Opp; WTP chances + bench fill). Live, rest-of-week totals drop ~5%. Not re-measured yet:
+WEEK_UNCERTAINTY still holds some of this spread (slight double count, errs underconfident),
+and the season engine's FUTURE weeks still play healthy players every game.
+loadLeague attaches `league.availability` (`availabilityRows`), `useLiveSides`
 runs `applyAvailability` (their games become likely: `availabilityMoments`, expected games
 + the variance of not knowing whether he plays), and every swap (Streamers, Bench, planner,
-crowded days) uses `rowMoments`, which subtracts exactly what was added. Healthy players are
-byte-identical to before. THE LOGS TOO (2026-11-09): the pre-week forecast and winprob-log
+crowded days) uses `rowMoments`, which subtracts exactly what was added. THE LOGS TOO (2026-11-09): the pre-week forecast and winprob-log
 readings record the gauge's own sides (`seasonData.currentWeekSides`, written by the Node
 season step after Will They Play is scored) plus the scoring constants they used
-(variance, projectionError, shotCorrelation, categoryCorrelation), and lib/predictions.ts
-scores each entry with ITS constants (older entries: shots independent, as recorded). Week
+(variance, projectionError, shotCorrelation, categoryCorrelation, weekCorrelation) as an audit
+trail; since 2026-11-21 lib/predictions.ts scores every entry with the CURRENT model instead
+(see HISTORY IS REGRADED above). Week
 4's forecast had read 49.1% against a first live 84.6%; re-recorded this way it equals the
 gauge. Everything reads availability through `lib/leagueAttach.ts normaliseLeague`, the
 pages and the Node step alike.

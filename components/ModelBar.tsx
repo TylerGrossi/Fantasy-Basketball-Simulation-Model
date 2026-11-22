@@ -183,7 +183,6 @@ export default function ModelBar({
         aria-expanded={open}
         title="Model in use — click to choose one"
       >
-        <span className="modelbar-dot" />
         {shown ? label(shown) : "auto"}
         {preferred && <span className="modelbar-pin">pinned</span>}
       </button>

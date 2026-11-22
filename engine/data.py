@@ -16,6 +16,7 @@ from config import (
     MAX_PLAYERS_PER_DAY,
     MAX_ROSTER_SIZE,
     NUMERIC_COLS,
+    SEASON_OPENING_DATE,
     STATUS_DISPLAY,
     TEAM_FIXES,
     NBA_TEAM_MAP,
@@ -858,8 +859,114 @@ def build_stat_df(roster, period_key, label, fantasy_team_name, year):
             # The games behind the line: GP, plus last season's for a blend. What a Min GP
             # filter or a percentile's qualifying bar tests (lib/percentiles.ts gamesFor).
             "SampleGP": sample_gp,
+            # MINUTES (2026-11-21), season frame only: this season's minutes per game and
+            # the last-7 / last-15-day windows', for the minutes projection in
+            # blend_season_last30. Not in NUMERIC_COLS, so nothing displayed reads them.
+            **(_minutes_columns(p, period_key) if use_prior else {}),
         })
     return pd.DataFrame(rows)
+
+
+_RATE_STATS = ("FGM", "FGA", "FTM", "FTA", "3PM", "3PA", "REB", "AST", "STL", "BLK", "TO",
+               "PTS", "DD", "TW")
+
+
+def _split_totals(p, key):
+    """One ESPN split's totals (GP, MIN and every rate stat), zeros when absent."""
+    tot = ((p.stats.get(key, {}) or {}).get("total", {}) or {})
+    return {k: safe_num(tot.get(k, 0)) for k in ("GP", "MIN") + _RATE_STATS}
+
+
+def _minutes_columns(p, period_key):
+    """
+    Season frame only: minutes per game (season, last 7 and last 15 days) and, per stat,
+    RATE_<stat> = his DECAYED per-minute rate over his SEASON per-minute rate.
+
+    The decayed rate weights each game 0.5^(days ago / RATE_HALF_LIFE_DAYS). ESPN only gives
+    cumulative splits, so the season is cut into four stretches - the last 7 days, 7-15,
+    15-30, and before - each weighted at its midpoint's age (the oldest stretch's midpoint
+    from SEASON_OPENING_DATE). Early in the season every weight is ~1 and the ratio ~1.
+    """
+    year = str(period_key)[: -len("_total")]
+    T = {k: _split_totals(p, f"{year}_{k}") for k in ("total", "last_30", "last_15", "last_7")}
+    sea = T["total"]
+    out = {
+        "MPG": sea["MIN"] / sea["GP"] if sea["GP"] > 0 else 0.0,
+        "GP_SEASON": sea["GP"],
+        "MPG_L7": T["last_7"]["MIN"] / T["last_7"]["GP"] if T["last_7"]["GP"] > 0 else 0.0,
+        "GP_L7": T["last_7"]["GP"],
+        "MPG_L15": T["last_15"]["MIN"] / T["last_15"]["GP"] if T["last_15"]["GP"] > 0 else 0.0,
+        "GP_L15": T["last_15"]["GP"],
+    }
+    days = max(30.0, float((date.today() - SEASON_OPENING_DATE).days))
+    seg = [
+        (T["last_7"], 3.5),
+        ({k: T["last_15"][k] - T["last_7"][k] for k in T["total"]}, 11.0),
+        ({k: T["last_30"][k] - T["last_15"][k] for k in T["total"]}, 22.5),
+        ({k: sea[k] - T["last_30"][k] for k in T["total"]}, (30.0 + days) / 2),
+    ]
+    wts = [(st, 0.5 ** (age / RATE_HALF_LIFE_DAYS)) for st, age in seg]
+    dmin = sum(w * max(0.0, st["MIN"]) for st, w in wts)
+    lo, hi = RATE_FACTOR_BOUNDS
+    for k in _RATE_STATS:
+        if sea["MIN"] > 0 and dmin > 0 and sea[k] > 0:
+            decayed = sum(w * max(0.0, st[k]) for st, w in wts) / dmin
+            out[f"RATE_{k}"] = min(hi, max(lo, decayed / (sea[k] / sea["MIN"])))
+        else:
+            out[f"RATE_{k}"] = 1.0
+    return out
+
+
+# THE MINUTES PROJECTION (owner, 2026-11-21) - replaces 0.7 x last-30 + 0.3 x season.
+# A player's line = his per-minute production x projected minutes:
+#   minutes  = 0.2 x last-7-day MPG + 0.2 x last-15-day MPG + 0.6 x season MPG (a window
+#              with no games falls back to the season);
+#   rate     = per-minute production with each game weighted 0.5^(days ago / 42) - a
+#              six-week half-life (see _minutes_columns for how ESPN's splits give it).
+# Applied to the season line as x (rate / season rate) per stat x (minutes / season MPG),
+# so the early-season prior blend in build_stat_df is kept; percentages are recomputed
+# from the scaled makes and attempts.
+# Backtest, 2025-26 (fantasy archive, next week's line from earlier weeks only; the same
+# player-weeks for every model), % lower squared miss than season-to-date, averaged over
+# PTS REB AST 3PM STL BLK TO FGA FTA DD:
+#                                     weeks 4-19   fantasy playoffs (wk 20+)
+#     0.7 x last-30 + 0.3 x season      -2.84         +14.91
+#     season rate x minutes mix         +1.19          +2.50
+#     6-week rate x minutes mix (this)  +1.05         +14.07
+# In the regular season recent production is mostly noise and recent MINUTES carry the
+# signal; by March the season average is months stale and recent production matters too.
+# The decayed rate gets both. Redistributing injured teammates' minutes was tested and NOT
+# added: it fixes a ~1.4 min/game bias in the game a regular first sits, but even knowing
+# who sat each week it did not improve rostered players' weekly lines.
+MINUTES_PROJECTION = True
+MINUTES_MIX = (0.2, 0.2, 0.6)        # last 7 days, last 15 days, season
+MINUTES_FACTOR_BOUNDS = (0.5, 1.5)   # a role change, not a typo in a split
+RATE_HALF_LIFE_DAYS = 42.0
+RATE_FACTOR_BOUNDS = (0.5, 2.0)
+
+
+def _rate_adj(df, col):
+    """The decayed-rate adjustment for one stat column (1 where the frame has none)."""
+    c = f"RATE_{col}"
+    return df[c].fillna(1.0) if c in df.columns else 1.0
+
+
+def _recompute_pcts(df):
+    """FG% / FT% / 3P% from the projected makes and attempts."""
+    for pct, (made, att) in {"FG%": ("FGM", "FGA"), "FT%": ("FTM", "FTA"), "3P%": ("3PM", "3PA")}.items():
+        a = df[att]
+        df[pct] = (df[made] / a.where(a > 0, 1.0)).where(a > 0, 0.0)
+
+
+def _minutes_factor(df):
+    """Projected / season minutes per game, per row; 1 where the season has no minutes."""
+    mpg = df["MPG"].fillna(0)
+    m7 = df["MPG_L7"].where(df["GP_L7"].fillna(0) > 0, mpg)
+    m15 = df["MPG_L15"].where(df["GP_L15"].fillna(0) > 0, mpg)
+    a, b, c = MINUTES_MIX
+    proj = a * m7 + b * m15 + c * mpg
+    lo, hi = MINUTES_FACTOR_BOUNDS
+    return (proj / mpg.where(mpg > 0, 1.0)).where(mpg > 0, 1.0).clip(lo, hi)
 
 
 def blend_season_last30(season_df, last30_df, blend_weight, merge_on=None):
@@ -876,10 +983,30 @@ def blend_season_last30(season_df, last30_df, blend_weight, merge_on=None):
         for col in NUMERIC_COLS:
             if col not in out.columns:
                 out[col] = 0.0
+        if MINUTES_PROJECTION and "MPG" in out.columns:
+            factor = _minutes_factor(out)
+            for col in NUMERIC_COLS:
+                if not col.endswith("%"):
+                    out[col] = out[col] * factor * _rate_adj(out, col)
+            _recompute_pcts(out)
+            out["MinutesFactor"] = factor
         return out
     merged = season_df.merge(
         last30_df, on=merge_on, how="left", suffixes=("_season", "_30")
     )
+    if MINUTES_PROJECTION and "MPG" in merged.columns:
+        # The minutes projection (see MINUTES_PROJECTION): the last-30 frame is merged
+        # only for its Team / Games Left; its production is not used.
+        factor = _minutes_factor(merged)
+        for col in NUMERIC_COLS:
+            if col.endswith("%"):
+                continue
+            c_sea = f"{col}_season"
+            sea = merged[c_sea].fillna(0) if c_sea in merged.columns else merged.get(col, 0)
+            merged[col] = sea * factor * _rate_adj(merged, col)
+        _recompute_pcts(merged)
+        merged["MinutesFactor"] = factor
+        return _finish_blend(merged)
     has_last30 = merged["PTS_30"].notna()
     # The last-30 weight GROWS WITH ITS SAMPLE (2026-10-20): full `blend_weight` from
     # BLEND_FULL_GAMES games in the window, proportionally less before. A flat 70% let
@@ -898,6 +1025,11 @@ def blend_season_last30(season_df, last30_df, blend_weight, merge_on=None):
         t30 = merged[c30].fillna(0) if c30 in merged.columns else 0
         blended = t30 * weight + sea * (1 - weight)
         merged[col] = blended.where(has_last30, sea)
+    return _finish_blend(merged)
+
+
+def _finish_blend(merged):
+    """Team / Games Left from the window frame where present, and the suffixed columns dropped."""
     for base in ("Team", "Games Left"):
         sb = f"{base}_season"
         st = f"{base}_30"

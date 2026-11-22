@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import SectionIndex, { type IndexStat } from "@/components/SectionIndex";
 import { careerPlayers, careerTotals, headToHead, managerTable } from "@/lib/career";
-import { allPlayStarted, firstWeekFinal } from "@/lib/league";
+import { allPlayStarted, firstWeekFinal, nameHasSeason } from "@/lib/league";
 import { loadCareer, loadLeague, myTeam } from "@/lib/loadLeague";
 import { INDEXED_SECTIONS, navFor, type SectionKey } from "@/lib/nav";
 
@@ -74,7 +74,7 @@ function captionFor(key: SectionKey, league: League): string {
   // "More" spans every league you have played in, so the current one's name would be
   // wrong on five of its seven rows.
   if (key === "more") return "Agent, settings and your career history";
-  return `${name} · ${year}`;
+  return nameHasSeason(name, league.season) ? name : `${name} · ${year}`;
 }
 
 /* -------------------------------------------------------------------------- */

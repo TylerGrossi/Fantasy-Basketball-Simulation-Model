@@ -582,7 +582,6 @@ export default function DraftBoardView({ data }: { data: DraftData }) {
                 onClick={() => setLiveOn(!liveOn)}
                 title={liveErr ? `ESPN feed error: ${liveErr}. Click to turn sync ${liveOn ? "off" : "on"}.` : `Live ESPN sync is ${liveOn ? "on" : "off"}. Click to toggle.`}
               >
-                <span className="dg-dot" aria-hidden="true" />
                 {liveText}
               </button>
             </>

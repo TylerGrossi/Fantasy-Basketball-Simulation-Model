@@ -6,6 +6,7 @@ import { LiveRosterView, LiveWeekSchedule } from "@/components/LiveRosters";
 import Scoreboard from "@/components/Scoreboard";
 import StreamersView from "@/components/StreamersView";
 import WeekPlanner from "@/components/WeekPlanner";
+import { longTermValues } from "@/lib/longTermValue";
 import { forecastFor, winProbHistory } from "@/lib/predictions";
 import ScoreboardTabs from "@/components/ScoreboardTabs";
 import SectionHash from "@/components/SectionHash";
@@ -167,6 +168,14 @@ export default async function Page({
    * One trimmed league (with free agents, for Streamers) is handed to all of them.
    */
   const deckLeague = trimLeague(league, { matchupTeamId: me.id, freeAgents: true });
+  // The planner's Long term drops: long-term values from the FULL pool (deckLeague has
+  // none), sent for just your roster and the free agents.
+  const allLongTerm = longTermValues(league);
+  const plannerLongTerm = Object.fromEntries(
+    [...(r.isHome ? r.matchup.home : r.matchup.away).players.map((p) => p.name), ...league.freeAgents.map((f) => f.name)]
+      .filter((n) => allLongTerm.has(n))
+      .map((n) => [n, Math.round(allLongTerm.get(n)! * 100) / 100])
+  );
   // The Streamers table's playoff / title odds: the season engine's inputs (lib/seasonOdds.ts),
   // compact — only your roster's and the free agents' lines, not the whole pool.
   const mySide = r.isHome ? r.matchup.home : r.matchup.away;
@@ -322,6 +331,7 @@ export default async function Page({
           isHome={r.isHome}
           teamId={me.id}
           acq={youAcq}
+          longTermValues={plannerLongTerm}
         />
       </section>
 

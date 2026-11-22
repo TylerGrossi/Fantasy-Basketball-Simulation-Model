@@ -60,6 +60,7 @@ export default async function Page() {
           projectionError: league.projectionError,
           categoryCorrelation: league.categoryCorrelation,
           shotCorrelation: league.shotCorrelation,
+          weekCorrelation: league.weekCorrelation,
           teamSigma: league.teamSigma,
         },
       }

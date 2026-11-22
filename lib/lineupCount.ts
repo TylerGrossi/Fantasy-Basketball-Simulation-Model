@@ -22,8 +22,8 @@
  */
 
 import type { LeagueData, PlayerRow, TeamSide } from "./league";
-import { playerRank, rowMoments } from "./league";
-import { addMoments, subtractMoments } from "./probability";
+import { availabilityMoments, playerRank, rowMoments } from "./league";
+import { addMoments, subtractMoments, type Moments } from "./probability";
 import { rosterDays } from "./streamers";
 import type { CrowdedDay } from "./crowdedDays";
 import { legalStarters } from "./seatRule";
@@ -38,6 +38,71 @@ export interface Window {
 
 const rank = (league: LeagueData, p: PlayerRow) => playerRank(p, league.stats.indexOf("PTS"));
 
+/**
+ * BENCH FILL (owner, 2026-11-21). A crowded day's starters are chosen as if everyone plays,
+ * and since Will They Play covers every player each starter counts only his chance of
+ * playing - so a benched player whose game would be used when a starter sits counted 0.
+ * A manager swaps him in. Here, per crowded day, who plays is drawn from Will They Play
+ * (BENCH_DRAWS fixed, seeded draws), the lineup is re-seated in the SAME priority (the day's
+ * starters first, then the bench by value, positions checked), and each benched player's
+ * share of draws in which he is seated is his chance of a counted game that day.
+ * Week 4 of 2026-27: per-team counted-games miss 3.5 -> 2.5 with this (positions ignored).
+ */
+const BENCH_DRAWS = 200; // ~3.5pp standard error per player-day; ~20 ms per crowded day
+
+/** His chance of playing on `date` (Will They Play), 1 with no row for that date. */
+function playChance(league: LeagueData, name: string, date: string): number {
+  const row = league.availability?.[name]?.find(([d]) => d === date);
+  return row ? Math.min(1, Math.max(0, row[1])) : 1;
+}
+
+/** Benched players' chance of a counted game on one day: name -> P(seated and plays). */
+function benchFillDay(
+  league: LeagueData,
+  win: Window,
+  date: string,
+  starters: PlayerRow[],
+  bench: PlayerRow[]
+): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!bench.length || !starters.length) return out;
+  const pS = starters.map((p) => playChance(league, p.name, date));
+  const pB = bench.map((p) => playChance(league, p.name, date));
+  if (pS.every((p) => p >= 1)) return out; // every starter plays: no spot ever opens
+  // Starters keep priority over the bench (huge rank), each group in value order.
+  const prio = new Map<string, number>([
+    ...starters.map((p): [string, number] => [p.name, 1e6 + rank(league, p)]),
+    ...bench.map((p): [string, number] => [p.name, rank(league, p)]),
+  ]);
+  // mulberry32 seeded by the date: identical in every browser and on every render.
+  let seed = 0x6e11;
+  for (let i = 0; i < date.length; i++) seed = (Math.imul(seed, 31) + date.charCodeAt(i)) | 0;
+  const rand = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const hits = new Array(bench.length).fill(0);
+  for (let d = 0; d < BENCH_DRAWS; d++) {
+    const sPlay = pS.map((p) => rand() < p);
+    const bPlay = pB.map((p) => rand() < p);
+    if (sPlay.every(Boolean)) continue; // nobody sat: the starters fill the day as set
+    const ranked = [
+      ...starters.filter((_, i) => sPlay[i]),
+      ...bench.filter((_, i) => bPlay[i]),
+    ].map((p) => ({ name: p.name, value: prio.get(p.name)! }));
+    const seated = legalStarters(ranked, win.layout, league.eligibility);
+    bench.forEach((p, i) => {
+      if (bPlay[i] && seated.has(p.name)) hits[i]++;
+    });
+  }
+  bench.forEach((p, i) => {
+    if (hits[i]) out.set(p.name, hits[i] / BENCH_DRAWS);
+  });
+  return out;
+}
+
 /** Recount one side's remaining starts with `startersFor(date, playing)`. */
 function recount(
   league: LeagueData,
@@ -49,6 +114,7 @@ function recount(
   const rows = side.players.filter((p) => !ir.has(p.name));
   const days = new Map(rows.map((p) => [p.name, rosterDays(p, win)]));
   const delta = new Map<string, number>();
+  const fill = new Map<string, number[]>(); // benched player -> chance of a counted game, per day
   for (const d of win.dates) {
     const playing = rows.filter((p) => days.get(p.name)!.has(d));
     if (!playing.length) continue;
@@ -61,6 +127,13 @@ function recount(
       const dd = (now.has(p.name) ? 1 : 0) - (old.has(p.name) ? 1 : 0);
       if (dd) delta.set(p.name, (delta.get(p.name) ?? 0) + dd);
     }
+    if (league.availability) {
+      const benched = playing.filter((p) => !now.has(p.name)).sort((a, b) => rank(league, b) - rank(league, a));
+      const starting = playing.filter((p) => now.has(p.name));
+      for (const [name, q] of benchFillDay(league, win, d, starting, benched)) {
+        fill.set(name, [...(fill.get(name) ?? []), q]);
+      }
+    }
   }
   // A player in an IR slot today scores nothing until he is activated (an activation is
   // a planner move) - the planner and crowded days always counted it that way; the gauge
@@ -68,14 +141,24 @@ function recount(
   for (const p of side.players) {
     if (ir.has(p.name) && p.gamesLeft > 0) delta.set(p.name, -p.gamesLeft);
   }
-  if (!delta.size) return side;
-  let mine = { mu: side.projMu, var: side.projVar };
+  if (!delta.size && !fill.size) return side;
+  let mine: Moments = { mu: side.projMu, var: side.projVar };
   const players = side.players.map((p) => {
     const dd = delta.get(p.name);
-    if (!dd) return p;
-    const to = Math.max(0, p.gamesLeft + dd);
-    mine = addMoments(subtractMoments(mine, rowMoments(league, p, p.gamesLeft)), rowMoments(league, p, to));
-    return { ...p, gamesLeft: to };
+    const q = fill.get(p.name);
+    if (!dd && !q) return p;
+    let row = p;
+    if (dd) {
+      const to = Math.max(0, p.gamesLeft + dd);
+      mine = addMoments(subtractMoments(mine, rowMoments(league, p, p.gamesLeft)), rowMoments(league, p, to));
+      row = { ...row, gamesLeft: to };
+    }
+    if (q) {
+      // Each fill day is a game he plays with chance q: the same moments as a doubtful game.
+      mine = addMoments(mine, availabilityMoments(p.avg, q, league.variance, league.projectionError));
+      row = { ...row, benchFill: q.reduce((a, b) => a + b, 0) };
+    }
+    return row;
   });
   return { ...side, players, projMu: mine.mu, projVar: mine.var };
 }

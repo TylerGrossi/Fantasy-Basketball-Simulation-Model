@@ -33,14 +33,10 @@ export default function LiveBadge({
         : state === "error"
           ? `Live update unavailable · showing data from ${new Date(generatedAt).toLocaleString()}`
           : "Loading live totals…";
-  const dot = state === "live" ? "" : state === "error" ? "error" : "stale";
   return (
     /* Spacing via a class, not an inline style: inside `.sb-panel` the badge is a band
        of the scoreboard and needs the panel's own padding, and an inline margin would
        win against that rule no matter how specific it was. */
-    <p className="live live-badge">
-      <span className={`live-dot ${dot}`} />
-      {label}
-    </p>
+    <p className="live live-badge">{label}</p>
   );
 }

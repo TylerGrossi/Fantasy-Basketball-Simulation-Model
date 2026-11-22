@@ -39,6 +39,7 @@ import {
   addMoments,
   categoryProbabilities,
   choleskyFactor,
+  weekShare,
   normalQuantile,
   type Moments,
   type StatVector,
@@ -48,7 +49,7 @@ import {
  * Measured season-long team-strength spread (probit units per category) - mirrors
  * engine/config.py SEASON_TEAM_SIGMA for an export that predates `teamSigma`.
  */
-export const DEFAULT_TEAM_SIGMA = 0.32;
+export const DEFAULT_TEAM_SIGMA = 0.33;
 
 export interface SeasonPlayer {
   name: string;
@@ -98,7 +99,7 @@ export interface SeasonInputs {
 
 export type SeasonMeta = Pick<
   LeagueData,
-  "stats" | "categories" | "lowerIsBetter" | "variance" | "projectionError" | "categoryCorrelation" | "shotCorrelation" | "teamSigma" | "weekUncertainty"
+  "stats" | "categories" | "lowerIsBetter" | "variance" | "projectionError" | "categoryCorrelation" | "shotCorrelation" | "teamSigma" | "weekUncertainty" | "weekCorrelation"
 >;
 
 /** A roster change for one team: players out, players in (with their weeks' games). */
@@ -227,6 +228,11 @@ export function makeSeasonEngine(meta: SeasonMeta, inputs: SeasonInputs, sims = 
   const corr = meta.categoryCorrelation && meta.categoryCorrelation.length === C ? meta.categoryCorrelation : null;
   const L = corr ? choleskyFactor(corr) : null;
   const Z = new Float32Array(sims * slots * C);
+  // The week term's own draws (2026-11-21, lib/probability.ts correlatedWins): a future
+  // week's games shock moves every counting category together. Absent matrix: none.
+  const wcorr = corr && meta.weekCorrelation && meta.weekCorrelation.length === C ? meta.weekCorrelation : null;
+  const Lw = wcorr ? choleskyFactor(wcorr) : null;
+  const Zw = Lw ? new Float32Array(sims * slots * C) : null;
   const shift = new Float64Array(sims * n);
   {
     const e = new Float64Array(C);
@@ -242,6 +248,15 @@ export function makeSeasonEngine(meta: SeasonMeta, inputs: SeasonInputs, sims = 
           if (L) for (let j = 0; j <= i; j++) z += L[i][j] * e[j];
           else z = e[i];
           Z[base + i] = z;
+        }
+        if (Lw && Zw) {
+          const rw = rng(hash(s, k + 1 + 0x40000));
+          for (let c = 0; c < C; c++) e[c] = gaussFrom(rw);
+          for (let i = 0; i < C; i++) {
+            let z = 0;
+            for (let j = 0; j <= i; j++) z += Lw[i][j] * e[j];
+            Zw[base + i] = z;
+          }
         }
       }
     }
@@ -276,13 +291,20 @@ export function makeSeasonEngine(meta: SeasonMeta, inputs: SeasonInputs, sims = 
    * orientation as lib/probability.ts correlatedWins (the correlation is of A-minus-B
    * margins; a lower-is-better category flips the side).
    */
-  const thresholds = (a: Moments, b: Moments) =>
-    Float64Array.from(categoryProbabilities(meta, a, b).map((p) => normalQuantile(Math.min(1 - 1e-9, Math.max(1e-9, p)))));
+  // Packed [q_0..q_C-1, b_0..b_C-1]: b = the week term's share of each margin's spread
+  // (weekShare), so a draw is a*Z + b*Zw exactly as the gauge's copula.
+  const thresholds = (a: Moments, b: Moments) => {
+    const out = new Float64Array(2 * C);
+    categoryProbabilities(meta, a, b).forEach((p, c) => (out[c] = normalQuantile(Math.min(1 - 1e-9, Math.max(1e-9, p)))));
+    if (Zw) weekShare(meta, a, b).forEach((w, c) => (out[C + c] = w));
+    return out;
+  };
   const play = (q: Float64Array, s: number, slot: number, d: number) => {
     const base = (s * slots + slot) * C;
     let won = 0;
     for (let c = 0; c < C; c++) {
-      const z = Z[base + c];
+      const w = q[C + c];
+      const z = w > 0 && Zw ? Math.sqrt(1 - w * w) * Z[base + c] + w * Zw[base + c] : Z[base + c];
       won += +((lower[c] ? z : -z) < q[c] + d);
     }
     return won;

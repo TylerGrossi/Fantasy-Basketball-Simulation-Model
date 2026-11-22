@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { loadLeague, myTeam } from "@/lib/loadLeague";
+import { nameHasSeason } from "@/lib/league";
 import {
   BroadcastIcon,
   TrophyIcon,
@@ -148,7 +149,7 @@ const DIRECTORY: Array<{
     // League Home, then the one-page Current Matchup's sections in page order.
     section: "This Week",
     items: [
-      { href: "/league", name: "Home", desc: "Standings, scores, moves and risers at a glance." },
+      { href: "/league", name: "Home", desc: "Standings, scores, moves and risers." },
       { href: "/scoreboard", name: "Scoreboard", desc: "The matchup category by category, live from ESPN." },
       { href: "/scoreboard#schedule", name: "Week Schedule", desc: "Who plays each day, and days with too many players." },
       { href: "/scoreboard#odds", name: "Win Probability", desc: "Win odds, score distribution and projections." },
@@ -214,14 +215,10 @@ export default async function Page() {
         <header className="lp-hero">
           <div className="lp-eyebrow">
             {leagueName}
-            {status && <> &middot; {status}</>} &middot; {yr}
+            {status && <> &middot; {status}</>}
+            {!nameHasSeason(leagueName, league.season) && <> &middot; {yr}</>}
           </div>
           <h1 className="lp-title">Fantasy Basketball Simulator</h1>
-          <p className="lp-sub">
-            Turning a {league.teams.length}-team ESPN head-to-head category league into a
-            probability problem: what are my odds this week, and which move improves them
-            most? Built to answer that in the time it takes to click.
-          </p>
         </header>
 
         {/*
@@ -290,8 +287,7 @@ export default async function Page() {
           </div>
           <h1 className="home-title">Fantasy Basketball Simulator</h1>
           <p className="home-sub">
-            Monte Carlo projections and season analytics for your ESPN league. You&rsquo;re
-            analyzing <strong>{me.name}</strong>.
+            <strong>{me.name}</strong>
           </p>
         </div>
         <div className="home-tiles">

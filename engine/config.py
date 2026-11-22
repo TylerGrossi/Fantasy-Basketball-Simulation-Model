@@ -158,14 +158,19 @@ CATEGORY_VARIANCE = {
 # (build_data.py player_moments, lib/league.ts playerMoments) uses it, and since
 # 2026-11-09 so does the season sim's weekly variance (simulation.py
 # _build_projected_weekly_for_team).
+# RE-MEASURED 2026-11-21 with the measure script emulating the MINUTES PROJECTION
+# (engine/data.py MINUTES_PROJECTION; was 0.7 x last-30 + 0.3 x season): the projection
+# error fell for most stats (PTS 0.09 -> 0.08, TO 0.14 -> 0.12, 3PM 0.16 -> 0.15). The
+# correlations, WEEK_UNCERTAINTY, SHOT_CORRELATION and SEASON_TEAM_SIGMA (0.320 -> 0.330)
+# below were re-measured in the same run.
 PROJECTION_ERROR = {
-    "FGM": 0.10, "FGA": 0.07,
-    "FTM": 0.13, "FTA": 0.13,
-    "3PM": 0.16, "3PA": 0.08,
+    "FGM": 0.09, "FGA": 0.06,
+    "FTM": 0.13, "FTA": 0.12,
+    "3PM": 0.15, "3PA": 0.07,
     "REB": 0.09, "AST": 0.12,
-    "STL": 0.17, "BLK": 0.21,
-    "TO": 0.14, "PTS": 0.09,
-    "DD": 0.26, "TW": 0.18
+    "STL": 0.17, "BLK": 0.22,
+    "TO": 0.12, "PTS": 0.08,
+    "DD": 0.24, "TW": 0.18
 }
 
 # Correlation of a team-week's made and attempted forecast miss, per ratio category
@@ -173,14 +178,14 @@ PROJECTION_ERROR = {
 # variance needs it: makes and attempts rise and fall together, and treating them as
 # independent (the old delta method) made an FT% range run 60%-100% when ~76-84% was
 # right, and pulled every FG%/FT%/3P% matchup toward 50/50.
-SHOT_CORRELATION = {"FG%": 0.78, "FT%": 0.93, "3P%": 0.77}
+SHOT_CORRELATION = {"FG%": 0.77, "FT%": 0.93, "3P%": 0.77}
 
 # Season-long team-strength spread, probit per category (scripts/measure_variance.mjs,
 # 2025-26, split-half fit over 12 start weeks, 2026-11-09). The season engine
 # (lib/seasonOdds.ts) shifts each team ONCE per simulated season by N(0, this): a team's
 # true level for the rest of the year is not known in November. It runs ~0.5-0.6 from
 # early-season starts and under 0.3 late (less season left to drift); one average for now.
-SEASON_TEAM_SIGMA = 0.320
+SEASON_TEAM_SIGMA = 0.330
 
 # What a PRE-WEEK projection cannot know (scripts/measure_variance.mjs, 2025-26, 170
 # team-weeks, 2026-11-09): injuries, rest, pickups, drops and returns during the week, as a
@@ -195,7 +200,7 @@ WEEK_UNCERTAINTY = {
     "FTM": 0.17, "FTA": 0.17,
     "3PM": 0.13, "3PA": 0.14,
     "REB": 0.13, "AST": 0.13,
-    "STL": 0.15, "BLK": 0.21,
+    "STL": 0.15, "BLK": 0.19,
     "TO": 0.13, "PTS": 0.14,
     "DD": 0.12, "TW": 0.14
 }
@@ -208,21 +213,48 @@ CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
 # 3PA move together, and counting them as five separate coin flips made one hot quarter
 # swing the live win probability 20+ points. lib/probability.ts draws them jointly.
 CATEGORY_CORRELATION = [
-    [ 1.00, 0.78, 0.63,-0.02, 0.25, 0.28, 0.08, 0.21, 0.11, 0.11, 0.06, 0.10, 0.07, 0.94, 0.07],  # FGM
-    [ 0.78, 1.00, 0.02,-0.00, 0.19, 0.39,-0.05, 0.30, 0.14, 0.10, 0.06, 0.10, 0.10, 0.75,-0.04],  # FGA
-    [ 0.63, 0.02, 1.00,-0.04, 0.16,-0.03, 0.19,-0.03, 0.00, 0.05, 0.01, 0.04,-0.01, 0.57, 0.17],  # FG%
-    [-0.02,-0.00,-0.04, 1.00,-0.00, 0.02,-0.02,-0.00, 0.01,-0.07, 0.02, 0.02, 0.00, 0.04,-0.01],  # FT%
-    [ 0.25, 0.19, 0.16,-0.00, 1.00, 0.42, 0.78, 0.03, 0.03,-0.00, 0.02, 0.04, 0.02, 0.29, 0.04],  # 3PM
-    [ 0.28, 0.39,-0.03, 0.02, 0.42, 1.00,-0.20, 0.07, 0.06, 0.03, 0.03, 0.03, 0.02, 0.32, 0.01],  # 3PA
-    [ 0.08,-0.05, 0.19,-0.02, 0.78,-0.20, 1.00,-0.02,-0.00,-0.02, 0.00, 0.03, 0.01, 0.11, 0.03],  # 3P%
-    [ 0.21, 0.30,-0.03,-0.00, 0.03, 0.07,-0.02, 1.00, 0.18, 0.04, 0.09, 0.15, 0.18, 0.23, 0.03],  # REB
-    [ 0.11, 0.14, 0.00, 0.01, 0.03, 0.06,-0.00, 0.18, 1.00, 0.02, 0.01, 0.10, 0.07, 0.13, 0.06],  # AST
-    [ 0.11, 0.10, 0.05,-0.07,-0.00, 0.03,-0.02, 0.04, 0.02, 1.00, 0.02, 0.09, 0.03, 0.10, 0.02],  # STL
-    [ 0.06, 0.06, 0.01, 0.02, 0.02, 0.03, 0.00, 0.09, 0.01, 0.02, 1.00, 0.02, 0.02, 0.07, 0.05],  # BLK
-    [ 0.10, 0.10, 0.04, 0.02, 0.04, 0.03, 0.03, 0.15, 0.10, 0.09, 0.02, 1.00, 0.02, 0.13,-0.03],  # TO
-    [ 0.07, 0.10,-0.01, 0.00, 0.02, 0.02, 0.01, 0.18, 0.07, 0.03, 0.02, 0.02, 1.00, 0.06, 0.06],  # DD
-    [ 0.94, 0.75, 0.57, 0.04, 0.29, 0.32, 0.11, 0.23, 0.13, 0.10, 0.07, 0.13, 0.06, 1.00, 0.06],  # PTS
-    [ 0.07,-0.04, 0.17,-0.01, 0.04, 0.01, 0.03, 0.03, 0.06, 0.02, 0.05,-0.03, 0.06, 0.06, 1.00],  # TW
+    [ 1.00, 0.79, 0.62,-0.02, 0.38, 0.31, 0.22, 0.21, 0.13, 0.11, 0.06, 0.10, 0.10, 0.94, 0.08],  # FGM
+    [ 0.79, 1.00, 0.02,-0.00, 0.29, 0.42, 0.03, 0.29, 0.16, 0.10, 0.07, 0.11, 0.14, 0.75,-0.04],  # FGA
+    [ 0.62, 0.02, 1.00,-0.04, 0.26,-0.03, 0.32,-0.02, 0.00, 0.05, 0.01, 0.03,-0.01, 0.56, 0.18],  # FG%
+    [-0.02,-0.00,-0.04, 1.00, 0.01, 0.02,-0.01,-0.00, 0.02,-0.09, 0.02, 0.02, 0.02, 0.04,-0.02],  # FT%
+    [ 0.38, 0.29, 0.26, 0.01, 1.00, 0.50, 0.78, 0.06, 0.07, 0.01, 0.04, 0.07, 0.03, 0.44, 0.05],  # 3PM
+    [ 0.31, 0.42,-0.03, 0.02, 0.50, 1.00,-0.12, 0.09, 0.09, 0.02, 0.04, 0.04, 0.03, 0.35, 0.02],  # 3PA
+    [ 0.22, 0.03, 0.32,-0.01, 0.78,-0.12, 1.00, 0.00, 0.01,-0.00, 0.02, 0.05, 0.01, 0.26, 0.04],  # 3P%
+    [ 0.21, 0.29,-0.02,-0.00, 0.06, 0.09, 0.00, 1.00, 0.20, 0.04, 0.12, 0.15, 0.23, 0.23, 0.03],  # REB
+    [ 0.13, 0.16, 0.00, 0.02, 0.07, 0.09, 0.01, 0.20, 1.00, 0.02, 0.01, 0.09, 0.09, 0.14, 0.05],  # AST
+    [ 0.11, 0.10, 0.05,-0.09, 0.01, 0.02,-0.00, 0.04, 0.02, 1.00, 0.01, 0.08, 0.03, 0.11, 0.02],  # STL
+    [ 0.06, 0.07, 0.01, 0.02, 0.04, 0.04, 0.02, 0.12, 0.01, 0.01, 1.00, 0.02, 0.05, 0.08, 0.04],  # BLK
+    [ 0.10, 0.11, 0.03, 0.02, 0.07, 0.04, 0.05, 0.15, 0.09, 0.08, 0.02, 1.00, 0.01, 0.13,-0.03],  # TO
+    [ 0.10, 0.14,-0.01, 0.02, 0.03, 0.03, 0.01, 0.23, 0.09, 0.03, 0.05, 0.01, 1.00, 0.10, 0.05],  # DD
+    [ 0.94, 0.75, 0.56, 0.04, 0.44, 0.35, 0.26, 0.23, 0.14, 0.11, 0.08, 0.13, 0.10, 1.00, 0.07],  # PTS
+    [ 0.08,-0.04, 0.18,-0.02, 0.05, 0.02, 0.04, 0.03, 0.05, 0.02, 0.04,-0.03, 0.05, 0.07, 1.00],  # TW
+]
+
+# How the WEEK term (WEEK_UNCERTAINTY) moves the categories TOGETHER (scripts/measure_variance.mjs
+# section 4b, 2025-26, 170 team-weeks, 2026-11-21). The week term is mostly games: a team
+# that loses a player's games loses his REB, AST, PTS and the rest at once - one common
+# factor (loadings 0.93-0.99 for most counting stats, BLK 0.45, TW 0.78). CATEGORY_CORRELATION
+# above is measured GIVEN the games played and has none of it, and the copula used to draw
+# the week term's share of every margin with that weak matrix: pre-week matchups read 96-98%
+# and lost (2026-27 weeks 1-4 pre-week log loss 1.00, coin flip 0.69). lib/probability.ts
+# now draws each margin as a*Zbase + b*Zweek, b = the week term's share of its spread (0 for
+# ratios, 0 once the week is played). Ratio rows are identity.
+WEEK_CORRELATION = [
+    [ 1.00, 0.98, 0.00, 0.00, 0.93, 0.92, 0.00, 0.96, 0.98, 0.91, 0.46, 0.98, 0.95, 0.98, 0.78],  # FGM
+    [ 0.98, 1.00, 0.00, 0.00, 0.93, 0.92, 0.00, 0.96, 0.98, 0.91, 0.46, 0.98, 0.95, 0.98, 0.78],  # FGA
+    [ 0.00, 0.00, 1.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],  # FG%
+    [ 0.00, 0.00, 0.00, 1.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],  # FT%
+    [ 0.93, 0.93, 0.00, 0.00, 1.00, 0.88, 0.00, 0.91, 0.93, 0.86, 0.44, 0.93, 0.90, 0.93, 0.74],  # 3PM
+    [ 0.92, 0.92, 0.00, 0.00, 0.88, 1.00, 0.00, 0.91, 0.92, 0.85, 0.43, 0.92, 0.89, 0.92, 0.73],  # 3PA
+    [ 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 1.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],  # 3P%
+    [ 0.96, 0.96, 0.00, 0.00, 0.91, 0.91, 0.00, 1.00, 0.96, 0.89, 0.45, 0.96, 0.93, 0.96, 0.76],  # REB
+    [ 0.98, 0.98, 0.00, 0.00, 0.93, 0.92, 0.00, 0.96, 1.00, 0.91, 0.46, 0.98, 0.95, 0.98, 0.78],  # AST
+    [ 0.91, 0.91, 0.00, 0.00, 0.86, 0.85, 0.00, 0.89, 0.91, 1.00, 0.43, 0.91, 0.88, 0.91, 0.72],  # STL
+    [ 0.46, 0.46, 0.00, 0.00, 0.44, 0.43, 0.00, 0.45, 0.46, 0.43, 1.00, 0.46, 0.45, 0.46, 0.36],  # BLK
+    [ 0.98, 0.98, 0.00, 0.00, 0.93, 0.92, 0.00, 0.96, 0.98, 0.91, 0.46, 1.00, 0.95, 0.98, 0.78],  # TO
+    [ 0.95, 0.95, 0.00, 0.00, 0.90, 0.89, 0.00, 0.93, 0.95, 0.88, 0.45, 0.95, 1.00, 0.95, 0.75],  # DD
+    [ 0.98, 0.98, 0.00, 0.00, 0.93, 0.92, 0.00, 0.96, 0.98, 0.91, 0.46, 0.98, 0.95, 1.00, 0.78],  # PTS
+    [ 0.78, 0.78, 0.00, 0.00, 0.74, 0.73, 0.00, 0.76, 0.78, 0.72, 0.36, 0.78, 0.75, 0.78, 1.00],  # TW
 ]
 
 NUMERIC_COLS = ['FGM', 'FGA', 'FG%', 'FTM', 'FTA', 'FT%', '3PM', '3PA', '3P%',

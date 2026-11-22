@@ -53,6 +53,15 @@ import { seatDay, type SeatRule } from "./seatRule";
 
 export type PlanObjective = "cats" | "games";
 
+/**
+ * How far ahead a drop is judged (owner, 2026-11-21). "season" (the default): a roster
+ * player may only be dropped for a pickup who is at least as good LONG TERM
+ * (lib/longTermValue.ts - this season plus a decayed track record), so week 5 never trades
+ * Herro for a one-game Podziemski. "week": a must-win week, anyone not protected may go.
+ * Players picked up inside the plan are droppable either way (streaming chains).
+ */
+export type PlanHorizon = "season" | "week";
+
 export interface PlannedMove {
   id: string;
   /** "add" (default) picks up a free agent; "activate" moves `add` off IR. */
@@ -364,7 +373,12 @@ export interface OptimizeOptions {
   maxMoves: number;
   /** Roster players never dropped. Pickups from the plan are always droppable. */
   protect: Set<string>;
+  /** "season" (default): drop only for a pickup at least as good long term; "week": anyone unprotected. */
+  horizon?: PlanHorizon;
+  /** Long-term values by name (lib/longTermValue.ts), for "season". */
+  longTerm?: Map<string, number>;
 }
+
 
 let seq = 0;
 export const newMoveId = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
@@ -401,6 +415,9 @@ export function optimizePlan(
    * or an activation of anyone still on IR (those are not limited).
    */
   const irDays = new Map(prep.roster.filter((r) => r.ir).map((r) => [r.name, r.days]));
+  const seasonal = (opts.horizon ?? "season") === "season";
+  // Unknown long-term value: a pickup cannot justify a drop, a roster player is kept.
+  const lt = (name: string, unknown: number) => opts.longTerm?.get(name) ?? unknown;
   const bestMove = (base: PlannedMove[], pool: Seat[], gains?: Map<string, number>) => {
     const e = evaluatePlan(prep, base);
     const used = new Set(e.rows.map((r) => r.name));
@@ -413,7 +430,10 @@ export function optimizePlan(
         const drops: (string | null)[] = openLeft > 0 ? [null] : [];
         for (const r of e.rows) {
           const onRoster = (r.from == null || r.from < d) && r.until == null;
-          if (onRoster && (r.added || !opts.protect.has(r.name))) drops.push(r.name);
+          if (!onRoster) continue;
+          if (r.added) drops.push(r.name);
+          else if (opts.protect.has(r.name)) continue;
+          else if (!seasonal || lt(name, -Infinity) >= lt(r.name, Infinity)) drops.push(r.name);
         }
         for (const drop of drops) {
           const move: PlannedMove = { id: "", kind, date: d, add: name, drop };

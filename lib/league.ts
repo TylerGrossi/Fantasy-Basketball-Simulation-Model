@@ -31,6 +31,12 @@ export interface PlayerRow {
   value?: number;
   status: string;
   injured: boolean;
+  /**
+   * BENCH FILL (2026-11-21, lib/lineupCount.ts): expected extra games from days he starts on
+   * the bench but gets a spot because someone ahead of him does not play. Set only on the
+   * win probability's sides; already inside their moments, NOT in `gamesLeft`.
+   */
+  benchFill?: number;
 }
 
 /** A waiver-pool player. Same shape as PlayerRow minus roster-only fields. */
@@ -370,9 +376,9 @@ export interface LeagueData extends LeagueMeta {
   weekUncertainty?: number[];
   /**
    * Will They Play (lib/availability.ts), attached by loadLeague: the chance of playing
-   * each remaining game, [ISO date, p], for players WITH DOUBT only - a listed or ESPN
-   * injury status, or any game under 85% (a back-to-back rest habit). Everyone else is
-   * absent and projects exactly as before (owner's option b, 2026-11-03).
+   * each remaining game, [ISO date, p], for EVERY scored player (owner, 2026-11-21; it was
+   * players with doubt only, option b of 2026-11-03, which left healthy players at every
+   * game - they play ~92% of them). A player with no row projects every game.
    */
   availability?: Record<string, Array<[string, number]>>;
   /**
@@ -544,7 +550,7 @@ export function availabilityMoments(
 
 /**
  * His chance of playing each of his `games` remaining counted games, or null when he has
- * no doubt (not in `league.availability`). The LAST `games` of his remaining dates: the
+ * no Will They Play row (not in `league.availability`). The LAST `games` of his remaining dates: the
  * projection's injury-aware count already drops the games before an expected return (the
  * scorer puts 0 on those too), so averaging the whole week would charge him twice.
  */
@@ -573,7 +579,8 @@ export function availProbs(
 
 /**
  * A player's moments over `games` remaining games, availability-aware: availabilityMoments
- * for a player with doubt, playerMoments for everyone else. EVERY swap that takes a
+ * for a player with a Will They Play row (every scored player since 2026-11-21),
+ * playerMoments for one without. EVERY swap that takes a
  * roster player out or puts one in (Streamers, Bench, the planner, crowded days) uses this,
  * so it subtracts exactly what applyAvailability put into the side.
  */
@@ -623,9 +630,9 @@ export function shiftGames(
 }
 
 /**
- * A side's projection with each doubtful player's games swapped from certain to likely:
+ * A side's projection with each player's games swapped from certain to likely:
  * his playerMoments out, his rowMoments in. Run on the LIVE side (after remainingSide),
- * so `gamesLeft` is what is really left. Players with no doubt are untouched.
+ * so `gamesLeft` is what is really left. Players with no Will They Play row are untouched.
  */
 export function applyAvailability(league: LeagueData, side: TeamSide): TeamSide {
   if (!league.availability) return side;
@@ -759,7 +766,7 @@ export function sideMoments(side: TeamSide, current: StatVector): Moments {
  */
 const DEFAULT_WEEK_UNCERTAINTY: Record<string, number> = {
   FGM: 0.13, FGA: 0.13, FTM: 0.17, FTA: 0.17, "3PM": 0.13, "3PA": 0.14,
-  REB: 0.13, AST: 0.13, STL: 0.15, BLK: 0.21, TO: 0.13, PTS: 0.14, DD: 0.12, TW: 0.14,
+  REB: 0.13, AST: 0.13, STL: 0.15, BLK: 0.19, TO: 0.13, PTS: 0.14, DD: 0.12, TW: 0.14,
 };
 
 /** The week term's variance for a rest-of-week projection `mu`: (cv x mu)^2 per stat. */
@@ -811,4 +818,13 @@ export function winProbability(
 /** The GL column's number: the player's scheduled games, falling back to counted games. */
 export function scheduledGames(p: PlayerRow): number {
   return p.nbaGamesLeft ?? p.gamesLeft;
+}
+
+/**
+ * Does the league's own name already carry the season ("Connell 2026-2027 Fantasy")? Then
+ * a label must not add "· 2026-27" after it (owner, 2026-11-21). Either year of the season
+ * in the name counts.
+ */
+export function nameHasSeason(name: string, season: number): boolean {
+  return name.includes(String(season)) || name.includes(String(season - 1));
 }

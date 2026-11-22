@@ -55,6 +55,13 @@ export interface LeagueMeta {
    * variance (ratioMoments). Older exports lack it; DEFAULT_SHOT_CORRELATION stands in.
    */
   shotCorrelation?: Record<string, number>;
+  /**
+   * How the WEEK term moves the categories together (engine/config.py WEEK_CORRELATION,
+   * 2026-11-21): one common games factor, `categories` x `categories`, ratio rows identity.
+   * `categoryCorrelation` is measured GIVEN the games played; the week term's share of each
+   * margin is drawn from this instead (correlatedWins). Absent: the old single-matrix draw.
+   */
+  weekCorrelation?: number[][];
 }
 
 export interface MatchupOutcome {
@@ -169,7 +176,7 @@ function indexOf(meta: LeagueMeta): Record<string, number> {
  * engine/config.py SHOT_CORRELATION so an older snapshot does not fall back to the
  * independent maths that made FT% ranges run 60%-100%.
  */
-const DEFAULT_SHOT_CORRELATION: Record<string, number> = { "FG%": 0.78, "FT%": 0.93, "3P%": 0.77 };
+const DEFAULT_SHOT_CORRELATION: Record<string, number> = { "FG%": 0.77, "FT%": 0.93, "3P%": 0.77 };
 
 /** The made/attempted correlation for one ratio category. */
 export function shotCorrelation(meta: Pick<LeagueMeta, "shotCorrelation">, cat: string): number {
@@ -300,14 +307,15 @@ export function choleskyFactor(corr: number[][]): number[][] {
  * Column-major so the per-matchup scan is one tight loop per category — the streamers
  * page runs ~1,800 matchups per render, and row-major was 6x slower.
  */
-function correlatedDraws(corr: number[][]): Float32Array[] {
+function correlatedDraws(corr: number[][], seed0 = 0x5eed): Float32Array[] {
   const cached = drawCache.get(corr);
   if (cached) return cached;
   const n = corr.length;
   const L = choleskyFactor(corr);
 
-  // mulberry32: small, seeded, and identical in every browser.
-  let seed = 0x5eed;
+  // mulberry32: small, seeded, and identical in every browser. The week draws use their
+  // own seed so they are independent of the base draws.
+  let seed = seed0;
   const rand = () => {
     seed = (seed + 0x6d2b79f5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -336,6 +344,24 @@ function correlatedDraws(corr: number[][]): Float32Array[] {
 }
 
 const winsScratch = new Uint8Array(COPULA_DRAWS);
+const mixScratch = new Float32Array(COPULA_DRAWS);
+
+/**
+ * Per category, the week term's share of the margin's SPREAD (b in a*Zbase + b*Zweek):
+ * sqrt(week variance / total variance), both sides together. 0 for a ratio category (the
+ * week term cancels in a ratio) and for sides that carry no week term.
+ */
+export function weekShare(meta: LeagueMeta, you: Moments, opp: Moments): number[] {
+  if (!you.wk && !opp.wk) return meta.categories.map(() => 0);
+  const idx = indexOf(meta);
+  return meta.categories.map((cat) => {
+    if (RATIO_PAIRS[cat]) return 0;
+    const i = idx[cat];
+    const w = (you.wk?.[i] ?? 0) + (opp.wk?.[i] ?? 0);
+    const v = Math.max(you.var[i], 0) + Math.max(opp.var[i], 0);
+    return v > 0 ? Math.sqrt(Math.min(1, Math.max(0, w) / v)) : 0;
+  });
+}
 
 /**
  * Distribution over the number of categories won, with correlated categories.
@@ -344,10 +370,16 @@ const winsScratch = new Uint8Array(COPULA_DRAWS);
 export function correlatedWins(
   meta: LeagueMeta,
   probs: number[],
-  corr: number[][]
+  corr: number[][],
+  week?: { corr: number[][]; share: number[] }
 ): number[] {
   const n = probs.length;
   const cols = correlatedDraws(corr);
+  // Two factors (2026-11-21): each margin is a*Zbase + b*Zweek, b^2 = the week term's share
+  // of its variance. Zbase carries the in-game correlation, Zweek the week's common games
+  // shock. With no week share (b = 0 everywhere) this is exactly the single-matrix draw.
+  const useWeek = !!week && week.corr.length === n && week.share.some((b) => b > 0);
+  const wcols = useWeek ? correlatedDraws(week!.corr, 0x77ee) : null;
   const lower = new Set(meta.lowerIsBetter);
   const wins = winsScratch.fill(0);
   // The correlation is of the RAW margins (you minus opponent), and p = Phi(t) for the
@@ -355,8 +387,17 @@ export function correlatedWins(
   // positive: z > -t. A lower-is-better one (TO) when it is negative: z < -t, where
   // p = 1 - Phi(t) makes -t = Phi^-1(p).
   for (let c = 0; c < n; c++) {
-    const col = cols[c];
     const q = normalQuantile(probs[c]);
+    const b = useWeek ? Math.min(1, Math.max(0, week!.share[c])) : 0;
+    let col: ArrayLike<number> = cols[c];
+    if (b > 0) {
+      const a = Math.sqrt(1 - b * b);
+      const zb = cols[c];
+      const zw = wcols![c];
+      const mix = mixScratch;
+      for (let d = 0; d < COPULA_DRAWS; d++) mix[d] = a * zb[d] + b * zw[d];
+      col = mix;
+    }
     // Branchless (`+(a < b)`): each comparison is close to a coin flip, which a branch
     // predictor cannot learn, and the branchy form ran at half the speed.
     if (lower.has(meta.categories[c])) {
@@ -382,7 +423,12 @@ export function matchupOutcome(
   const corr = meta.categoryCorrelation;
   const distribution =
     corr && corr.length === n
-      ? correlatedWins(meta, categoryProbs, corr)
+      ? correlatedWins(
+          meta,
+          categoryProbs,
+          corr,
+          meta.weekCorrelation ? { corr: meta.weekCorrelation, share: weekShare(meta, you, opp) } : undefined
+        )
       : poissonBinomial(categoryProbs);
   let win = 0;
   let loss = 0;
