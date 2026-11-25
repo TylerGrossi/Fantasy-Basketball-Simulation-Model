@@ -8207,7 +8207,7 @@ table.sheet.ws-table tfoot td {
 .pl-move-bad .pl-move-gain { color: var(--clay); font-family: inherit; }
 .pl-form { display: grid; gap: 0.5rem; }
 .pl-form label { display: grid; gap: 0.2rem; font-size: 0.74rem; color: var(--ink-2); }
-.pl-form .field-select { width: 100%; min-width: 0; }
+.pl-form .field-select, .pl-form input.field { width: 100%; min-width: 0; }
 .pl-form .dg-btn { justify-self: start; font-size: 0.82rem; padding: 0.4rem 0.9rem; }
 .pl-grid-col { min-width: 0; }
 .pl-table td.ws-cell.pl-off { color: var(--line-strong); font-weight: 400; }
@@ -9209,3 +9209,10 @@ table.sheet.wst-dg .wst-dg-tot { font-weight: 700; }
 }
 
 .wst-h.wst-h-solo { margin-bottom: 0.7rem; }
+
+/* Streamers' candidate table fits its column without sideways scroll (owner, 2026-11-25):
+   short headers (full names on hover), weekday-only Days, tighter padding. */
+table.sheet.st-table th { padding: 0.45rem 0.32rem; letter-spacing: 0.02em; }
+table.sheet.st-table td { padding: 0.38rem 0.32rem; }
+table.sheet.st-table th:first-child, table.sheet.st-table td:first-child { padding-left: 0.6rem; }
+table.sheet.st-table .sort-caret:not(.on) { display: none; }

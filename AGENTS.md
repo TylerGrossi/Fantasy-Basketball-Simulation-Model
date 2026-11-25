@@ -469,7 +469,11 @@ persisting them (localStorage) rather than resetting each visit.
 scored with the Streamers arithmetic (swap each changed player's whole moments) so its
 cats / win numbers agree with the rest of the page. Optimize = greedy best move, then a
 re-pick pass; it keeps any moves already entered, and it finds chains (stream A Thu, drop
-A Sun for B). Verified: the empty plan reproduces the baseline exactly, and the 1-move
+A Sun for B). BRIDGES (owner, 2026-11-25): a move already in the plan that drops P on day D
+can take a streamer in front of it - Optimize may add S earlier dropping P and change that
+move's drop to S ("Sat: add streamer, drop Holiday; Sun: add Jenkins, drop streamer"). It
+edits the owner's own move's DROP only (same player out, same pickup, same day). The Add
+field has a name search over every pickup (accent-insensitive). Verified: the empty plan reproduces the baseline exactly, and the 1-move
 optimum matches brute force over every FA x day x drop on the real export, both
 objectives. Each move has an IMPACT panel (owner, 2026-11-21, `MoveImpact`): games each
 player gains/loses, a "Helps / Hurts" line (win-chance points per category), and a 3-column

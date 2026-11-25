@@ -42,10 +42,10 @@ const STREAMER_COLS: SortCol[] = [
     key: "rank",
     label: "#",
     num: true,
-    title: "Best move first by this week's Δ Cats.",
+    title: "Best move first by this week's ΔCat.",
   },
   { key: "add", label: "Add", title: "The free agent to pick up." },
-  { key: "nba", label: "NBA", title: "His NBA team." },
+  { key: "nba", label: "Tm", title: "Team: his NBA team." },
   {
     key: "gl",
     label: "GL",
@@ -54,44 +54,44 @@ const STREAMER_COLS: SortCol[] = [
   },
   {
     key: "netGames",
-    label: "Δ Games",
+    label: "ΔG",
     num: true,
     title:
-      "Change in games your lineup actually plays this week: his starts, minus the drop's, minus any starter he pushes to the bench on a full day.",
+      "Δ games: change in games your lineup actually plays this week: his starts, minus the drop's, minus any starter he pushes to the bench on a full day.",
   },
-  { key: "games", label: "Games", title: "The days he plays this week." },
+  { key: "games", label: "Days", title: "The days he plays this week." },
   {
     key: "deltaCats",
-    label: "Δ Cats",
+    label: "ΔCat",
     num: true,
     title:
-      "This week only: how many more categories you are expected to win this matchup if you make the move. +0.30 = about a third of a category.",
+      "Δ cats, this week only: how many more categories you are expected to win this matchup if you make the move. +0.30 = about a third of a category.",
   },
   {
     key: "season",
-    label: "Season Δ Cats",
+    label: "ΔSzn",
     num: true,
     title:
-      "The rest of the regular season: how many more categories you are expected to win, in total over every week after this one, with the pickup on your roster instead of the drop. Negative = the drop is the better player, and you lose that much by letting him go.",
+      "Season Δ cats, the rest of the regular season: how many more categories you are expected to win, in total over every week after this one, with the pickup on your roster instead of the drop. Negative = the drop is the better player, and you lose that much by letting him go.",
   },
   {
     key: "deltaWin",
-    label: "Δ Win %",
+    label: "ΔWin",
     num: true,
-    title: "Change in your chance of winning this week's matchup, in percentage points.",
+    title: "Δ win %: change in your chance of winning this week's matchup, in percentage points.",
   },
   {
     key: "dPlayoff",
-    label: "Δ Playoff",
+    label: "ΔPO",
     num: true,
     title:
-      "How much the move changes your playoff chance, in percentage points: this week's result and every week after it, with the pickup instead of the drop.",
+      "Δ playoff: how much the move changes your playoff chance, in percentage points: this week's result and every week after it, with the pickup instead of the drop.",
   },
   {
     key: "dChamp",
-    label: "Δ Champ",
+    label: "ΔTitle",
     num: true,
-    title: "How much the move changes your title chance, in percentage points.",
+    title: "Δ title: how much the move changes your title chance, in percentage points.",
   },
   {
     key: "drop",
@@ -100,9 +100,9 @@ const STREAMER_COLS: SortCol[] = [
   },
   {
     key: "value",
-    label: "Value",
+    label: "Val",
     num: true,
-    title: "The pickup's season value, the same scale as the Roster and Player Value pages.",
+    title: "Value: the pickup's season value, the same scale as the Roster and Player Value pages.",
   },
   ...SHOWN.map((s) => ({ key: s, label: s, num: true, title: `The pickup's ${s} per game.` })),
 ];
@@ -375,6 +375,7 @@ export default function StreamersView({
           )}
           <SortableTable
             scrollClassName="st-scroll"
+            className="st-table"
             defaultKey="rank"
             defaultDesc={false}
             cols={STREAMER_COLS}
@@ -384,7 +385,9 @@ export default function StreamersView({
               const netGames = r.netGames;
               const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
               const iso = gameDates(r.add.nbaTeam);
-              const dates = iso.map(dayLabel).join(" · ") || "-";
+              // Weekday only (owner, 2026-11-25: no sideways scroll); the full dates are
+              // in the cell's tooltip.
+              const dates = iso.map((d) => dayLabel(d).split(" ")[0]).join(" ") || "-";
               return {
                 id: r.add.name,
                 cells: {
@@ -406,7 +409,7 @@ export default function StreamersView({
                     // "Wed 10/21" labels, which would sort by weekday name.
                     sort: iso.join(" ") || "~",
                     text: dates,
-                    node: <span style={{ whiteSpace: "nowrap" }}>{dates}</span>,
+                    node: <span title={iso.map(dayLabel).join(" · ")}>{dates}</span>,
                   },
                   ...(() => {
                     const o = shownOdds(r);

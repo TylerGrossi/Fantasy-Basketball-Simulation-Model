@@ -241,6 +241,8 @@ export default function WeekPlanner({
   const [formAdd, setFormAdd] = useState("");
   const [formKind, setFormKind] = useState<"add" | "activate">("add");
   const [formDrop, setFormDrop] = useState("");
+  // Search over every pickup (owner, 2026-11-25): the ranked list runs ~120 names deep.
+  const [formQuery, setFormQuery] = useState("");
   const date = win.dates.includes(formDate) ? formDate : (win.dates[0] ?? "");
   const dropOptions = useMemo(
     () =>
@@ -284,7 +286,11 @@ export default function WeekPlanner({
       .sort((a, b) => b.gain - a.gain || b.s.rank - a.s.rank);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prep, evaluation, state.moves, state.objective, date, dropName, kind]);
-  const addName = addOptions.some((x) => x.s.name === formAdd) ? formAdd : (addOptions[0]?.s.name ?? "");
+  const shownAdds = useMemo(() => {
+    const q = foldName(formQuery.trim());
+    return q ? addOptions.filter((x) => foldName(x.s.name).includes(q)) : addOptions;
+  }, [addOptions, formQuery]);
+  const addName = shownAdds.some((x) => x.s.name === formAdd) ? formAdd : (shownAdds[0]?.s.name ?? "");
 
   function addMove() {
     if (!date || !addName || !dropName) return;
@@ -298,6 +304,7 @@ export default function WeekPlanner({
     update({ moves: [...state.moves, move] });
     setFormAdd("");
     setFormDrop("");
+    setFormQuery("");
   }
 
   // ---- render ----
@@ -667,12 +674,27 @@ export default function WeekPlanner({
             </label>
             <label>
               <span>{kind === "activate" ? "Activate" : "Add"}</span>
+              <input
+                type="search"
+                className="field"
+                placeholder={`Search ${addOptions.length} players`}
+                value={formQuery}
+                onChange={(e) => {
+                  setFormQuery(e.target.value);
+                  setFormAdd("");
+                }}
+              />
+              {formQuery.trim() && shownAdds.length === 0 && (
+                <span className="caption" style={{ margin: 0 }}>
+                  No one by that name with a game from {dayLabel(date)}.
+                </span>
+              )}
               <select
                 className="field field-select"
                 value={addName}
                 onChange={(e) => setFormAdd(e.target.value)}
               >
-                {addOptions.map(({ s, games, gain }) => (
+                {shownAdds.map(({ s, games, gain }) => (
                   <option key={s.name} value={s.name}>
                     {s.name} · {s.nbaTeam} · {games}g ·{" "}
                     {state.objective === "games"
@@ -885,6 +907,9 @@ function orderRows(rows: PlanRow[], moves: PlannedMove[], lineup: LineupOrder) {
   }
   return { kept, moved };
 }
+
+/** Lower case, accents off: "jokic" finds Jokić. */
+const foldName = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
 /** The form's default drop: the lowest-value player you have not protected. */
 function lowestDroppable(rows: PlanRow[], protect: Set<string>): PlanRow | undefined {
