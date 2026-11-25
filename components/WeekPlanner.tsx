@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { AcquisitionSummary, LeagueData, Matchup } from "@/lib/league";
-import { sideMoments, winPctText } from "@/lib/league";
-import { matchupOutcome } from "@/lib/probability";
+import { categoryValue, formatValue, sideMoments, winPctText } from "@/lib/league";
+import { categoryProbabilities, matchupOutcome, type Moments } from "@/lib/probability";
 import { playerStatus } from "@/lib/playerPool";
 import {
   evaluatePlan,
@@ -16,6 +16,7 @@ import {
   type PlanObjective,
   type PlannedMove,
   type PlanRow,
+  type PlanHorizon,
 } from "@/lib/planner";
 import { dayLabel } from "@/lib/dates";
 import { byLineup, lineupOrder, type LineupOrder } from "@/lib/lineupOrder";
@@ -48,17 +49,24 @@ interface Props {
   live?: boolean;
   /** This matchup's acquisitions, used of allowed. */
   acq?: AcquisitionSummary;
+  /**
+   * Long-term values (lib/longTermValue.ts) for your roster and the free agents, computed
+   * on the server: the page's league is trimmed and carries no player pool to value from.
+   */
+  longTermValues?: Record<string, number>;
 }
 
 interface Stored {
   moves: PlannedMove[];
   objective: PlanObjective;
+  /** Long term (default) or must win; plans saved before it have none = long term. */
+  horizon?: PlanHorizon;
   /** Moves to plan; null = what ESPN says is left this week. */
   maxMoves: number | null;
 }
 
 const KEY = "fbb.planner.v1";
-const DEFAULTS: Stored = { moves: [], objective: "cats", maxMoves: null };
+const DEFAULTS: Stored = { moves: [], objective: "cats", horizon: "season", maxMoves: null };
 
 function readStore(): Record<string, Stored> {
   try {
@@ -75,6 +83,7 @@ export default function WeekPlanner({
   teamId,
   live: liveEnabled = true,
   acq,
+  longTermValues: ltValues,
 }: Props) {
   // The win probability's sides and lineup rule (see StreamersView): the plan's "no moves"
   // is the gauge's number, and every planned day is re-seated by the same rule.
@@ -164,6 +173,8 @@ export default function WeekPlanner({
   const protect = useMemo(() => new Set(settings.untouchables), [settings.untouchables]);
 
   const evaluation = useMemo(() => evaluatePlan(prep, state.moves), [prep, state.moves]);
+  const horizon: PlanHorizon = state.horizon ?? "season";
+  const longTerm = useMemo(() => new Map(Object.entries(ltValues ?? {})), [ltValues]);
   // "No moves" starts from the plan's own baseline, which takes IR players' games out.
   const baseWin = useMemo(
     () => matchupOutcome(league, prep.teamMoments, oppMoments).win,
@@ -177,9 +188,14 @@ export default function WeekPlanner({
   // What each move is worth on its own: the plan with and without it. A move a later
   // one depends on (that one drops his pickup) cannot be taken out alone — no number.
   const marginal = useMemo(() => {
-    const out = new Map<string, { games: number; cats: number } | null>();
+    const out = new Map<
+      string,
+      { games: number; cats: number; without: Moments; addGames: number; dropGames: number } | null
+    >();
     for (const m of evaluation.applied) {
       const without = evaluatePlan(prep, state.moves.filter((x) => x.id !== m.id));
+      const startsOf = (e: typeof evaluation, name: string | null | undefined) =>
+        name ? (e.rows.find((r) => r.name === name)?.starts.size ?? 0) : 0;
       out.set(
         m.id,
         without.invalid.size > evaluation.invalid.size
@@ -187,6 +203,10 @@ export default function WeekPlanner({
           : {
               games: evaluation.started - without.started,
               cats: evaluation.expectedCats - without.expectedCats,
+              without: without.moments,
+              // His started games WITH the move, and what the dropped player loses by it.
+              addGames: startsOf(evaluation, m.add) - startsOf(without, m.add),
+              dropGames: startsOf(without, m.drop) - startsOf(evaluation, m.drop),
             }
       );
     }
@@ -208,6 +228,8 @@ export default function WeekPlanner({
         objective: state.objective,
         maxMoves,
         protect,
+        horizon,
+        longTerm,
       });
       update({ moves });
       setBusy(false);
@@ -219,6 +241,8 @@ export default function WeekPlanner({
   const [formAdd, setFormAdd] = useState("");
   const [formKind, setFormKind] = useState<"add" | "activate">("add");
   const [formDrop, setFormDrop] = useState("");
+  // Search over every pickup (owner, 2026-11-25): the ranked list runs ~120 names deep.
+  const [formQuery, setFormQuery] = useState("");
   const date = win.dates.includes(formDate) ? formDate : (win.dates[0] ?? "");
   const dropOptions = useMemo(
     () =>
@@ -262,7 +286,11 @@ export default function WeekPlanner({
       .sort((a, b) => b.gain - a.gain || b.s.rank - a.s.rank);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prep, evaluation, state.moves, state.objective, date, dropName, kind]);
-  const addName = addOptions.some((x) => x.s.name === formAdd) ? formAdd : (addOptions[0]?.s.name ?? "");
+  const shownAdds = useMemo(() => {
+    const q = foldName(formQuery.trim());
+    return q ? addOptions.filter((x) => foldName(x.s.name).includes(q)) : addOptions;
+  }, [addOptions, formQuery]);
+  const addName = shownAdds.some((x) => x.s.name === formAdd) ? formAdd : (shownAdds[0]?.s.name ?? "");
 
   function addMove() {
     if (!date || !addName || !dropName) return;
@@ -276,6 +304,7 @@ export default function WeekPlanner({
     update({ moves: [...state.moves, move] });
     setFormAdd("");
     setFormDrop("");
+    setFormQuery("");
   }
 
   // ---- render ----
@@ -430,8 +459,32 @@ export default function WeekPlanner({
       <div className="pl-bar">
         <FilterBar
           className="controls pl-controls"
-          summary={`${state.objective === "cats" ? "Win the matchup" : "Most games"} · ${maxMoves} moves`}
+          summary={`${state.objective === "cats" ? "Win the matchup" : "Most games"} · ${horizon === "season" ? "Long term" : "Must win"} · ${maxMoves} moves`}
         >
+          <div
+            className="segmented"
+            role="radiogroup"
+            aria-label="Drops"
+            title="Long term: only drops a player for a pickup who is at least as good over the season. Must win: drops anyone not protected."
+          >
+            {(
+              [
+                ["season", "Long term"],
+                ["week", "Must win"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={horizon === k}
+                className={`seg${horizon === k ? " seg-on" : ""}`}
+                onClick={() => update({ horizon: k })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="segmented" role="radiogroup" aria-label="Optimize for">
             {(
               [
@@ -534,6 +587,16 @@ export default function WeekPlanner({
                           ? `${signed(mg.games)} games · ${signed(mg.cats, 2)} cats`
                           : "a later move depends on this one"}
                       </div>
+                      {mg && (
+                        <MoveImpact
+                          league={league}
+                          add={{ name: m.add, avg: (prep.pool.get(m.add) ?? prep.roster.find((r) => r.name === m.add))?.avg, games: mg.addGames }}
+                          drop={m.drop ? { name: m.drop, avg: prep.roster.find((r) => r.name === m.drop)?.avg, games: mg.dropGames } : null}
+                          without={mg.without}
+                          withMove={evaluation.moments}
+                          opp={oppMoments}
+                        />
+                      )}
                     </div>
                     <button
                       type="button"
@@ -611,12 +674,27 @@ export default function WeekPlanner({
             </label>
             <label>
               <span>{kind === "activate" ? "Activate" : "Add"}</span>
+              <input
+                type="search"
+                className="field"
+                placeholder={`Search ${addOptions.length} players`}
+                value={formQuery}
+                onChange={(e) => {
+                  setFormQuery(e.target.value);
+                  setFormAdd("");
+                }}
+              />
+              {formQuery.trim() && shownAdds.length === 0 && (
+                <span className="caption" style={{ margin: 0 }}>
+                  No one by that name with a game from {dayLabel(date)}.
+                </span>
+              )}
               <select
                 className="field field-select"
                 value={addName}
                 onChange={(e) => setFormAdd(e.target.value)}
               >
-                {addOptions.map(({ s, games, gain }) => (
+                {shownAdds.map(({ s, games, gain }) => (
                   <option key={s.name} value={s.name}>
                     {s.name} · {s.nbaTeam} · {games}g ·{" "}
                     {state.objective === "games"
@@ -830,8 +908,94 @@ function orderRows(rows: PlanRow[], moves: PlannedMove[], lineup: LineupOrder) {
   return { kept, moved };
 }
 
+/** Lower case, accents off: "jokic" finds Jokić. */
+const foldName = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
 /** The form's default drop: the lowest-value player you have not protected. */
 function lowestDroppable(rows: PlanRow[], protect: Set<string>): PlanRow | undefined {
   const ok = rows.filter((r) => r.added || !protect.has(r.name));
   return ok.sort((a, b) => a.value - b.value)[0];
+}
+
+/**
+ * What one move does, in plain terms (owner, 2026-11-21): which categories it helps and
+ * hurts (your chance of winning each, without the move -> with it), the added and dropped
+ * players' per-game lines in those categories, and the games each gains or loses. Only the
+ * categories that move are listed; the rest collapse into one line. Fits a phone without
+ * sideways scrolling. "Without" is the plan minus this move only - the same pair as its
+ * cats figure.
+ */
+function MoveImpact({
+  league,
+  add,
+  drop,
+  without,
+  withMove,
+  opp,
+}: {
+  league: LeagueData;
+  add: { name: string; avg?: number[]; games: number };
+  drop: { name: string; avg?: number[]; games: number } | null;
+  without: Moments;
+  withMove: Moments;
+  opp: Moments;
+}) {
+  const pBefore = categoryProbabilities(league, without, opp);
+  const pAfter = categoryProbabilities(league, withMove, opp);
+  const att: Record<string, string> = { "FG%": "FGA", "FT%": "FTA", "3P%": "3PA" };
+  const perGame = (avg: number[] | undefined, c: string) => {
+    if (!avg) return "—";
+    if (att[c] && !(avg[league.stats.indexOf(att[c])] > 0)) return "—";
+    const v = categoryValue(league.stats, avg, c);
+    return c.includes("%") ? `${(v * 100).toFixed(0)}%` : v.toFixed(1);
+  };
+  const rows = league.categories
+    .map((c, i) => ({ c, before: pBefore[i], after: pAfter[i], d: pAfter[i] - pBefore[i] }))
+    .sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+  const moved = rows.filter((r) => Math.abs(r.d) >= 0.01);
+  const still = rows.filter((r) => Math.abs(r.d) < 0.01).map((r) => r.c);
+  const pct = (p: number) => `${(p * 100).toFixed(1)}%`;
+  const chg = (d: number) => `${d > 0 ? "+" : "−"}${Math.abs(d * 100).toFixed(1)}%`;
+  const last = (n: string) => n.split(" ").slice(-1)[0];
+  const gamesText = (g: number) => `${g > 0 ? "+" : g < 0 ? "−" : "±"}${Math.abs(g)} game${Math.abs(g) === 1 ? "" : "s"}`;
+  return (
+    <details className="pl-impact">
+      <summary>Impact</summary>
+      <p className="pl-impact-line">
+        {add.name} {gamesText(add.games)}
+        {drop && ` · ${drop.name} ${gamesText(-drop.games)}`}
+      </p>
+      {moved.length > 0 ? (
+        <table className="pl-impact-table">
+          <thead>
+            <tr>
+              <th>Cat</th>
+              <th className="num">
+                {last(add.name)}
+                {drop ? ` / ${last(drop.name)}` : ""}
+              </th>
+              <th className="num">Win</th>
+              <th className="num">Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            {moved.map((r) => (
+              <tr key={r.c}>
+                <td className="pl-impact-cat">{r.c}</td>
+                <td className="num mono">
+                  {perGame(add.avg, r.c)}
+                  {drop ? ` / ${perGame(drop.avg, r.c)}` : ""}
+                </td>
+                <td className="num mono">{pct(r.after)}</td>
+                <td className={`num mono ${r.d > 0 ? "pl-impact-up" : "pl-impact-down"}`}>{chg(r.d)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="pl-impact-line">No category changes by a point or more.</p>
+      )}
+      {still.length > 0 && moved.length > 0 && <p className="pl-impact-still">No change: {still.join(", ")}</p>}
+    </details>
+  );
 }

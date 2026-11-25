@@ -48,10 +48,37 @@ const CATEGORIES = ["FGM", "FGA", "FG%", "FT%", "3PM", "3PA", "3P%",
 const RATIO = { "FG%": ["FGM", "FGA"], "FT%": ["FTM", "FTA"], "3P%": ["3PM", "3PA"] };
 const LOWER = new Set(["TO"]);
 
-// Mirrors engine/data.py: last-30 weight 0.7, scaled down below BLEND_FULL_GAMES games.
-const BLEND = 0.7;
-const BLEND_FULL_GAMES = 10;
-const LAST30_WEEKS = 4;
+// Mirrors engine/data.py's MINUTES PROJECTION (2026-11-21; was 0.7 x last-30 + 0.3 x season):
+// per-minute production with each past week weighted 0.5^(weeks ago / 6) (the engine's
+// 42-day half-life) x projected minutes = 0.2 x last-7-day + 0.2 x last-15-day + 0.6 x
+// season MPG. Weekly archive windows stand in for the day windows (last week ~ 7 days, last
+// two weeks ~ 15); a window with no games falls back to the season; the minutes factor is
+// held to [0.5, 1.5] as in the engine. Archive minutes count active-slot games only, a
+// noisier stand-in than ESPN's splits.
+const MINUTES_MIX = [0.2, 0.2, 0.6];
+const RATE_HALF_LIFE_WEEKS = 6;
+const mpgOf = (weeks) => {
+  const g = weeks.reduce((a, w) => a + w.gp, 0);
+  return g ? weeks.reduce((a, w) => a + (w.min ?? 0), 0) / g : 0;
+};
+/** The engine's projection of a per-game line from `prior` weeks, as of week `t`. */
+function minutesProjection(prior, t) {
+  const season = perGame(prior);
+  const s = mpgOf(prior);
+  if (!(s > 0)) return season.avg;
+  const m7 = mpgOf(prior.filter((p) => p.per === t)) || s;
+  const m15 = mpgOf(prior.filter((p) => p.per >= t - 1)) || s;
+  const f = Math.min(1.5, Math.max(0.5, (MINUTES_MIX[0] * m7 + MINUTES_MIX[1] * m15 + MINUTES_MIX[2] * s) / s));
+  let mins = 0;
+  const acc = new Array(N).fill(0);
+  for (const p of prior) {
+    const wt = Math.pow(0.5, (t - p.per) / RATE_HALF_LIFE_WEEKS);
+    mins += wt * (p.min ?? 0);
+    for (let i = 0; i < N; i++) acc[i] += wt * p.v[i];
+  }
+  if (!(mins > 0)) return season.avg.map((a) => a * f);
+  return acc.map((x) => (x / mins) * s * f);
+}
 const MIN_PRIOR_GAMES = 5; // week 1 projects off a different source; skip cold starts
 
 // ---------------------------------------------------------------------------------------
@@ -65,7 +92,7 @@ for (const per of periods) {
     const tw = [];
     for (const r of rows) {
       if (!r.gp) continue;
-      const row = { per, gp: r.gp, v: r.v, name: r.name, team };
+      const row = { per, gp: r.gp, min: r.min ?? 0, v: r.v, name: r.name, team };
       if (!byPlayer.has(r.name)) byPlayer.set(r.name, []);
       byPlayer.get(r.name).push(row);
       tw.push(row);
@@ -115,9 +142,7 @@ for (const [name, weeks] of byPlayer) {
     const prior = weeks.slice(0, k);
     const season = perGame(prior);
     if (season.g < MIN_PRIOR_GAMES) continue;
-    const recent = perGame(prior.filter((p) => p.per >= w.per - LAST30_WEEKS));
-    const wt = recent.g ? Math.min(1, recent.g / BLEND_FULL_GAMES) * BLEND : 0;
-    const proj = STATS.map((_, i) => wt * recent.avg[i] + (1 - wt) * season.avg[i]);
+    const proj = minutesProjection(prior, w.per - 1);
     const z = new Array(N).fill(0);
     for (let i = 0; i < N; i++) {
       const a = proj[i];
@@ -316,9 +341,7 @@ function projAt(name, t) {
   const ws = (byPlayer.get(name) ?? []).filter((w) => w.per <= t);
   const season = perGame(ws);
   if (season.g < MIN_PRIOR_GAMES) return null;
-  const recent = perGame(ws.filter((p) => p.per > t - LAST30_WEEKS));
-  const wt = recent.g ? Math.min(1, recent.g / BLEND_FULL_GAMES) * BLEND : 0;
-  const avg = STATS.map((_, i) => wt * recent.avg[i] + (1 - wt) * season.avg[i]);
+  const avg = minutesProjection(ws, t);
   return { avg, gpw: season.g / ws.length };
 }
 /** A team's projected week from its roster at t: (mu, var) per stat, playerMoments. */
@@ -467,6 +490,63 @@ const weekCv = STATS.map((_, i) => {
 });
 console.log(`\n# What a pre-week projection cannot know, as a CV of the rest-of-week total (${wkRows.length} team-weeks).`);
 console.log(`WEEK_UNCERTAINTY = ${dict(weekCv)}`);
+
+// ---------------------------------------------------------------------------------------
+// 4b. WEEK_CORRELATION (2026-11-21): how the week term moves the stats TOGETHER. The week
+//     term is mostly games: a team that loses a player's games for the week loses his
+//     rebounds, assists, blocks and points at once. CATEGORY_CORRELATION (section 3) is
+//     measured GIVEN the games played, so it has none of that (REB~AST 0.18) - and the
+//     copula drew the week term's share of every margin with it, as if a short-handed
+//     week cost REB and AST independently. Matchups came out far too sure (a 96% and a
+//     98% lost in the first four weeks of 2026-27; pre-week log loss 1.00 vs a coin
+//     flip's 0.69) even though each category on its own was calibrated.
+//     Here: the covariance of the same team-week misses as section 4 (bias removed),
+//     minus what the per-player terms explain (statCorr x their sds), as a correlation.
+//     Rows/columns in CATEGORIES order; the ratio rows are identity (the week term
+//     cancels in a ratio, so it never enters FG%/FT%/3P%).
+// ---------------------------------------------------------------------------------------
+const wkCov = STATS.map((_, i) =>
+  STATS.map((_, j) => {
+    const n = wkRows.length;
+    const bi = wkRows.reduce((s, x) => s + x.r[i], 0) / n;
+    const bj = wkRows.reduce((s, x) => s + x.r[j], 0) / n;
+    const miss = wkRows.reduce((s, x) => s + (x.r[i] - bi) * (x.r[j] - bj), 0) / n;
+    const model = wkRows.reduce((s, x) => s + statCorr[i][j] * Math.sqrt(x.mv[i] * x.mv[j]), 0) / n;
+    return miss - model;
+  })
+);
+// One common factor: rho_ij = lambda_i * lambda_j. The week term IS mostly one thing (how
+// many games the team gets), the raw estimates sit near 1 for the big counting stats, and
+// a factor model is positive definite by construction - no clipping, no ad-hoc shrink.
+const cnt = CATEGORIES.filter((c) => !RATIO[c]).map((c) => idx[c]);
+const rawW = (i, j) => wkCov[i][j] / Math.sqrt(Math.max(wkCov[i][i], 1e-9) * Math.max(wkCov[j][j], 1e-9));
+const lam = new Map(cnt.map((i) => [i, 0.7]));
+for (let it = 0; it < 200; it++) {
+  for (const i of cnt) {
+    let num = 0, den = 0;
+    for (const j of cnt) if (j !== i) { num += rawW(i, j) * lam.get(j); den += lam.get(j) ** 2; }
+    lam.set(i, Math.max(0, Math.min(0.99, num / den)));
+  }
+}
+const weekCorr = CATEGORIES.map((ci) =>
+  CATEGORIES.map((cj) => {
+    if (ci === cj) return 1;
+    if (RATIO[ci] || RATIO[cj]) return 0;
+    return lam.get(idx[ci]) * lam.get(idx[cj]);
+  })
+);
+console.log(`
+# week-term factor loadings: ${cnt.map((i) => `${STATS[i]} ${f2(lam.get(i))}`).join(", ")}`);
+const offW = [];
+CATEGORIES.forEach((ci, i) => CATEGORIES.forEach((cj, j) => { if (j > i && !RATIO[ci] && !RATIO[cj]) offW.push(weekCorr[i][j]); }));
+console.log(`\n# Correlation of the WEEK term across categories (${wkRows.length} team-weeks; mean off-diagonal`);
+console.log(`# ${f2(offW.reduce((a, b) => a + b, 0) / offW.length)}; one common factor). Ratio rows are identity.`);
+console.log("WEEK_CORRELATION = [");
+for (let i = 0; i < C; i++) {
+  const row = weekCorr[i].map((v, j) => (i === j ? "1.00" : f2(v)).padStart(5));
+  console.log(`    [${row.join(",")}],  # ${CATEGORIES[i]}`);
+}
+console.log("]");
 
 const sig2 = [];
 for (let t = 4; t <= RS - 4; t++) {

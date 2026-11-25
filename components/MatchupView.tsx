@@ -8,6 +8,8 @@ import {
   scoreboardRows,
   categoryRecord,
   sideMoments,
+  availProbs,
+  type TeamSide,
 } from "@/lib/league";
 import { matchupOutcome, projectionPercentile, RATIO_PAIRS, ratioMoments, shotCorrelation } from "@/lib/probability";
 import { gradeForecast, type Forecast, type WinProbPoint } from "@/lib/predictions";
@@ -94,6 +96,8 @@ export default function MatchupView({
 
   const yourGames = you.players.reduce((a, p) => a + p.gamesLeft, 0);
   const oppGames = opp.players.reduce((a, p) => a + p.gamesLeft, 0);
+  const yourX = expectedGames(league, you);
+  const oppX = expectedGames(league, opp);
 
   const mostLikely = outcome.distribution.reduce(
     (best, p, k) => (p > best.p ? { k, p } : best),
@@ -138,8 +142,8 @@ export default function MatchupView({
           good={outcome.expectedCats >= nCats / 2}
         />
         <Metric label="Most likely" value={`${mostLikely.k}-${nCats - mostLikely.k}`} />
-        <Metric label="Your games left" value={formatGames(yourGames)} />
-        <Metric label="Opp games left" value={formatGames(oppGames)} />
+        <PairMetric label="Games left" you={formatGames(yourGames)} opp={formatGames(oppGames)} />
+        <PairMetric label="xGames" you={yourX.toFixed(1)} opp={oppX.toFixed(1)} />
       </div>
 
       {/* Three across: now (gauge), how it could end (distribution), how it got here
@@ -324,6 +328,39 @@ function Header({ youName, oppName }: { youName: string; oppName: string }) {
     <div className="sb-hero">
       <span className="sb-name">{youName}</span>
       <span className="sb-name sb-name-right">{oppName}</span>
+    </div>
+  );
+}
+
+/**
+ * xGames (owner, 2026-11-21): the counted games Will They Play expects - each start's chance
+ * of being played, plus bench fill (a benched player seated when a starter sits). What the
+ * projection counts; "Games left" is the starts the lineup can use if everyone plays.
+ */
+function expectedGames(league: LeagueData, side: TeamSide): number {
+  return side.players.reduce((a, p) => {
+    if (p.gamesLeft <= 0) return a;
+    const probs = availProbs(league, p.name, p.gamesLeft);
+    return a + (probs ? probs.reduce((s, x) => s + x, 0) : p.gamesLeft);
+  }, 0) + side.players.reduce((a, p) => a + (p.benchFill ?? 0), 0); // bench fill (lib/lineupCount.ts)
+}
+
+/** One measure for both sides, You beside Opp (owner: games together, xGames together). */
+function PairMetric({ label, you, opp }: { label: string; you: string; opp: string }) {
+  return (
+    <div className="metric">
+      <div className="eyebrow">{label}</div>
+      <div className="metric-pair">
+        <div>
+          <div className="metric-value mono">{you}</div>
+          <div className="metric-sub">You</div>
+        </div>
+        <div className="metric-value metric-dash" aria-hidden="true">–</div>
+        <div>
+          <div className="metric-value mono">{opp}</div>
+          <div className="metric-sub">Opp</div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -31,9 +31,7 @@ export default async function Page() {
     <>
       <h1>Draft Recap</h1>
       <p className="caption">
-        {data
-          ? `${data.league.name} · who won the draft, graded on this league's ${data.league.categories.length} categories.`
-          : "No draft data — run `python scripts/build_draft.py`."}
+        {data ? data.league.name : "No draft data — run `python scripts/build_draft.py`."}
       </p>
       {data && (
         <DraftRecapView data={data} live={frozen?.feed ?? null} season={frozen?.results ?? null} />

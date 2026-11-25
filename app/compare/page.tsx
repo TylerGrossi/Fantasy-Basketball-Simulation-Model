@@ -8,7 +8,6 @@ export default async function Page() {
   return (
     <>
       <h1>Compare</h1>
-      <p className="caption">Two players, category by category.</p>
       <CompareView league={slim} />
     </>
   );

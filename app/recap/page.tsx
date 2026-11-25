@@ -387,8 +387,8 @@ function MatchupCard({
   // Scoreboard order (ESPN's), as every scoreboard in the app keeps it.
   const cats = league.categories;
   const sides = [
-    { id: m.homeId, vec: m.home, other: m.away, won: m.score.home, lost: m.score.away, pre: m.pre?.home },
-    { id: m.awayId, vec: m.away, other: m.home, won: m.score.away, lost: m.score.home, pre: m.pre?.away },
+    { id: m.homeId, vec: m.home, other: m.away, won: m.score.home, lost: m.score.away, pre: m.pre?.home, xc: m.pre?.xHome },
+    { id: m.awayId, vec: m.away, other: m.home, won: m.score.away, lost: m.score.home, pre: m.pre?.away, xc: m.pre?.xAway },
   ];
   return (
     <div className={`wr-card${m.homeId === me || m.awayId === me ? " wr-card-me" : ""}`}>
@@ -399,6 +399,7 @@ function MatchupCard({
             <col className="wr-col-team" />
             <col className="wr-col-score" />
             <col className="wr-col-pre" />
+            <col className="wr-col-xc" />
             {cats.map((c) => (
               <col key={c} />
             ))}
@@ -408,6 +409,7 @@ function MatchupCard({
               <th aria-label="Team" />
               <th className="num">Score</th>
               <th className="num">Pre-week</th>
+              <th className="num" title="Expected categories won, pre-week">xCats</th>
               {cats.map((c) => (
                 <th key={c} className="num">
                   {c}
@@ -426,6 +428,7 @@ function MatchupCard({
                   {s.won}-{s.lost}-{m.score.tie}
                 </td>
                 <td className="num mono">{s.pre == null ? "—" : winPctText(s.pre)}</td>
+                <td className="num mono">{s.xc == null ? "—" : s.xc.toFixed(1)}</td>
                 {cats.map((c) => {
                   const a = categoryValue(league.stats, s.vec, c);
                   const b = categoryValue(league.stats, s.other, c);

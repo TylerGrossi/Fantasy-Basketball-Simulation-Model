@@ -285,24 +285,11 @@ body {
 }
 .nav-word {
   display: block;
-  height: 18px;
+  /* 22px alone (owner, 2026-11-21): it was 18px with a tagline stacked beneath. */
+  height: 22px;
   width: auto;
 }
-/* Tracked-out caps, the way the artwork sets it. `line-height: 1` because the stack's
-   `gap` is doing the spacing — leading on top of it would push the tagline off-centre
-   against the ball. */
-.nav-tagline {
-  /* 9px. Small on purpose — it is a descriptor, not a second wordmark, and at anything
-     larger it out-measures "FBBSim" above it and stops reading as subordinate to it.
-     The tracking is what keeps it legible at this size, so don't trade it away. */
-  font-size: 0.5625rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-  line-height: 1;
-  white-space: nowrap;
-}
+
 
 .nav-link {
   color: var(--ink-2);
@@ -870,6 +857,33 @@ table.sheet.tape th:first-child { width: 1%; }
 .metric-delta {
   font-size: 0.72rem;
   margin-top: 0.15rem;
+}
+/* Two figures in one tile (games left beside xGames). */
+/* Week Planner: one move's category-by-category impact (MoveImpact). */
+.pl-impact { margin-top: 0.3rem; font-size: 0.74rem; }
+.pl-impact > summary { cursor: pointer; color: var(--ink-3); font-weight: 600; font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.pl-impact-line { margin: 0.35rem 0 0; line-height: 1.4; }
+.pl-impact-still { margin: 0.3rem 0 0; color: var(--ink-3); font-size: 0.7rem; }
+.pl-impact-table { border-collapse: collapse; width: 100%; margin-top: 0.35rem; }
+.pl-impact-table th { font-size: 0.6rem; font-weight: 600; color: var(--ink-3); padding: 0.15rem 0.35rem; text-align: right; }
+.pl-impact-table td { padding: 0.15rem 0.35rem; border-top: 1px solid var(--line-2, var(--line)); }
+.pl-impact-table td.num { text-align: right; }
+.pl-impact-cat { font-weight: 600; }
+.pl-impact-up { color: var(--good); font-weight: 700; }
+.pl-impact-down { color: var(--bad); font-weight: 700; }
+.metric-pair {
+  display: flex;
+  justify-content: center;
+  gap: 0.9rem;
+}
+.metric-dash { color: var(--ink-3); font-weight: 400; }
+.metric-sub {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 0.2rem;
 }
 
 /* ---- a table sized to be READ, not scanned sideways ------------------------
@@ -4284,13 +4298,6 @@ table.sheet.lu-table .lu-pos {
   cursor: pointer;
 }
 .modelbar-trigger:hover { color: var(--ink-2); background: var(--surface-2); }
-.modelbar-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--good);
-  flex: 0 0 auto;
-}
 .modelbar-pin {
   font-family: var(--sans);
   font-size: 0.58rem;
@@ -6200,10 +6207,7 @@ table.sheet.sr-value-table tbody tr.sr-value-active:hover td { background: var(-
   padding: 0.22rem 0.6rem; border: 1px solid var(--line); border-radius: 999px;
   background: var(--card); color: var(--ink-2); cursor: pointer;
 }
-.dg-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--ink-3); }
-.dg-live-pill.ok .dg-dot { background: var(--good); }
 .dg-live-pill.bad { color: var(--bad); border-color: var(--bad); }
-.dg-live-pill.bad .dg-dot { background: var(--bad); }
 
 .dg-subbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin: -0.2rem 0 0.6rem; padding: 0 0.2rem; }
 .dg-subbar-k { font-size: 0.72rem; font-weight: 600; color: var(--clay); }
@@ -8203,7 +8207,7 @@ table.sheet.ws-table tfoot td {
 .pl-move-bad .pl-move-gain { color: var(--clay); font-family: inherit; }
 .pl-form { display: grid; gap: 0.5rem; }
 .pl-form label { display: grid; gap: 0.2rem; font-size: 0.74rem; color: var(--ink-2); }
-.pl-form .field-select { width: 100%; min-width: 0; }
+.pl-form .field-select, .pl-form input.field { width: 100%; min-width: 0; }
 .pl-form .dg-btn { justify-self: start; font-size: 0.82rem; padding: 0.4rem 0.9rem; }
 .pl-grid-col { min-width: 0; }
 .pl-table td.ws-cell.pl-off { color: var(--line-strong); font-weight: 400; }
@@ -8501,8 +8505,8 @@ table.sheet.ws-table tfoot tr.pl-foot-base td { border-top: 0; font-weight: 400;
 .gd-game.on { border-color: var(--cobalt); background: var(--cobalt-soft); }
 .gd-game.in { border-left: 3px solid var(--good); }
 .gd-game-status { display: flex; align-items: center; gap: 0.35rem; font-size: 0.68rem; color: var(--ink-2); white-space: nowrap; }
-.gd-game-status .live-dot { flex: none; }
 .gd-game.post .gd-game-status { color: var(--ink-3); }
+.gd-game-status .live-dot { flex: none; }
 .gd-game-team { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; }
 .gd-game.post .gd-game-team:not(.won) { color: var(--ink-2); font-weight: 500; }
 .gd-game-all { flex: 0 0 118px; justify-content: space-between; }
@@ -9018,10 +9022,11 @@ table.sheet.gd-ptable .sort-caret:not(.on) { display: none; }
 .wr-board { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
 .wr-board th { font-size: 0.62rem; font-weight: 600; color: var(--ink-3); padding: 0.2rem 0.4rem; text-align: right; }
 .wr-board td { padding: 0.28rem 0.4rem; border-top: 1px solid var(--line-2, var(--line)); text-align: right; }
-.wr-board { table-layout: fixed; min-width: 58rem; }
+.wr-board { table-layout: fixed; min-width: 61.8rem; }
 .wr-board col.wr-col-team { width: 15rem; }
 .wr-board col.wr-col-score { width: 4.6rem; }
 .wr-board col.wr-col-pre { width: 5rem; }
+.wr-board col.wr-col-xc { width: 3.8rem; }
 .wr-board td.wr-team { text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .wr-board td.wr-team .wr-upset { margin-left: 0.45rem; vertical-align: 0.1em; }
 .wr-board tr.wr-win td.wr-team { font-weight: 700; }
@@ -9204,3 +9209,10 @@ table.sheet.wst-dg .wst-dg-tot { font-weight: 700; }
 }
 
 .wst-h.wst-h-solo { margin-bottom: 0.7rem; }
+
+/* Streamers' candidate table fits its column without sideways scroll (owner, 2026-11-25):
+   short headers (full names on hover), weekday-only Days, tighter padding. */
+table.sheet.st-table th { padding: 0.45rem 0.32rem; letter-spacing: 0.02em; }
+table.sheet.st-table td { padding: 0.38rem 0.32rem; }
+table.sheet.st-table th:first-child, table.sheet.st-table td:first-child { padding-left: 0.6rem; }
+table.sheet.st-table .sort-caret:not(.on) { display: none; }

@@ -9,9 +9,6 @@ export default async function Page() {
   return (
     <>
       <h1>Trade Simulator</h1>
-      <p className="caption">
-        Pick who goes out and who comes in. Value and the category swing update instantly.
-      </p>
       <TradeView league={slim} myTeamName={me.name} />
     </>
   );

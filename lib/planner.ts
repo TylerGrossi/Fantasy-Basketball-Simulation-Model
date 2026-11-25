@@ -53,6 +53,15 @@ import { seatDay, type SeatRule } from "./seatRule";
 
 export type PlanObjective = "cats" | "games";
 
+/**
+ * How far ahead a drop is judged (owner, 2026-11-21). "season" (the default): a roster
+ * player may only be dropped for a pickup who is at least as good LONG TERM
+ * (lib/longTermValue.ts - this season plus a decayed track record), so week 5 never trades
+ * Herro for a one-game Podziemski. "week": a must-win week, anyone not protected may go.
+ * Players picked up inside the plan are droppable either way (streaming chains).
+ */
+export type PlanHorizon = "season" | "week";
+
 export interface PlannedMove {
   id: string;
   /** "add" (default) picks up a free agent; "activate" moves `add` off IR. */
@@ -364,7 +373,12 @@ export interface OptimizeOptions {
   maxMoves: number;
   /** Roster players never dropped. Pickups from the plan are always droppable. */
   protect: Set<string>;
+  /** "season" (default): drop only for a pickup at least as good long term; "week": anyone unprotected. */
+  horizon?: PlanHorizon;
+  /** Long-term values by name (lib/longTermValue.ts), for "season". */
+  longTerm?: Map<string, number>;
 }
+
 
 let seq = 0;
 export const newMoveId = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
@@ -401,25 +415,59 @@ export function optimizePlan(
    * or an activation of anyone still on IR (those are not limited).
    */
   const irDays = new Map(prep.roster.filter((r) => r.ir).map((r) => [r.name, r.days]));
+  const seasonal = (opts.horizon ?? "season") === "season";
+  // Unknown long-term value: a pickup cannot justify a drop, a roster player is kept.
+  const lt = (name: string, unknown: number) => opts.longTerm?.get(name) ?? unknown;
+  /*
+   * BRIDGES (owner, 2026-11-25). A move already in the plan that drops someone on day D
+   * ("Sun: add Jenkins, drop Holiday") leaves that roster spot for a streamer before D:
+   * drop Holiday EARLIER for a free agent S, and have the D move drop S instead. Holiday
+   * goes either way and Jenkins arrives the same day; the plan gains S's games in between
+   * for one acquisition. A plain move cannot express it (Holiday would be dropped twice),
+   * so it is its own candidate: `base` comes back with that move's drop changed.
+   */
+  type Best = { base: PlannedMove[]; move: PlannedMove; score: number };
   const bestMove = (base: PlannedMove[], pool: Seat[], gains?: Map<string, number>) => {
     const e = evaluatePlan(prep, base);
     const used = new Set(e.rows.map((r) => r.name));
     const openLeft = ctx.openSpots - base.filter((m) => m.drop == null).length;
     const addsLeft = opts.maxMoves - base.filter(isAdd).length;
-    let best: { move: PlannedMove; score: number } | null = null;
+    let best: Best | null = null;
+    const consider = (b: PlannedMove[], move: PlannedMove) => {
+      const s = score([...b, move]);
+      if (!best || s > best.score) best = { base: b, move, score: s };
+      return s;
+    };
     const tryAll = (name: string, days: Iterable<string>, kind: "add" | "activate") => {
       let top = -Infinity;
       for (const d of days) {
         const drops: (string | null)[] = openLeft > 0 ? [null] : [];
         for (const r of e.rows) {
           const onRoster = (r.from == null || r.from < d) && r.until == null;
-          if (onRoster && (r.added || !opts.protect.has(r.name))) drops.push(r.name);
+          if (!onRoster) continue;
+          if (r.added) drops.push(r.name);
+          else if (opts.protect.has(r.name)) continue;
+          else if (!seasonal || lt(name, -Infinity) >= lt(r.name, Infinity)) drops.push(r.name);
         }
         for (const drop of drops) {
-          const move: PlannedMove = { id: "", kind, date: d, add: name, drop };
-          const s = score([...base, move]);
-          if (s > top) top = s;
-          if (!best || s > best.score) best = { move, score: s };
+          top = Math.max(top, consider(base, { id: "", kind, date: d, add: name, drop }));
+        }
+      }
+      return top;
+    };
+    // The moves a streamer could bridge into: each drops someone, on a day after the first.
+    const bridgeable = base
+      .map((m, i) => ({ m, i }))
+      .filter(({ m }) => m.drop != null && !e.invalid.has(m.id));
+    const tryBridges = (fa: Seat) => {
+      let top = -Infinity;
+      for (const { m, i } of bridgeable) {
+        const out = e.rows.find((r) => r.name === m.drop);
+        if (!out) continue;
+        for (const d of fa.days) {
+          if (d >= m.date || (out.from != null && out.from >= d)) continue;
+          const b = base.map((x, j) => (j === i ? { ...x, drop: fa.name } : x));
+          top = Math.max(top, consider(b, { id: "", kind: "add", date: d, add: fa.name, drop: m.drop }));
         }
       }
       return top;
@@ -429,14 +477,14 @@ export function optimizePlan(
         if (used.has(fa.name)) continue;
         // Evaluated BEFORE the optional call: `gains?.set(x, f())` skips f() entirely
         // when there is no map, which silently stopped every search after the first.
-        const top = tryAll(fa.name, fa.days, "add");
+        const top = Math.max(tryAll(fa.name, fa.days, "add"), tryBridges(fa));
         gains?.set(fa.name, top);
       }
     }
     for (const r of e.rows) {
       if (r.ir && r.from === INACTIVE) tryAll(r.name, irDays.get(r.name) ?? [], "activate");
     }
-    return best as { move: PlannedMove; score: number } | null;
+    return best as Best | null;
   };
 
   // 1. Greedy.
@@ -452,7 +500,7 @@ export function optimizePlan(
         .slice(0, SHORTLIST);
     }
     if (!best || best.score <= current + EPS) break;
-    plan.push({ ...best.move, id: newMoveId() });
+    plan = [...best.base, { ...best.move, id: newMoveId() }];
     current = best.score;
   }
 
@@ -464,7 +512,7 @@ export function optimizePlan(
       if (score(rest) === -Infinity) continue; // a later move depends on this one
       const best = bestMove(rest, shortlist);
       if (best && best.score > current + EPS) {
-        plan = [...rest.slice(0, i), { ...best.move, id: plan[i].id }, ...rest.slice(i)];
+        plan = [...best.base.slice(0, i), { ...best.move, id: plan[i].id }, ...best.base.slice(i)];
         current = best.score;
         improved = true;
       }

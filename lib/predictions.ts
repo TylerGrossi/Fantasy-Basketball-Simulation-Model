@@ -19,30 +19,54 @@
  */
 
 import { matchupOutcome, type LeagueMeta, type Moments } from "./probability";
+import { weekTerm } from "./league";
 
 /**
- * The maths an entry was scored with, stored WITH it by the recorder (2026-11-09) so a
- * constant re-measured later never regrades history. Entries from before then carry
- * none: they were recorded with made and attempted INDEPENDENT (shotCorrelation 0) and
- * are scored that way; their category correlation falls back to the current one.
+ * The meta every entry is scored with: the CURRENT model's.
+ *
+ * REGRADED (owner, 2026-11-21). Until now each entry was scored with the constants stored
+ * beside it, so history showed exactly what the site said at the time - including weeks
+ * 1-4 of 2026-27, logged before the week term and the week correlation existed, which read
+ * 96-98% on matchups the favourite lost. The owner chose the current maths for every week
+ * instead. What stays fixed is what makes an entry a forecast: its MOMENTS (rosters,
+ * averages, games), all written before the week was played. Only how those moments are
+ * turned into a probability is re-applied, so a regraded number is still no hindsight.
+ * The constants stored with an entry are kept in the file but no longer read here.
  */
+export type ScoringMeta = LeagueMeta & { weekUncertainty?: number[] };
+
+/** The constants the recorder stores with an entry - an audit trail, not read for scoring. */
 interface LoggedConstants {
   variance?: number[];
   projectionError?: number[];
   shotCorrelation?: Record<string, number>;
   categoryCorrelation?: number[][];
+  weekCorrelation?: number[][];
 }
-const INDEPENDENT_SHOTS: Record<string, number> = { "FG%": 0, "FT%": 0, "3P%": 0 };
 
-/** The meta to score one entry with: the log's categories, the entry's own constants. */
-function entryMeta(log: { stats?: string[]; categories?: string[]; lowerIsBetter?: string[] } | null, entry: LoggedConstants, meta: LeagueMeta): LeagueMeta {
+/** The meta to score an entry with: the log's categories, the current model's maths. */
+function entryMeta(log: { stats?: string[]; categories?: string[]; lowerIsBetter?: string[] } | null, meta: LeagueMeta): LeagueMeta {
+  // A log kept under different categories gets no matrices whose rows mean something else.
+  const same = !log?.categories || log.categories.join() === meta.categories.join();
   return {
     stats: log?.stats ?? meta.stats,
     categories: log?.categories ?? meta.categories,
     lowerIsBetter: log?.lowerIsBetter ?? meta.lowerIsBetter,
-    categoryCorrelation: entry.categoryCorrelation ?? logCorrelation(log, meta),
-    shotCorrelation: entry.shotCorrelation ?? INDEPENDENT_SHOTS,
+    categoryCorrelation: same ? meta.categoryCorrelation : undefined,
+    shotCorrelation: meta.shotCorrelation,
+    weekCorrelation: same ? meta.weekCorrelation : undefined,
   };
+}
+
+/**
+ * A logged side as the current gauge would build it. Entries from before 2026-11-09 have
+ * no week term: it is added from the logged projection, (cv x rest-of-week mu)^2, exactly
+ * as lib/league.ts withWeekTerm does for a live side (the logged mu IS the rest of week).
+ */
+function loggedSide(meta: ScoringMeta, mu: number[], v: number[], wk?: number[]): Moments {
+  if (wk) return { mu, var: v, wk };
+  const w = weekTerm({ stats: meta.stats, weekUncertainty: meta.weekUncertainty }, mu);
+  return { mu, var: v.map((x, i) => x + w[i]), wk: w };
 }
 
 export interface PreWeekGame {
@@ -71,20 +95,6 @@ export interface PreWeekLog {
   periods: Record<string, PreWeekPeriod>;
 }
 
-/**
- * The current category correlation, when it applies to a log's categories. The logs do
- * not carry one; a log scored under different categories gets independent categories
- * rather than a matrix whose rows mean something else.
- */
-function logCorrelation(
-  log: { categories?: string[] } | null,
-  meta: LeagueMeta
-): number[][] | undefined {
-  const cats = log?.categories;
-  if (cats && cats.join() !== meta.categories.join()) return undefined;
-  return meta.categoryCorrelation;
-}
-
 /** One team's forecast for one week, already turned into a probability. */
 export interface Forecast {
   /** Chance the model gave this team of winning the matchup, 0-1. */
@@ -109,7 +119,7 @@ export interface Forecast {
  */
 export function forecastFor(
   log: PreWeekLog | null,
-  meta: LeagueMeta,
+  meta: ScoringMeta,
   period: number,
   teamId: number
 ): Forecast | null {
@@ -122,12 +132,10 @@ export function forecastFor(
 
   // The gauge's own sides at the time (since 2026-11-09 the recorder logs those).
   const isHome = game.homeId === teamId;
-  const mom = (mu: number[], v: number[], wk?: number[]): Moments => (wk ? { mu, var: v, wk } : { mu, var: v });
+  const mom = (mu: number[], v: number[], wk?: number[]): Moments => loggedSide(meta, mu, v, wk);
   const you = isHome ? mom(game.homeMu, game.homeVar, game.homeWk) : mom(game.awayMu, game.awayVar, game.awayWk);
   const opp = isHome ? mom(game.awayMu, game.awayVar, game.awayWk) : mom(game.homeMu, game.homeVar, game.homeWk);
-  // Scored with the meta the log itself carries where present: a league that changed its
-  // categories mid-history must not have old forecasts re-graded under the new rules.
-  const scoreMeta = entryMeta(log, entry, meta);
+  const scoreMeta = entryMeta(log, meta);
   const out = matchupOutcome(scoreMeta, you, opp);
   return {
     win: out.win,
@@ -205,7 +213,7 @@ export interface WinProbPoint {
 export function winProbHistory(
   forecastLog: PreWeekLog | null,
   log: WinProbLog | null,
-  meta: LeagueMeta,
+  meta: ScoringMeta,
   period: number,
   teamId: number
 ): WinProbPoint[] {
@@ -217,14 +225,14 @@ export function winProbHistory(
     const g = r.games.find((x) => x.homeId === teamId || x.awayId === teamId);
     if (!g) continue;
     const home = g.homeId === teamId;
-    const side = (mu: number[], vr: number[], cur: number[], wk?: number[]): Moments => ({
-      mu: mu.map((v, i) => v + (cur[i] ?? 0)),
-      var: vr.slice(),
-      ...(wk ? { wk } : {}),
-    });
+    // The week term on the rest-of-week projection (before banked totals are added).
+    const side = (mu: number[], vr: number[], cur: number[], wk?: number[]): Moments => {
+      const m = loggedSide(meta, mu, vr, wk);
+      return { ...m, mu: mu.map((v, i) => v + (cur[i] ?? 0)) };
+    };
     const you = home ? side(g.homeMu, g.homeVar, g.homeCur, g.homeWk) : side(g.awayMu, g.awayVar, g.awayCur, g.awayWk);
     const opp = home ? side(g.awayMu, g.awayVar, g.awayCur, g.awayWk) : side(g.homeMu, g.homeVar, g.homeCur, g.homeWk);
-    points.push({ at: r.at, win: matchupOutcome(entryMeta(log, r, meta), you, opp).win, kind: "reading" });
+    points.push({ at: r.at, win: matchupOutcome(entryMeta(log, meta), you, opp).win, kind: "reading" });
   }
   return points.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }

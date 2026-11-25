@@ -31,8 +31,9 @@ Embiid's second-night rest is under-predicted (64% predicted, 44% actual).
 ## Where the app uses it
 
 The page, and the projections behind the win probability, Streamers, Bench, the planner and
-crowded days - for players WITH DOUBT only (a listed or ESPN status, or any game under 85%).
-See `applyAvailability` / `rowMoments` in `lib/league.ts`. Healthy players project as before.
+crowded days - for EVERY scored player since 2026-11-21 (it was players with doubt only;
+healthy players then projected every game, and play ~92% of them). See `applyAvailability` /
+`rowMoments` in `lib/league.ts` and `availabilityRows` in `lib/leagueAttach.ts`.
 The Agent reads the full file through its `will_they_play` tool (`lib/agentTools.ts`), so it
 can answer "will X play Saturday?" or "who on my team is at risk?" from the same numbers.
 

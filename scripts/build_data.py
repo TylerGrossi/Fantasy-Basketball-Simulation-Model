@@ -1032,6 +1032,7 @@ def _scoring_constants(payload):
         "projectionError": payload.get("projectionError"),
         "shotCorrelation": payload.get("shotCorrelation"),
         "categoryCorrelation": payload.get("categoryCorrelation"),
+        "weekCorrelation": payload.get("weekCorrelation"),
     }
 
 
@@ -1988,6 +1989,10 @@ def main():
         # draws the categories jointly from it (lib/probability.ts matchupOutcome).
         "categoryCorrelation": [[_round(v, 3) for v in row]
                                 for row in config.CATEGORY_CORRELATION],
+        # How the week term moves the categories together (one games factor), for the
+        # copula's week share (lib/probability.ts correlatedWins).
+        "weekCorrelation": [[_round(v, 3) for v in row]
+                            for row in config.WEEK_CORRELATION],
         # Made-vs-attempted correlation per ratio category, for the ratio variance
         # (lib/probability.ts ratioMoments).
         "shotCorrelation": dict(config.SHOT_CORRELATION),
@@ -2075,6 +2080,9 @@ def validate(payload):
     corr = payload["categoryCorrelation"]
     if len(corr) != nc or any(len(row) != nc for row in corr):
         problems.append("categoryCorrelation is not categories x categories")
+    wcorr = payload.get("weekCorrelation")
+    if wcorr is not None and (len(wcorr) != nc or any(len(row) != nc for row in wcorr)):
+        problems.append("weekCorrelation is not categories x categories")
     if not payload["teams"]:
         problems.append("no teams")
     if not payload["matchups"]:
