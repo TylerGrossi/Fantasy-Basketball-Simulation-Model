@@ -9213,14 +9213,11 @@ table.sheet.wst-dg .wst-dg-tot { font-weight: 700; }
 /* Streamers' candidate table fits its column without sideways scroll (owner, 2026-11-25):
    short headers (full names on hover), weekday-only Days, tighter padding. A sortable
    header's padding lives on its BUTTON (the th has none), so the button gets the cells'
-   padding - padding on the th as well inset every header past its column. The number
-   columns shrink to their content and the two name columns take the spare width, so the
-   figures read as one block instead of spreading across the page. */
+   padding - padding on the th as well inset every header past its column. Columns share
+   the spare width evenly (owner, 2026-11-25: not all of it to the name columns). */
 table.sheet.sortable.st-table th { padding: 0; }
 table.sheet.sortable.st-table .th-sort { padding: 0.45rem 0.4rem; letter-spacing: 0.02em; }
 table.sheet.st-table td { padding: 0.38rem 0.4rem; }
 table.sheet.sortable.st-table th:first-child .th-sort,
 table.sheet.st-table td:first-child { padding-left: 0.6rem; }
-table.sheet.st-table th.num { width: 1%; }
 table.sheet.st-table .sort-caret:not(.on) { display: none; }
-table.sheet.st-table th:nth-child(3), table.sheet.st-table th:nth-child(6) { width: 1%; }
